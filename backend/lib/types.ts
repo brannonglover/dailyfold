@@ -21,6 +21,7 @@ export interface Article {
   excerpt: string;
   body: string;
   source: string;
+  sourceLogo?: string;
   imageUrl: string;
   topics: Topic[];
   sportTags?: SportTag[];

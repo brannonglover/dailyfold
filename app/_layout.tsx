@@ -12,6 +12,7 @@ import { PreferencesProvider } from '@/contexts/PreferencesContext';
 import { AppThemeProvider } from '@/contexts/ThemeContext';
 import { useAppFonts } from '@/constants/Fonts';
 import { useColorScheme } from '@/components/useColorScheme';
+import { useNotificationNavigation } from '@/hooks/useNotificationNavigation';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -89,6 +90,7 @@ export default function RootLayout() {
 
 function RootLayoutNav() {
   const colorScheme = useColorScheme();
+  useNotificationNavigation();
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkNavTheme : LightNavTheme}>

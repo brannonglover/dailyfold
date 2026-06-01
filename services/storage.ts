@@ -30,6 +30,7 @@ export async function getPreferences(userId: string): Promise<UserPreferences> {
       enabledSourceIds: [],
       enabledTopics: [],
       enabledSportTags: [],
+      trendingNotificationsEnabled: false,
       folders: [],
     };
   }
@@ -42,10 +43,15 @@ export async function getPreferences(userId: string): Promise<UserPreferences> {
     enabledSourceIds: parsed.enabledSourceIds ?? [],
     enabledTopics: parsed.enabledTopics ?? [],
     enabledSportTags: parsed.enabledSportTags ?? [],
+    trendingNotificationsEnabled: parsed.trendingNotificationsEnabled ?? false,
     folders: parsed.folders ?? [],
   });
 }
 
 export async function savePreferences(userId: string, prefs: UserPreferences) {
   await AsyncStorage.setItem(`${PREFS_PREFIX}${userId}`, JSON.stringify(prefs));
+}
+
+export async function clearUserPreferences(userId: string) {
+  await AsyncStorage.removeItem(`${PREFS_PREFIX}${userId}`);
 }

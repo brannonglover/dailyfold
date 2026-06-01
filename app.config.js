@@ -31,12 +31,14 @@ module.exports = {
     userInterfaceStyle: "automatic",
     ios: {
       supportsTablet: true,
+      bundleIdentifier: "com.brannonglover.current",
       buildNumber,
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
       },
     },
     android: {
+      package: "com.brannonglover.current",
       adaptiveIcon: {
         backgroundColor: "#E6F4FE",
         foregroundImage: "./assets/images/android-icon-foreground.png",
@@ -52,6 +54,7 @@ module.exports = {
       favicon: "./assets/images/favicon.png",
     },
     plugins: [
+      "expo-dev-client",
       "expo-router",
       [
         "expo-splash-screen",
@@ -62,6 +65,12 @@ module.exports = {
         },
       ],
       "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          color: "#E85D4C",
+        },
+      ],
     ],
     experiments: {
       typedRoutes: true,

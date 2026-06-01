@@ -11,10 +11,8 @@ export function mergeArticleFeed(prev: Article[], incoming: Article[]): Article[
 
   for (const item of prev) {
     const updated = incomingById.get(item.id);
-    if (updated) {
-      merged.push(updated);
-      seen.add(item.id);
-    }
+    merged.push(updated ?? item);
+    seen.add(item.id);
   }
 
   const newcomers = interleaveBySource(incoming.filter((a) => !seen.has(a.id)));

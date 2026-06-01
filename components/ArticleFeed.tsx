@@ -3,8 +3,6 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import {
   FlatList,
   LayoutChangeEvent,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
   PixelRatio,
   RefreshControlProps,
   ScrollView,
@@ -17,14 +15,18 @@ import Animated, {
   Easing,
   runOnJS,
   scrollTo,
+  SharedValue,
   useAnimatedRef,
   useAnimatedReaction,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
 
 import { ArticleCard } from '@/components/ArticleCard';
 import { FeedBottomVignette } from '@/components/FeedBottomVignette';
+import { FeedEndStretch } from '@/components/FeedEndStretch';
 import { FeedHeader } from '@/components/FeedHeader';
 import { FEED_SCROLL_PEEK_RATIO } from '@/constants/Layout';
 import { useTheme } from '@/hooks/useTheme';
@@ -56,6 +58,32 @@ function getSnapMetrics(pageHeight: number) {
   return { peekPx, snapHeight };
 }
 
+function FeedCardItem({
+  article,
+  height,
+  isLast,
+  endPullDistance,
+}: {
+  article: Article;
+  height: number;
+  isLast: boolean;
+  endPullDistance: SharedValue<number>;
+}) {
+  const stretchStyle = useAnimatedStyle(() => {
+    if (!isLast) return {};
+    const pull = Math.min(endPullDistance.value, 100);
+    return {
+      transform: [{ scaleY: 1 + pull * 0.004 }],
+    };
+  }, [isLast]);
+
+  return (
+    <Animated.View style={stretchStyle}>
+      <ArticleCard article={article} height={height} />
+    </Animated.View>
+  );
+}
+
 export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(function ArticleFeed(
   { articles, title, subtitle, titleTrailing, emptyMessage, refreshControl, headerExtra },
   ref,
@@ -72,6 +100,9 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   const emptyScrollRef = useRef<ScrollView>(null);
   const scrollY = useSharedValue(0);
   const isAnimatingScroll = useSharedValue(false);
+  const isAnimatingToTopShared = useSharedValue(false);
+  const maxScrollOffset = useSharedValue(0);
+  const endPullDistance = useSharedValue(0);
 
   const onListLayout = useCallback((e: LayoutChangeEvent) => {
     setPageHeight(normalizeHeight(e.nativeEvent.layout.height));
@@ -102,6 +133,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
   const finishScrollToTop = useCallback(() => {
     isAnimatingToTopRef.current = false;
+    isAnimatingToTopShared.value = false;
     isAnimatingScroll.value = false;
     pendingScrollToTopRef.current = false;
     setFreeScroll(false);
@@ -109,7 +141,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     setActiveIndex(0);
     scrollCompleteRef.current?.();
     scrollCompleteRef.current = null;
-  }, [isAnimatingScroll]);
+  }, [isAnimatingScroll, isAnimatingToTopShared]);
 
   const scrollToTop = useCallback(() => {
     if (articles.length === 0) {
@@ -137,6 +169,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
     pendingScrollToTopRef.current = false;
     isAnimatingToTopRef.current = true;
+    isAnimatingToTopShared.value = true;
 
     const { snapHeight } = getSnapMetrics(pageHeight);
     const startIndex = activeIndexRef.current;
@@ -155,7 +188,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         }
       },
     );
-  }, [freeScroll, pageHeight, finishScrollToTop, scrollY, isAnimatingScroll]);
+  }, [freeScroll, pageHeight, finishScrollToTop, scrollY, isAnimatingScroll, isAnimatingToTopShared]);
 
   useAnimatedReaction(
     () => scrollY.value,
@@ -165,18 +198,27 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     },
   );
 
-  const onScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (!isAnimatingToTopRef.current) return;
-      updateActiveIndexFromOffset(event.nativeEvent.contentOffset.y);
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      const y = event.contentOffset.y;
+      endPullDistance.value = Math.max(0, y - maxScrollOffset.value);
+      if (isAnimatingToTopShared.value) {
+        runOnJS(updateActiveIndexFromOffset)(y);
+      }
     },
-    [updateActiveIndexFromOffset],
-  );
+  });
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 });
   const canPullToRefresh = activeIndex === 0 && !!refreshControl && !freeScroll;
   const snapMetrics = pageHeight > 0 ? getSnapMetrics(pageHeight) : null;
   const hasMoreBelow = activeIndex < articles.length - 1;
+  const isAtEnd = activeIndex >= articles.length - 1;
+  const canOverscroll = (canPullToRefresh || isAtEnd) && !freeScroll;
+
+  useEffect(() => {
+    if (!snapMetrics) return;
+    maxScrollOffset.value = Math.max(0, (articles.length - 1) * snapMetrics.snapHeight);
+  }, [snapMetrics, articles.length, maxScrollOffset]);
 
   useImperativeHandle(ref, () => ({ scrollToTop }), [scrollToTop]);
 
@@ -222,8 +264,13 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             ref={listRef}
             data={articles}
             keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <ArticleCard article={item} height={snapMetrics.snapHeight} />
+            renderItem={({ item, index }) => (
+              <FeedCardItem
+                article={item}
+                height={snapMetrics.snapHeight}
+                isLast={index === articles.length - 1}
+                endPullDistance={endPullDistance}
+              />
             )}
             style={[styles.list, { height: pageHeight, zIndex: 0 }]}
             showsVerticalScrollIndicator={false}
@@ -232,13 +279,13 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             snapToAlignment="start"
             disableIntervalMomentum
             decelerationRate="fast"
-            bounces={canPullToRefresh}
-            alwaysBounceVertical={canPullToRefresh}
-            overScrollMode={canPullToRefresh ? 'always' : 'never'}
+            bounces={canOverscroll}
+            alwaysBounceVertical={canOverscroll}
+            overScrollMode={canOverscroll ? 'always' : 'never'}
             removeClippedSubviews={false}
             refreshControl={refreshControl}
             scrollEventThrottle={16}
-            onScroll={onScroll}
+            onScroll={scrollHandler}
             onViewableItemsChanged={onViewableItemsChanged.current}
             viewabilityConfig={viewabilityConfig.current}
             getItemLayout={(_, index) => ({
@@ -249,6 +296,9 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
           />
         )}
         {pageHeight > 0 && hasMoreBelow && <FeedBottomVignette />}
+        {pageHeight > 0 && isAtEnd && !freeScroll && (
+          <FeedEndStretch pullDistance={endPullDistance} />
+        )}
       </View>
     </View>
   );

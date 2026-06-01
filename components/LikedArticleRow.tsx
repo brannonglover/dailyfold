@@ -58,7 +58,13 @@ export function LikedArticleRow({
         pressed && { opacity: 0.7 },
       ]}>
       {showThumbnail ? (
-        <ArticleImage uri={article.imageUrl} style={styles.thumbnail} />
+        <ArticleImage
+          uri={article.imageUrl}
+          style={styles.thumbnail}
+          compact
+          source={article.source}
+          sourceLogo={article.sourceLogo}
+        />
       ) : null}
 
       <View style={styles.textWrap}>

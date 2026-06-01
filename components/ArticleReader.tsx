@@ -82,7 +82,12 @@ export function ArticleReader({ article }: ArticleReaderProps) {
         bounces
         contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
         <View style={styles.imageWrap}>
-          <ArticleImage uri={article.imageUrl} style={styles.image} />
+          <ArticleImage
+            uri={article.imageUrl}
+            style={styles.image}
+            source={article.source}
+            sourceLogo={article.sourceLogo}
+          />
           <LinearGradient
             colors={['transparent', colors.background]}
             style={styles.imageGradient}
@@ -210,9 +215,9 @@ const styles = StyleSheet.create({
   },
   title: {
     fontFamily: 'LoraBold',
-    fontSize: 32,
-    lineHeight: 40,
-    letterSpacing: -0.5,
+    fontSize: 26,
+    lineHeight: 34,
+    letterSpacing: -0.4,
     marginBottom: 16,
   },
   topics: {

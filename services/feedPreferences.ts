@@ -47,16 +47,28 @@ export function normalizeFeedPreferences(prefs: UserPreferences): UserPreference
     rawSportTags.filter((tag): tag is SportTag => VALID_SPORT_TAGS.has(tag as SportTag)),
   );
 
+  // Legacy / explicit full selection is equivalent to All (empty = no topic filter).
+  if (
+    enabledTopics.length > 0 &&
+    enabledTopics.length === CURIOSITY_ORDER.length &&
+    CURIOSITY_ORDER.every((topic) => enabledTopics.includes(topic))
+  ) {
+    enabledTopics = [];
+  }
+
   if (isAllTopicsEnabled(enabledTopics) || !isSportsTopicActive(enabledTopics)) {
     enabledSportTags = [];
   }
 
+  const trendingNotificationsEnabled = prefs.trendingNotificationsEnabled === true;
+
   if (
     sameStringArray(enabledTopics, prefs.enabledTopics) &&
-    sameStringArray(enabledSportTags, prefs.enabledSportTags)
+    sameStringArray(enabledSportTags, prefs.enabledSportTags) &&
+    trendingNotificationsEnabled === prefs.trendingNotificationsEnabled
   ) {
     return prefs;
   }
 
-  return { ...prefs, enabledTopics, enabledSportTags };
+  return { ...prefs, enabledTopics, enabledSportTags, trendingNotificationsEnabled };
 }

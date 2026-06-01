@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 
 import { inferSportTags } from '../../catalog/sports';
+import { decodeFeedText, stripAndDecodeHtml } from '../../catalog/decodeHtmlText';
 
 import { detectRequiresSubscription } from './subscription';
 import { Article, FeedConfig, Topic } from './types';
@@ -19,22 +20,11 @@ const TOPICS: Topic[] = [
   'gardening',
 ];
 
-const PLACEHOLDER_IMAGE =
-  'https://images.unsplash.com/photo-1504711434966-e33886168f5c?w=800&q=80';
+/** Client renders an in-app placeholder when empty. */
+const PLACEHOLDER_IMAGE = '';
 
 function stripHtml(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
+  return stripAndDecodeHtml(html);
 }
 
 function hashId(input: string): string {
@@ -70,53 +60,139 @@ function normalizeImageUrl(url: string | null | undefined, pageUrl?: string): st
   }
 }
 
+const FEED_HERO_TARGET_WIDTH = 960;
+
 function isImageMedia(attrs: { medium?: string; type?: string; url?: string }): boolean {
-  if (attrs.medium === 'image') return true;
+  if (attrs.medium && attrs.medium !== 'image') return false;
+  if (attrs.type?.startsWith('video')) return false;
   if (attrs.type?.startsWith('image')) return true;
-  if (attrs.url && /\.(jpe?g|png|gif|webp|avif)(\?|$)/i.test(attrs.url)) return true;
+  if (attrs.url && isDisplayableImageUrl(attrs.url)) return true;
   return false;
 }
 
-function readMediaUrl(field: unknown): string | null {
-  if (!field) return null;
+function isDisplayableImageUrl(url: string): boolean {
+  if (/\.m3u8(\?|$)/i.test(url)) return false;
+  if (/\.(mp4|webm|mov|avi)(\?|$)/i.test(url)) return false;
+  return /\.(jpe?g|png|gif|webp|avif|bmp|svg)(\?|$)/i.test(url) || /\/image\//i.test(url);
+}
 
-  if (Array.isArray(field)) {
-    let fallback: string | null = null;
-    for (const entry of field) {
-      if (typeof entry === 'object' && entry) {
-        const attrs = (entry as Record<string, unknown>).$ as
-          | { medium?: string; type?: string; url?: string }
-          | undefined;
-        if (attrs?.url && isImageMedia(attrs)) return attrs.url;
+/** Bump common RSS/CDN thumbnail params so feed heroes are not upscaled from tiny sources. */
+export function upgradeFeedImageUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+
+    if (parsed.hostname.endsWith('guim.co.uk')) {
+      const width = Number(parsed.searchParams.get('width'));
+      if (width > 0 && width < 600) {
+        parsed.searchParams.set('width', String(FEED_HERO_TARGET_WIDTH));
       }
-      const url = readMediaUrl(entry);
-      if (url && !fallback) fallback = url;
     }
-    return fallback;
+
+    const queryWidth = parsed.searchParams.get('width') ?? parsed.searchParams.get('w');
+    if (queryWidth) {
+      const width = Number(queryWidth);
+      if (width > 0 && width < 400) {
+        parsed.searchParams.set(
+          parsed.searchParams.has('w') ? 'w' : 'width',
+          String(FEED_HERO_TARGET_WIDTH),
+        );
+        parsed.searchParams.delete('h');
+        parsed.searchParams.delete('crop');
+        parsed.searchParams.delete('resize');
+      }
+    }
+
+    if (parsed.hostname.includes('ichef.bbci.co.uk')) {
+      return url.replace(/\/standard\/\d+\//i, '/standard/976/');
+    }
+
+    const resizedPath = parsed.pathname.replace(
+      /-\d{2,4}x\d{2,4}(\.(?:jpe?g|png|gif|webp|avif))$/i,
+      '$1',
+    );
+    if (resizedPath !== parsed.pathname) {
+      parsed.pathname = resizedPath;
+    }
+
+    return parsed.href;
+  } catch {
+    return url;
+  }
+}
+
+interface MediaRef {
+  url: string;
+  width: number;
+  height: number;
+}
+
+function mediaPixels(ref: MediaRef): number {
+  if (ref.width > 0 && ref.height > 0) return ref.width * ref.height;
+  return Math.max(ref.width, ref.height);
+}
+
+function parseMediaRef(field: unknown): MediaRef | null {
+  if (typeof field === 'string') {
+    return isDisplayableImageUrl(field) ? { url: field, width: 0, height: 0 } : null;
   }
 
-  if (typeof field === 'string') return field;
+  if (!field || typeof field !== 'object') return null;
 
-  if (typeof field === 'object') {
-    const record = field as Record<string, unknown>;
-    const nested = record['media:content'] ?? record.mediaContent;
-    if (nested) {
-      const nestedUrl = readMediaUrl(nested);
-      if (nestedUrl) return nestedUrl;
-    }
+  const record = field as Record<string, unknown>;
+  const attrs = record.$ as
+    | { medium?: string; type?: string; url?: string; width?: string; height?: string }
+    | undefined;
 
-    const attrs = record.$ as { url?: string } | undefined;
-    if (attrs?.url) return attrs.url;
-    if (typeof record.url === 'string') return record.url;
+  if (attrs?.url && isImageMedia(attrs)) {
+    return {
+      url: attrs.url,
+      width: Number(attrs.width) || 0,
+      height: Number(attrs.height) || 0,
+    };
+  }
+
+  if (typeof record.url === 'string' && isDisplayableImageUrl(record.url)) {
+    return { url: record.url, width: 0, height: 0 };
   }
 
   return null;
 }
 
-function extractImageFromHtml(html: string): string | null {
-  const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
-  return match?.[1] ?? null;
+function collectMediaRefs(field: unknown): MediaRef[] {
+  if (!field) return [];
+
+  if (Array.isArray(field)) {
+    return field.flatMap((entry) => collectMediaRefs(entry));
+  }
+
+  const direct = parseMediaRef(field);
+  if (direct) return [direct];
+
+  if (typeof field !== 'object') return [];
+
+  const record = field as Record<string, unknown>;
+  const nestedFields = [
+    record['media:content'],
+    record.mediaContent,
+    record['media:thumbnail'],
+    record.mediaThumbnail,
+    record['media:group'],
+    record.mediaGroup,
+  ];
+
+  return nestedFields.flatMap((nested) => collectMediaRefs(nested));
 }
+
+function extractImagesFromHtml(html: string): string[] {
+  const urls: string[] = [];
+  const pattern = /<img[^>]+src=["']([^"']+)["']/gi;
+  for (const match of html.matchAll(pattern)) {
+    if (match[1]) urls.push(match[1]);
+  }
+  return urls;
+}
+
+type ImageCandidateTier = 0 | 1 | 2 | 3;
 
 function extractImage(
   item: {
@@ -133,30 +209,41 @@ function extractImage(
   },
   pageUrl?: string,
 ): string | null {
-  const candidates = [
-    readMediaUrl(item.mediaThumbnail),
-    readMediaUrl(item['media:thumbnail']),
-    readMediaUrl(item.mediaContent),
-    readMediaUrl(item['media:content']),
-    readMediaUrl(item.mediaGroup),
-    readMediaUrl(item['media:group']),
-  ];
+  const ranked: { tier: ImageCandidateTier; pixels: number; url: string }[] = [];
+
+  const addTier = (tier: ImageCandidateTier, field: unknown) => {
+    for (const ref of collectMediaRefs(field)) {
+      ranked.push({ tier, pixels: mediaPixels(ref), url: ref.url });
+    }
+  };
+
+  addTier(0, item.mediaContent);
+  addTier(0, item['media:content']);
+  addTier(1, item.mediaGroup);
+  addTier(1, item['media:group']);
 
   if (item.enclosure?.url) {
     const type = item.enclosure.type ?? '';
     const url = item.enclosure.url;
-    if (type.startsWith('image') || /\.(jpe?g|png|gif|webp|avif)(\?|$)/i.test(url)) {
-      candidates.unshift(url);
+    if (type.startsWith('image') || isDisplayableImageUrl(url)) {
+      ranked.push({ tier: 0, pixels: 0, url });
     }
   }
 
   const html = item.content ?? item.summary ?? '';
-  const htmlImage = extractImageFromHtml(html);
-  if (htmlImage) candidates.push(htmlImage);
+  for (const url of extractImagesFromHtml(html)) {
+    ranked.push({ tier: 2, pixels: 0, url });
+  }
 
-  for (const candidate of candidates) {
-    const normalized = normalizeImageUrl(candidate, pageUrl);
-    if (normalized) return normalized;
+  addTier(3, item.mediaThumbnail);
+  addTier(3, item['media:thumbnail']);
+
+  ranked.sort((a, b) => a.tier - b.tier || b.pixels - a.pixels);
+
+  for (const candidate of ranked) {
+    const normalized = normalizeImageUrl(candidate.url, pageUrl);
+    if (!normalized || !isDisplayableImageUrl(normalized)) continue;
+    return upgradeFeedImageUrl(normalized);
   }
 
   return null;
@@ -239,7 +326,7 @@ export function normalizeFeedItem(
   feed: FeedConfig,
 ): Article | null {
   const url = item.link?.trim();
-  const title = item.title?.trim();
+  const title = decodeFeedText(item.title);
   if (!url || !title) return null;
 
   const rawBody = item.content ?? item.summary ?? item.contentSnippet ?? '';
@@ -269,6 +356,7 @@ export function normalizeFeedItem(
     excerpt: excerpt || title,
     body,
     source: feed.source,
+    sourceLogo: feed.logoUrl,
     imageUrl,
     topics,
     sportTags: sportTags.length > 0 ? sportTags : undefined,

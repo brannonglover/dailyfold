@@ -40,6 +40,20 @@ export function countEnabledSources(
 }
 
 /** Maps outlet display name (article.source) to its catalog primary curiosity. */
+/** True when every enabled outlet is catalogued as sports-primary. */
+export function isSportsOnlySourceSelection(
+  sources: FeedSource[],
+  enabledSourceIds: string[],
+): boolean {
+  if (enabledSourceIds.length === 0 || sources.length === 0) return false;
+
+  const enabled = new Set(enabledSourceIds);
+  const selected = sources.filter((source) => enabled.has(source.id));
+  if (selected.length === 0) return false;
+
+  return selected.every((source) => (source.primaryTopic ?? source.topics[0]) === 'sports');
+}
+
 export function buildSourcePrimaryTopicMap(sources: FeedSource[]): Map<string, Topic> {
   const map = new Map<string, Topic>();
   for (const source of sources) {

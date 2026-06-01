@@ -1,24 +1,25 @@
 /**
  * Per-article subscription / paywall detection (ingest + optional post-extraction).
  *
- * Tradeoff: we bias toward false positives (showing "subscription may be required")
- * over false negatives (showing a teaser as a full article). Source-level catalog
- * flags never mark an article alone — they only strengthen feed-body heuristics.
+ * Strong RSS metadata and explicit paywall language apply to any publisher.
+ * Short-feed / truncation heuristics apply only to catalog `subscriptionPublisher`
+ * outlets (NYT, WaPo, etc.) — free sites like CNN often ship title-only or short teasers.
  */
 
 import type { FeedConfig } from './types';
 
 const PAYWALL_PHRASE_RE =
-  /\b(subscribe to (read|continue|access)|subscription required|subscribers? only|this article is (available )?for subscribers|already a subscriber|sign in to read|log in to read|register to read|behind (the |a |our )?paywall|hit (the |a )?paywall|premium content|members? only|continue reading with a subscription|unlock this article|full (story|article) (is )?available (only )?to subscribers|to keep reading|become a subscriber)\b/i;
+  /\b(subscribe to (read|continue|access)|subscription required|subscribers? only|this article is (available )?for subscribers|already a subscriber|sign in to read|log in to read|register to read|behind (the |a |our )?paywall|hit (the |a )?paywall|members? only|continue reading with a subscription|unlock this article|full (story|article) (is )?available (only )?to subscribers|become a subscriber)\b/i;
 
-const TRUNCATION_TAIL_RE =
-  /(?:…|\.\.\.|read more|continue reading|subscribe now|see all options|view comments)/i;
+/** Paywall-oriented teaser endings — not generic "read more" on free news feeds. */
+const PAYWALL_TRUNCATION_TAIL_RE =
+  /(?:…|\.\.\.|subscribe now|continue reading with a subscription|see all options)/i;
 
 const SUBSCRIPTION_CATEGORY_RE =
   /\b(premium|subscriber|subscription|paywall|members?\s*only|locked)\b/i;
 
 const ACCESS_RIGHTS_PAYWALL_RE =
-  /\b(subscription|restricted|paid|register|private|closed)\b/i;
+  /\b(subscription|restricted|paid|private|closed|registration required|requires registration)\b/i;
 
 export interface SubscriptionSignals {
   title: string;
@@ -93,25 +94,32 @@ function hasPaywallPhrases(text: string): boolean {
   return PAYWALL_PHRASE_RE.test(text);
 }
 
-function hasTruncationTail(text: string): boolean {
+function hasPaywallTruncationTail(text: string): boolean {
   const tail = text.slice(-120);
-  return TRUNCATION_TAIL_RE.test(tail);
+  return PAYWALL_TRUNCATION_TAIL_RE.test(tail);
 }
 
-function isTruncatedTeaser(excerpt: string, body: string): boolean {
+/** Short RSS body / duplicate excerpt+body — only for known subscription publishers. */
+function isTruncatedTeaser(
+  excerpt: string,
+  body: string,
+  subscriptionPublisher: boolean | undefined,
+): boolean {
+  if (!subscriptionPublisher) return false;
+
   const bodyWords = wordCount(body);
   const excerptWords = wordCount(excerpt);
   const combined = `${excerpt}\n${body}`;
 
   if (bodyWords === 0 && excerptWords > 0 && excerptWords < 70) return true;
-  if (bodyWords > 0 && bodyWords < 55 && hasTruncationTail(combined)) return true;
+  if (bodyWords > 0 && bodyWords < 55 && hasPaywallTruncationTail(combined)) return true;
   if (bodyWords > 0 && bodyWords < 45 && excerpt.trim() === body.trim()) return true;
   if (
     bodyWords > 0 &&
     bodyWords < 40 &&
     excerptWords > 0 &&
     excerptWords <= bodyWords + 5 &&
-    hasTruncationTail(combined)
+    hasPaywallTruncationTail(combined)
   ) {
     return true;
   }
@@ -139,11 +147,15 @@ export function detectRequiresSubscription(signals: SubscriptionSignals): boolea
 
   if (hasPaywallPhrases(combined)) return true;
 
-  if (isTruncatedTeaser(excerpt, body)) return true;
+  if (isTruncatedTeaser(excerpt, body, feed.subscriptionPublisher)) return true;
 
   if (feed.subscriptionPublisher) {
     const bodyWords = wordCount(body);
-    if (bodyWords > 0 && bodyWords < 110 && (hasTruncationTail(combined) || hasPaywallPhrases(combined))) {
+    if (
+      bodyWords > 0 &&
+      bodyWords < 110 &&
+      (hasPaywallTruncationTail(combined) || hasPaywallPhrases(combined))
+    ) {
       return true;
     }
     if (bodyWords > 0 && bodyWords < 90 && excerpt.trim() === body.trim()) {
@@ -158,6 +170,7 @@ export function detectRequiresSubscription(signals: SubscriptionSignals): boolea
 export function detectRequiresSubscriptionFromExtraction(
   paragraphs: string[],
   article: { requiresSubscription?: boolean; body: string; excerpt: string },
+  subscriptionPublisher?: boolean,
 ): boolean {
   if (article.requiresSubscription) return true;
 
@@ -166,8 +179,10 @@ export function detectRequiresSubscriptionFromExtraction(
 
   if (words < 90 && hasPaywallPhrases(text)) return true;
 
-  const feedWords = wordCount(`${article.excerpt} ${article.body}`);
-  if (words < 70 && feedWords < 120 && hasTruncationTail(text)) return true;
+  if (subscriptionPublisher) {
+    const feedWords = wordCount(`${article.excerpt} ${article.body}`);
+    if (words < 70 && feedWords < 120 && hasPaywallTruncationTail(text)) return true;
+  }
 
   return false;
 }

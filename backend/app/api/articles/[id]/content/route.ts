@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { corsHeaders, jsonResponse } from '@/lib/cors';
 import { getArticleById, getCachedReaderContent, saveReaderContent, setArticleRequiresSubscription } from '@/lib/db';
 import { extractReaderContent } from '@/lib/extract';
+import { FEEDS } from '@/lib/feeds';
 import { detectRequiresSubscriptionFromExtraction } from '@/lib/subscription';
 
 export async function OPTIONS(request: NextRequest) {
@@ -37,9 +38,11 @@ export async function GET(
     }
 
     const extracted = await extractReaderContent(article);
+    const articleSource = article.source;
+    const subscriptionPublisher = FEEDS.find((f) => f.source === articleSource)?.subscriptionPublisher;
 
     if (
-      detectRequiresSubscriptionFromExtraction(extracted.paragraphs, article) &&
+      detectRequiresSubscriptionFromExtraction(extracted.paragraphs, article, subscriptionPublisher) &&
       !article.requiresSubscription
     ) {
       setArticleRequiresSubscription(id, true);

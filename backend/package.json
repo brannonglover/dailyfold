@@ -1,6 +1,6 @@
 {
   "name": "current-api",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "dev": "WATCHPACK_POLLING=true CHOKIDAR_USEPOLLING=true next dev -p 3001 -H 0.0.0.0",
@@ -8,10 +8,12 @@
     "start": "next start -p 3001",
     "ingest": "tsx scripts/ingest.ts",
     "ingest:watch": "tsx scripts/ingest-watch.ts",
-    "test:subscription": "tsx lib/subscription.detect.test.ts"
+    "test:subscription": "tsx lib/subscription.detect.test.ts",
+    "test:image": "tsx lib/normalize.image.test.ts"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
+    "@supabase/supabase-js": "^2.106.2",
     "better-sqlite3": "^11.10.0",
     "drizzle-orm": "^0.44.2",
     "linkedom": "^0.18.12",

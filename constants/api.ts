@@ -9,13 +9,34 @@ function getMetroHost(): string | null {
   return hostUri.split(':')[0] ?? null;
 }
 
+function isLoopbackHost(host: string): boolean {
+  return host === 'localhost' || host === '127.0.0.1';
+}
+
+function isLoopbackUrl(url: string): boolean {
+  try {
+    return isLoopbackHost(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** Resolve the backend URL for dev (simulator, emulator, or physical device). */
 export function resolveApiUrl(): string {
   const configured = process.env.EXPO_PUBLIC_API_URL?.trim();
-  if (configured) return configured.replace(/\/$/, '');
-
   const metroHost = getMetroHost();
-  if (metroHost && metroHost !== 'localhost' && metroHost !== '127.0.0.1') {
+
+  if (configured) {
+    const normalized = configured.replace(/\/$/, '');
+    // .env often uses localhost for the simulator; on a physical device Metro's LAN host
+    // is the Mac — localhost on the phone is not the dev machine.
+    if (isLoopbackUrl(normalized) && metroHost && !isLoopbackHost(metroHost)) {
+      return `http://${metroHost}:${API_PORT}`;
+    }
+    return normalized;
+  }
+
+  if (metroHost && !isLoopbackHost(metroHost)) {
     return `http://${metroHost}:${API_PORT}`;
   }
 

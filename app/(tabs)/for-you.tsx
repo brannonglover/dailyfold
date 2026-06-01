@@ -14,32 +14,22 @@ export default function ForYouScreen() {
     preferences,
     isLoading: isPreferencesLoading,
     personalizationSummary,
-    filterByEnabledSources,
-    filterByEnabledTopics,
-    filterByEnabledSportTags,
+    filterFeedArticles,
   } = usePreferences();
   const { articles, isLoading, isRefreshing, error, notice, usingDemoArticles, refresh } = useArticles();
 
   const likedArticlesReady = preferences != null;
   const userHasLikedArticles = likedArticlesReady && hasLikedArticles(preferences);
 
-  const sourceFiltered = useMemo(
-    () => filterByEnabledSources(articles),
-    [articles, filterByEnabledSources],
+  const filtered = useMemo(
+    () => filterFeedArticles(articles),
+    [articles, filterFeedArticles],
   );
 
   const personalized = useMemo(() => {
     if (!userHasLikedArticles) return [];
-    const byTopic = filterByEnabledTopics(sourceFiltered);
-    const bySport = filterByEnabledSportTags(byTopic);
-    return orderPersonalizedFeed(getPersonalizedFeed(bySport, preferences));
-  }, [
-    sourceFiltered,
-    preferences,
-    userHasLikedArticles,
-    filterByEnabledTopics,
-    filterByEnabledSportTags,
-  ]);
+    return orderPersonalizedFeed(getPersonalizedFeed(filtered, preferences));
+  }, [filtered, preferences, userHasLikedArticles]);
 
   const emptyMessage = useMemo(
     () =>
@@ -47,7 +37,7 @@ export default function ForYouScreen() {
         error,
         totalCount: articles.length,
         filteredCount: personalized.length,
-        sourceFilteredCount: sourceFiltered.length,
+        sourceFilteredCount: filtered.length,
         enabledTopics: preferences?.enabledTopics,
         enabledSportTags: preferences?.enabledSportTags,
         sourcesRestricted:
@@ -59,7 +49,7 @@ export default function ForYouScreen() {
       error,
       articles.length,
       personalized.length,
-      sourceFiltered.length,
+      filtered.length,
       preferences?.enabledTopics,
       preferences?.enabledSportTags,
       preferences?.enabledSourceIds,

@@ -88,4 +88,64 @@ run('extraction thin + phrase', () => {
   );
 });
 
+run('cnn title-only rss item', () => {
+  const title =
+    'Some on-air claims about Dominion Voting Systems were false, Fox News acknowledges in statement';
+  assert.equal(
+    detectRequiresSubscription({
+      title,
+      excerpt: title,
+      body: '',
+      feed: {},
+    }),
+    false,
+  );
+});
+
+run('cnn short teaser without paywall metadata', () => {
+  assert.equal(
+    detectRequiresSubscription({
+      title: 'Breaking: major policy shift announced',
+      excerpt: 'Officials outlined the plan in a briefing today. Read more',
+      body: 'Officials outlined the plan in a briefing today. Read more',
+      feed: {},
+    }),
+    false,
+  );
+});
+
+run('cnn duplicate short excerpt and body', () => {
+  assert.equal(
+    detectRequiresSubscription({
+      title: 'Trial delay is not unusual, judge says',
+      excerpt: 'The judge addressed scheduling in a short order.',
+      body: 'The judge addressed scheduling in a short order.',
+      feed: {},
+    }),
+    false,
+  );
+});
+
+run('extraction truncation tail ignored for free publisher', () => {
+  assert.equal(
+    detectRequiresSubscriptionFromExtraction(
+      ['A thin extract. Read more'],
+      { body: 'Short feed body', excerpt: 'Short feed body' },
+      false,
+    ),
+    false,
+  );
+});
+
+run('extraction truncation tail for subscription publisher', () => {
+  assert.equal(
+    detectRequiresSubscriptionFromExtraction(
+      ['Brief extract…'],
+      { body: 'Brief…', excerpt: 'Brief…' },
+      true,
+    ),
+    true,
+  );
+});
+
 console.log('subscription.detect tests passed');

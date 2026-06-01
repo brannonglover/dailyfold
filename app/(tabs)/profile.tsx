@@ -1,7 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { DeleteAccountModal } from '@/components/DeleteAccountModal';
+import { FeedbackModal } from '@/components/FeedbackModal';
 import { ProfileNavRow } from '@/components/ProfileNavRow';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
@@ -21,14 +24,44 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; icon: keyof typeof
   ];
 
 export default function ProfileScreen() {
-  const { user, logout } = useAuth();
-  const { preferences, topTopics, topSources, topKeywords, enabledSourceCount, totalSourceCount } =
-    usePreferences();
+  const [feedbackVisible, setFeedbackVisible] = useState(false);
+  const [deleteAccountVisible, setDeleteAccountVisible] = useState(false);
+  const { user, logout, deleteAccount } = useAuth();
+  const {
+    preferences,
+    topTopics,
+    topSources,
+    topKeywords,
+    enabledSourceCount,
+    totalSourceCount,
+    trendingNotificationsEnabled,
+    setTrendingNotificationsEnabled,
+  } = usePreferences();
   const { preference, setPreference } = useThemeContext();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
   const likedCount = preferences?.likedArticleIds.length ?? 0;
+
+  async function handleTrendingAlertsToggle(enabled: boolean) {
+    const result = await setTrendingNotificationsEnabled(enabled);
+    if (result === 'updated') return;
+
+    if (result === 'denied') {
+      Alert.alert(
+        'Notifications blocked',
+        'Allow notifications in Settings to receive trending alerts.',
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Notifications unavailable',
+      Platform.OS === 'web'
+        ? 'Trending alerts are not supported on web.'
+        : 'Trending alerts require a development build. Run npx expo run:ios or npx expo run:android, then reopen the app.',
+    );
+  }
 
   const topicScoreRows = CURIOSITY_ORDER.map((topic) => ({
     topic,
@@ -48,6 +81,7 @@ export default function ProfileScreen() {
   }));
 
   return (
+    <>
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={{
@@ -158,6 +192,30 @@ export default function ProfileScreen() {
         )}
       </View>
 
+      <View
+        style={[
+          styles.notificationRow,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}>
+        <View style={styles.notificationCopy}>
+          <Ionicons name="flame-outline" size={22} color={colors.accent} />
+          <View style={styles.notificationText}>
+            <Text style={[styles.notificationLabel, { color: colors.text }]}>
+              Trending alerts
+            </Text>
+            <Text style={[styles.notificationDetail, { color: colors.textSecondary }]}>
+              Notify when a story is breaking or an outlet has multiple hot headlines.
+            </Text>
+          </View>
+        </View>
+        <Switch
+          value={trendingNotificationsEnabled}
+          onValueChange={(value) => void handleTrendingAlertsToggle(value)}
+          trackColor={{ false: colors.border, true: colors.accentMuted }}
+          thumbColor={trendingNotificationsEnabled ? colors.accent : colors.textSecondary}
+        />
+      </View>
+
       {(sourceScoreRows.length > 0 || keywordScoreRows.length > 0) && (
         <>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary, marginTop: 24 }]}>
@@ -229,17 +287,49 @@ export default function ProfileScreen() {
         })}
       </View>
 
+      <View style={styles.accountActions}>
+        <ProfileNavRow
+          icon="chatbubble-ellipses-outline"
+          label="Send feedback"
+          detail="Share ideas or report issues"
+          onPress={() => setFeedbackVisible(true)}
+        />
+        <Pressable
+          onPress={logout}
+          style={({ pressed }) => [
+            styles.logoutButton,
+            { borderColor: colors.border },
+            pressed && { opacity: 0.7 },
+          ]}>
+          <Ionicons name="log-out-outline" size={20} color={colors.textSecondary} />
+          <Text style={[styles.logoutText, { color: colors.textSecondary }]}>Sign out</Text>
+        </Pressable>
+      </View>
+
       <Pressable
-        onPress={logout}
-        style={({ pressed }) => [
-          styles.logoutButton,
-          { borderColor: colors.border },
-          pressed && { opacity: 0.7 },
-        ]}>
-        <Ionicons name="log-out-outline" size={20} color={colors.textSecondary} />
-        <Text style={[styles.logoutText, { color: colors.textSecondary }]}>Sign out</Text>
+        onPress={() => setDeleteAccountVisible(true)}
+        style={({ pressed }) => [styles.deleteAccountButton, pressed && { opacity: 0.7 }]}>
+        <Ionicons name="trash-outline" size={18} color={colors.accent} />
+        <Text style={[styles.deleteAccountText, { color: colors.accent }]}>Delete account</Text>
       </Pressable>
+
+      {user?.email ? (
+        <DeleteAccountModal
+          visible={deleteAccountVisible}
+          userEmail={user.email}
+          onClose={() => setDeleteAccountVisible(false)}
+          onConfirm={deleteAccount}
+        />
+      ) : null}
     </ScrollView>
+
+      <FeedbackModal
+        visible={feedbackVisible}
+        onClose={() => setFeedbackVisible(false)}
+        userName={user?.name}
+        userEmail={user?.email}
+      />
+    </>
   );
 }
 
@@ -366,6 +456,35 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter',
     fontSize: 14,
   },
+  notificationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 24,
+    gap: 12,
+  },
+  notificationCopy: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  notificationText: {
+    flex: 1,
+    gap: 4,
+  },
+  notificationLabel: {
+    fontFamily: 'InterMedium',
+    fontSize: 15,
+  },
+  notificationDetail: {
+    fontFamily: 'Inter',
+    fontSize: 13,
+    lineHeight: 18,
+  },
   themePicker: {
     flexDirection: 'row',
     borderWidth: 1,
@@ -386,12 +505,15 @@ const styles = StyleSheet.create({
     fontFamily: 'InterMedium',
     fontSize: 14,
   },
+  accountActions: {
+    marginTop: 32,
+    gap: 24,
+  },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginTop: 32,
     paddingVertical: 16,
     borderWidth: 1,
     borderRadius: 12,
@@ -399,5 +521,17 @@ const styles = StyleSheet.create({
   logoutText: {
     fontFamily: 'InterMedium',
     fontSize: 15,
+  },
+  deleteAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 16,
+    paddingVertical: 12,
+  },
+  deleteAccountText: {
+    fontFamily: 'InterMedium',
+    fontSize: 14,
   },
 });

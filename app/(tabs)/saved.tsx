@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { CreateFolderModal } from '@/components/CreateFolderModal';
-import { FeedTopicFilterBar } from '@/components/FeedTopicFilterBar';
 import { FolderPickerModal } from '@/components/FolderPickerModal';
 import { LikedArticleList } from '@/components/LikedArticleList';
 import { LikedFoldersBar } from '@/components/LikedFoldersBar';
@@ -13,8 +12,7 @@ import { useTheme } from '@/hooks/useTheme';
 
 export default function SavedScreen() {
   const { colors } = useTheme();
-  const { preferences, filterByEnabledSources, filterByEnabledTopics, filterByEnabledSportTags, folders, createFolder } =
-    usePreferences();
+  const { preferences, filterFeedArticles, folders, createFolder } = usePreferences();
   const { articles, isLoading, isRefreshing, error, notice, refresh } = useArticles();
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [showCreateFolder, setShowCreateFolder] = useState(false);
@@ -22,11 +20,8 @@ export default function SavedScreen() {
 
   const allLiked = useMemo(() => {
     const likedIds = new Set(preferences?.likedArticleIds ?? []);
-    const filtered = filterByEnabledSportTags(
-      filterByEnabledTopics(filterByEnabledSources(articles)),
-    );
-    return filtered.filter((a) => likedIds.has(a.id));
-  }, [articles, preferences, filterByEnabledSources, filterByEnabledTopics, filterByEnabledSportTags]);
+    return filterFeedArticles(articles).filter((a) => likedIds.has(a.id));
+  }, [articles, preferences, filterFeedArticles]);
 
   const displayed = useMemo(() => {
     if (!selectedFolderId) return allLiked;
@@ -78,16 +73,13 @@ export default function SavedScreen() {
           onRefresh={refresh}
           onArticleLongPress={(article) => setOrganizeArticleId(article.id)}
           headerExtra={
-            <>
-              <FeedTopicFilterBar />
-              <LikedFoldersBar
-                folders={folders}
-                selectedFolderId={selectedFolderId}
-                allCount={allLiked.length}
-                onSelectFolder={setSelectedFolderId}
-                onCreateFolder={() => setShowCreateFolder(true)}
-              />
-            </>
+            <LikedFoldersBar
+              folders={folders}
+              selectedFolderId={selectedFolderId}
+              allCount={allLiked.length}
+              onSelectFolder={setSelectedFolderId}
+              onCreateFolder={() => setShowCreateFolder(true)}
+            />
           }
         />
       </View>

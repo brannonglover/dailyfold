@@ -10,7 +10,9 @@ import { ArticleFeedScreen } from '@/components/ArticleFeedScreen';
 import { FeedTopicFilterBar } from '@/components/FeedTopicFilterBar';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useArticles } from '@/hooks/useArticles';
+import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import { isAllSourcesEnabled } from '@/services/sourcePreferences';
+import { isAllTopicsEnabled } from '@/services/topicPreferences';
 import { orderLatestFeed } from '@/utils/feedOrdering';
 import { getFeedEmptyMessage } from '@/utils/feedEmptyMessage';
 
@@ -18,8 +20,7 @@ export default function LatestScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<ParamListBase>>();
   const feedRef = useRef<ArticleFeedHandle>(null);
   const { articles, isLoading, isRefreshing, error, notice, usingDemoArticles, refresh } = useArticles();
-  const { preferences, filterByEnabledSources, filterByEnabledTopics, filterByEnabledSportTags } =
-    usePreferences();
+  const { preferences, filterFeedArticles, filterByEnabledSources } = usePreferences();
 
   useFocusEffect(
     useCallback(() => {
@@ -35,19 +36,15 @@ export default function LatestScreen() {
   );
 
   const filtered = useMemo(() => {
-    const bySource = filterByEnabledSources(articles);
-    const byTopic = filterByEnabledTopics(bySource);
-    const bySport = filterByEnabledSportTags(byTopic);
-    return orderLatestFeed(bySport);
-  }, [articles, filterByEnabledSources, filterByEnabledTopics, filterByEnabledSportTags]);
+    const filteredArticles = filterFeedArticles(articles);
+    const allTopics =
+      !preferences ||
+      isAllTopicsEnabled(normalizeFeedPreferences(preferences).enabledTopics);
+    return orderLatestFeed(filteredArticles, { diversifyTopics: allTopics });
+  }, [articles, filterFeedArticles, preferences]);
 
   const sourceFiltered = useMemo(
-    () =>
-      filterByEnabledSources(
-        [...articles].sort(
-          (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime(),
-        ),
-      ),
+    () => filterByEnabledSources(articles),
     [articles, filterByEnabledSources],
   );
 
@@ -102,8 +99,8 @@ export default function LatestScreen() {
 
 const styles = StyleSheet.create({
   brandLogo: {
-    height: 28,
-    width: 91,
+    height: 32,
+    width: 104,
     maxWidth: 120,
   },
 });

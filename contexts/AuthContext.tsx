@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { supabase } from '@/lib/supabase';
+import { deleteUserAccount } from '@/services/account';
 import {
   getSessionUser,
   loginUser,
@@ -16,6 +17,7 @@ interface AuthContextValue {
   register: (name: string, email: string, password: string) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  deleteAccount: (password: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -54,9 +56,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  const deleteAccount = useCallback(
+    async (password: string) => {
+      if (!user?.email) {
+        throw new Error('You must be signed in to delete your account.');
+      }
+      await deleteUserAccount(user.email, password);
+      setUser(null);
+    },
+    [user],
+  );
+
   const value = useMemo(
-    () => ({ user, isLoading, register, login, logout }),
-    [user, isLoading, register, login, logout],
+    () => ({ user, isLoading, register, login, logout, deleteAccount }),
+    [user, isLoading, register, login, logout, deleteAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

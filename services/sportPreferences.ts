@@ -1,6 +1,8 @@
 import { inferSportTags } from '@/catalog/sports';
 import { Article, SportTag, Topic } from '@/types';
 
+import { isAllTopicsEnabled } from './topicPreferences';
+
 function articleSportTags(article: Article): SportTag[] {
   if (article.sportTags && article.sportTags.length > 0) return article.sportTags;
   if (!article.topics.includes('sports')) return [];
@@ -21,7 +23,7 @@ export function filterArticlesBySportTags(
   enabledSportTags: SportTag[],
   enabledTopics: Topic[] = [],
 ): Article[] {
-  if (!isSportsTopicActive(enabledTopics)) return articles;
+  if (isAllTopicsEnabled(enabledTopics) || !isSportsTopicActive(enabledTopics)) return articles;
   if (isAllSportTagsEnabled(enabledSportTags)) return articles;
 
   const enabled = new Set(enabledSportTags);

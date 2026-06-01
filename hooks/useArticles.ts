@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 
+import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
+import { applyFeedFilters } from '@/services/feedFilters';
+import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import { getEnabledSourceIds, isAllSourcesEnabled } from '@/services/sourcePreferences';
+import { isAllTopicsEnabled } from '@/services/topicPreferences';
 import { fetchArticles } from '@/services/articles';
+import { processHotTrendingNotifications } from '@/services/trendingNotifications';
 import { Article } from '@/types';
 import { articleFeedOrderUnchanged, mergeArticleFeed } from '@/utils/mergeArticleFeed';
 
@@ -36,6 +41,7 @@ function scheduleGlobalSilentRefresh() {
 }
 
 export function useArticles(): UseArticlesResult {
+  const { user } = useAuth();
   const { preferences, sources } = usePreferences();
   const [articles, setArticles] = useState<Article[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -49,13 +55,18 @@ export function useArticles(): UseArticlesResult {
     undefined,
   );
 
+  const allTopicsSelected = useMemo(() => {
+    if (!preferences) return true;
+    return isAllTopicsEnabled(normalizeFeedPreferences(preferences).enabledTopics);
+  }, [preferences]);
+
   const sourceIds = useMemo(() => {
     if (sources.length === 0) return [];
-    if (!preferences) return sources.map((s) => s.id);
+    if (!preferences || allTopicsSelected) return sources.map((s) => s.id);
     return getEnabledSourceIds(sources, preferences.enabledSourceIds);
-  }, [preferences, sources]);
+  }, [preferences, sources, allTopicsSelected]);
 
-  const sourceIdsKey = sourceIds.join(',');
+  const sourceIdsKey = allTopicsSelected ? '__all_topics__' : sourceIds.join(',');
 
   const load = useCallback(
     async (mode: LoadMode = 'initial', forceRefresh = false) => {
@@ -71,7 +82,9 @@ export function useArticles(): UseArticlesResult {
       setUsingDemoArticles(false);
       try {
         const restrictSources =
-          preferences && !isAllSourcesEnabled(preferences.enabledSourceIds);
+          preferences &&
+          !allTopicsSelected &&
+          !isAllSourcesEnabled(preferences.enabledSourceIds);
         const { articles: data, meta } = await fetchArticles({
           forceRefresh,
           sourceIds: restrictSources && sourceIds.length > 0 ? sourceIds : undefined,
@@ -92,6 +105,11 @@ export function useArticles(): UseArticlesResult {
         if (meta?.ingestTriggered && !meta.ingestAwaited) {
           scheduleGlobalSilentRefresh();
         }
+
+        if (user && preferences?.trendingNotificationsEnabled) {
+          const forTrending = applyFeedFilters(data, preferences, sources);
+          void processHotTrendingNotifications(user.id, forTrending, true);
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to load articles');
         setNotice(null);
@@ -106,7 +124,7 @@ export function useArticles(): UseArticlesResult {
         }
       }
     },
-    [sourceIds, preferences],
+    [sourceIds, preferences, allTopicsSelected, user, sources],
   );
 
   loadRef.current = load;

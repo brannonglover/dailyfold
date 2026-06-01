@@ -1,4 +1,6 @@
 import { API_URL } from '@/constants/api';
+import { decodeFeedText } from '@/catalog/decodeHtmlText';
+import { resolveArticleImageUrl } from '@/constants/images';
 import { ARTICLES } from '@/data/articles';
 import { Article } from '@/types';
 
@@ -50,8 +52,21 @@ function apiUnreachableMessage(): string {
   return `Cannot reach the API at ${API_URL}. Run "npm run api" (see DEV.md), verify with "npm run api:check", and on a physical device set EXPO_PUBLIC_API_URL in .env to your computer's LAN address (e.g. http://192.168.1.94:3001).`;
 }
 
+function withResolvedArticleFields(articles: Article[]): Article[] {
+  return articles.map((article) => ({
+    ...article,
+    title: decodeFeedText(article.title),
+    excerpt: decodeFeedText(article.excerpt),
+    body: decodeFeedText(article.body),
+    imageUrl: resolveArticleImageUrl(article.imageUrl),
+  }));
+}
+
 function devFallbackArticles(): FetchArticlesResult {
-  return { articles: ARTICLES, meta: { lastIngestAt: null, usingFallback: true } };
+  return {
+    articles: withResolvedArticleFields(ARTICLES),
+    meta: { lastIngestAt: null, usingFallback: true },
+  };
 }
 
 export async function fetchArticles(options?: {
@@ -85,7 +100,7 @@ export async function fetchArticles(options?: {
     throw new Error('No articles in the feed yet. Run "npm run api:ingest" to fetch stories from your sources.');
   }
 
-  return { articles: data.articles, meta: data.meta };
+  return { articles: withResolvedArticleFields(data.articles), meta: data.meta };
 }
 
 export async function fetchArticleById(id: string): Promise<Article | undefined> {
@@ -95,7 +110,7 @@ export async function fetchArticleById(id: string): Promise<Article | undefined>
     });
     if (response.status === 404) return undefined;
     const data = await parseJson<ArticleResponse>(response);
-    return data.article;
+    return data.article ? withResolvedArticleFields([data.article])[0] : undefined;
   } catch {
     return undefined;
   }

@@ -1,6 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Pressable } from 'react-native-gesture-handler';
 
 import { ArticleActions } from '@/components/ArticleActions';
 import { ArticleImage } from '@/components/ArticleImage';
@@ -29,6 +30,8 @@ function formatDate(iso: string) {
 
 const IMAGE_HEIGHT_MAX = 220;
 const IMAGE_HEIGHT_RATIO = 0.32;
+/** Never collapse the hero to 0 on short cards (common on physical devices with more chrome). */
+const HERO_IMAGE_MIN_HEIGHT = 120;
 
 function withAlpha(hex: string, alpha: number) {
   const clamped = Math.min(1, Math.max(0, alpha));
@@ -64,9 +67,20 @@ const TEXT_BLOCK_CHROME_HEIGHT =
 const TEXT_BLOCK_MIN_HEIGHT = TEXT_BLOCK_CHROME_HEIGHT + TITLE_LINE_HEIGHT;
 
 function getCardImageHeight(cardHeight: number): number {
+  if (cardHeight <= 0) return 0;
+
   const byRatio = Math.round(cardHeight * IMAGE_HEIGHT_RATIO);
   const byTextBudget = cardHeight - ACTIONS_BAR_HEIGHT - TEXT_BLOCK_MIN_HEIGHT;
-  return Math.max(0, Math.min(IMAGE_HEIGHT_MAX, byRatio, byTextBudget));
+  const budgeted = Math.min(IMAGE_HEIGHT_MAX, byRatio, byTextBudget);
+
+  if (budgeted >= HERO_IMAGE_MIN_HEIGHT) return budgeted;
+
+  const minCardForHero = ACTIONS_BAR_HEIGHT + HERO_IMAGE_MIN_HEIGHT + 24;
+  if (cardHeight >= minCardForHero) {
+    return Math.min(IMAGE_HEIGHT_MAX, HERO_IMAGE_MIN_HEIGHT, byRatio);
+  }
+
+  return Math.max(0, budgeted);
 }
 
 export function ArticleCard({ article, height }: ArticleCardProps) {
@@ -90,7 +104,13 @@ export function ArticleCard({ article, height }: ArticleCardProps) {
         accessibilityLabel={`Read ${article.title}`}
         style={({ pressed }) => [styles.content, pressed && styles.pressed]}>
         <View style={[styles.imageWrap, { height: imageHeight }]}>
-          <ArticleImage uri={article.imageUrl} style={styles.image} />
+          <ArticleImage
+            uri={article.imageUrl}
+            recyclingKey={article.id}
+            style={styles.image}
+            source={article.source}
+            sourceLogo={article.sourceLogo}
+          />
           <LinearGradient
             colors={[
               withAlpha(colors.background, 0),

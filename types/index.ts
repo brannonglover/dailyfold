@@ -74,5 +74,7 @@ export interface UserPreferences {
   enabledTopics: Topic[];
   /** Empty array = all sports/leagues when Sports topic is active */
   enabledSportTags: SportTag[];
+  /** Local alerts for hot stories in the trending window. */
+  trendingNotificationsEnabled: boolean;
   folders: LikedFolder[];
 }

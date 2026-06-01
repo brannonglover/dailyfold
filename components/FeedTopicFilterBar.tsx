@@ -1,4 +1,5 @@
 import { usePreferences } from '@/contexts/PreferencesContext';
+import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import { isSportsTopicActive } from '@/services/sportPreferences';
 
 import { SportFilterBar } from './SportFilterBar';
@@ -7,13 +8,20 @@ import { TopicFilterBar } from './TopicFilterBar';
 export function FeedTopicFilterBar() {
   const {
     preferences,
+    isLoading,
     toggleTopic,
     selectAllTopics,
     toggleSportTag,
     selectAllSportTags,
   } = usePreferences();
 
-  const enabledTopics = preferences?.enabledTopics ?? [];
+  // Avoid showing "All" while prefs are loading (null defaults to All and hides Sports).
+  if (isLoading || !preferences) {
+    return null;
+  }
+
+  const normalized = normalizeFeedPreferences(preferences);
+  const enabledTopics = normalized.enabledTopics;
   const showSportFilters = isSportsTopicActive(enabledTopics);
 
   return (
@@ -25,7 +33,7 @@ export function FeedTopicFilterBar() {
       />
       {showSportFilters ? (
         <SportFilterBar
-          enabledSportTags={preferences?.enabledSportTags ?? []}
+          enabledSportTags={normalized.enabledSportTags}
           onSelectAll={() => void selectAllSportTags()}
           onToggleSportTag={(tag) => void toggleSportTag(tag)}
         />

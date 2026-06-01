@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -15,6 +16,7 @@ import {
   countEnabledSources,
   filterArticlesBySources,
   isAllSourcesEnabled,
+  isSportsOnlySourceSelection,
 } from '@/services/sourcePreferences';
 import {
   filterArticlesBySportTags,
@@ -25,7 +27,9 @@ import {
   filterArticlesByTopics,
   isAllTopicsEnabled,
 } from '@/services/topicPreferences';
+import { applyFeedFilters } from '@/services/feedFilters';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
+import { requestTrendingNotificationPermission } from '@/services/notificationSetup';
 import { getPreferences, savePreferences } from '@/services/storage';
 import { applyArticleLikeSignals } from '@/services/interestSignals';
 import {
@@ -36,6 +40,8 @@ import {
 } from '@/services/recommendations';
 import { Article, FeedSource, LikedFolder, SportTag, Topic, UserPreferences } from '@/types';
 import { createFolderId } from '@/utils/folderId';
+
+export type TrendingNotificationsToggleResult = 'updated' | 'denied' | 'unavailable';
 
 interface PreferencesContextValue {
   preferences: UserPreferences | null;
@@ -54,6 +60,7 @@ interface PreferencesContextValue {
   filterByEnabledSources: (articles: Article[]) => Article[];
   filterByEnabledTopics: (articles: Article[]) => Article[];
   filterByEnabledSportTags: (articles: Article[]) => Article[];
+  filterFeedArticles: (articles: Article[]) => Article[];
   toggleTopic: (topic: Topic) => Promise<void>;
   selectAllTopics: () => Promise<void>;
   toggleSportTag: (tag: SportTag) => Promise<void>;
@@ -64,6 +71,8 @@ interface PreferencesContextValue {
   removeArticleFromFolder: (folderId: string, articleId: string) => Promise<void>;
   toggleArticleInFolder: (folderId: string, articleId: string) => Promise<void>;
   getFoldersForArticle: (articleId: string) => LikedFolder[];
+  trendingNotificationsEnabled: boolean;
+  setTrendingNotificationsEnabled: (enabled: boolean) => Promise<TrendingNotificationsToggleResult>;
 }
 
 const PreferencesContext = createContext<PreferencesContextValue | null>(null);
@@ -73,6 +82,9 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
   const [sources, setSources] = useState<FeedSource[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const preferencesRef = useRef<UserPreferences | null>(null);
+
+  preferencesRef.current = preferences;
 
   useEffect(() => {
     fetchSources().then(setSources);
@@ -85,6 +97,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       return;
     }
 
+    setPreferences(null);
     setIsLoading(true);
     getPreferences(user.id)
       .then(async (loaded) => {
@@ -106,6 +119,17 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     },
     [user],
   );
+
+  /** All topics + sports-only outlets leaves a sports-only feed and API fetch. */
+  useEffect(() => {
+    if (!user || !preferences || sources.length === 0 || isLoading) return;
+
+    const normalized = normalizeFeedPreferences(preferences);
+    if (!isAllTopicsEnabled(normalized.enabledTopics)) return;
+    if (!isSportsOnlySourceSelection(sources, normalized.enabledSourceIds)) return;
+
+    void persist({ ...normalized, enabledSourceIds: [] });
+  }, [user, preferences, sources, isLoading, persist]);
 
   const isLiked = useCallback(
     (articleId: string) => preferences?.likedArticleIds.includes(articleId) ?? false,
@@ -209,6 +233,27 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     [preferences],
   );
 
+  const trendingNotificationsEnabled = preferences?.trendingNotificationsEnabled ?? false;
+
+  const setTrendingNotificationsEnabled = useCallback(
+    async (enabled: boolean): Promise<TrendingNotificationsToggleResult> => {
+      if (!user || !preferences) return 'unavailable';
+
+      if (!enabled) {
+        await persist({ ...preferences, trendingNotificationsEnabled: false });
+        return 'updated';
+      }
+
+      const permission = await requestTrendingNotificationPermission();
+      if (permission === 'unavailable') return 'unavailable';
+      if (permission === 'denied') return 'denied';
+
+      await persist({ ...preferences, trendingNotificationsEnabled: true });
+      return 'updated';
+    },
+    [user, preferences, persist],
+  );
+
   const isSourceEnabled = useCallback(
     (sourceId: string) => {
       if (!preferences) return true;
@@ -278,10 +323,23 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     [preferences],
   );
 
+  const filterFeedArticles = useCallback(
+    (articles: Article[]) => applyFeedFilters(articles, preferences, sources),
+    [preferences, sources],
+  );
+
   const selectAllTopics = useCallback(async () => {
-    if (!user || !preferences) return;
-    await persist({ ...preferences, enabledTopics: [], enabledSportTags: [] });
-  }, [user, preferences, persist]);
+    if (!user) return;
+    const prev = preferencesRef.current;
+    if (!prev) return;
+
+    await persist({
+      ...prev,
+      enabledTopics: [],
+      enabledSportTags: [],
+      enabledSourceIds: [],
+    });
+  }, [user, persist]);
 
   const selectAllSportTags = useCallback(async () => {
     if (!user || !preferences) return;
@@ -323,7 +381,11 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
         nextTopics = [topic];
       }
 
-      const nextSportTags = nextTopics.includes('sports') ? preferences.enabledSportTags : [];
+      const nextSportTags = isAllTopicsEnabled(nextTopics)
+        ? []
+        : nextTopics.includes('sports')
+          ? preferences.enabledSportTags
+          : [];
 
       await persist({
         ...preferences,
@@ -378,6 +440,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       filterByEnabledSources,
       filterByEnabledTopics,
       filterByEnabledSportTags,
+      filterFeedArticles,
       toggleTopic,
       selectAllTopics,
       toggleSportTag,
@@ -388,6 +451,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       removeArticleFromFolder,
       toggleArticleInFolder,
       getFoldersForArticle,
+      trendingNotificationsEnabled,
+      setTrendingNotificationsEnabled,
     }),
     [
       preferences,
@@ -405,6 +470,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       filterByEnabledSources,
       filterByEnabledTopics,
       filterByEnabledSportTags,
+      filterFeedArticles,
       toggleTopic,
       selectAllTopics,
       toggleSportTag,
@@ -415,6 +481,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       removeArticleFromFolder,
       toggleArticleInFolder,
       getFoldersForArticle,
+      trendingNotificationsEnabled,
+      setTrendingNotificationsEnabled,
     ],
   );
 

@@ -1,4 +1,4 @@
-import { Article } from '@/types';
+import { Article, Topic } from '@/types';
 
 /** Articles newer than this are shown in the first trending segment. */
 export const TRENDING_WINDOW_MS = 6 * 60 * 60 * 1000;
@@ -28,6 +28,57 @@ function sourceBurstCounts(articles: Article[], nowMs: number): Map<string, numb
 type QueueOrderOptions = {
   burstCounts?: Map<string, number>;
 };
+
+/** Primary curiosity for feed ordering (first tag on the article). */
+export function articlePrimaryTopic(article: Article): Topic {
+  return article.topics[0] ?? 'world';
+}
+
+function compareTopicQueues(a: Article[], b: Article[]): number {
+  return compareNewestFirst(a[0]!, b[0]!);
+}
+
+/**
+ * Round-robin across primary topics so a burst of sports headlines does not
+ * dominate the first screen when every topic chip is off (All).
+ */
+export function interleaveByPrimaryTopic(
+  articles: Article[],
+  options?: { preserveInputOrder?: boolean },
+): Article[] {
+  if (articles.length <= 1) return articles;
+
+  const byTopic = new Map<Topic, Article[]>();
+
+  for (const article of articles) {
+    const topic = articlePrimaryTopic(article);
+    const bucket = byTopic.get(topic);
+    if (bucket) bucket.push(article);
+    else byTopic.set(topic, [article]);
+  }
+
+  const queues = [...byTopic.values()].map((items) => {
+    if (options?.preserveInputOrder) return items;
+    return [...items].sort(compareNewestFirst);
+  });
+
+  queues.sort(compareTopicQueues);
+
+  const interleaved: Article[] = [];
+  let added = true;
+  while (added) {
+    added = false;
+    for (const queue of queues) {
+      const next = queue.shift();
+      if (next) {
+        interleaved.push(next);
+        added = true;
+      }
+    }
+  }
+
+  return interleaved;
+}
 
 function compareSourceQueues(
   a: Article[],
@@ -99,16 +150,31 @@ function partitionTrending(articles: Article[], nowMs: number): [Article[], Arti
   return [trending, rest];
 }
 
+export type OrderLatestFeedOptions = {
+  /**
+   * When true (All topics), interleave by primary topic instead of outlet burst
+   * so sports-heavy ingest does not fill the first cards.
+   */
+  diversifyTopics?: boolean;
+};
+
 /**
  * Latest feed: recent "trending" window first (interleaved), then older stories
  * (interleaved). Preserves every article; only order changes.
  */
-export function orderLatestFeed(articles: Article[]): Article[] {
+export function orderLatestFeed(articles: Article[], options?: OrderLatestFeedOptions): Article[] {
   if (articles.length <= 1) return articles;
 
   const nowMs = Date.now();
-  const burstCounts = sourceBurstCounts(articles, nowMs);
   const [trending, rest] = partitionTrending(articles, nowMs);
+
+  if (options?.diversifyTopics) {
+    const orderedTrending = interleaveByPrimaryTopic(trending);
+    const orderedRest = interleaveByPrimaryTopic(rest);
+    return [...orderedTrending, ...orderedRest];
+  }
+
+  const burstCounts = sourceBurstCounts(articles, nowMs);
   const queueOrder = { burstCounts };
 
   const orderedTrending = interleaveBySource(trending, { queueOrder });
