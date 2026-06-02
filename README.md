@@ -106,11 +106,50 @@ Do **not** leave Root Directory empty — the repo root `package.json` is Expo-o
 |---------|--------|
 | Root Directory | **`backend`** |
 | Framework Preset | Next.js (auto-detected) |
-| Install Command | *(default)* `npm install` in `backend/` |
-| Build Command | *(default)* `npm run build` in `backend/` |
+| Install Command | *(default or repo)* `npm ci` in `backend/` — set in **`backend/vercel.json`** |
+| Build Command | *(default or repo)* `npm run build` in `backend/` — set in **`backend/vercel.json`** |
 | Output Directory | *(default)* **`.next`** — **not** `backend/.next` |
 
-Config lives in **`backend/vercel.json`** (ingest cron). **`backend/.vercelignore`** trims Expo/native paths for CLI uploads.
+Config lives in **`backend/vercel.json`** (ingest cron + explicit `npm ci` / `npm run build`). Repo-root **`vercel.json`** fails fast if Root Directory is left empty (Expo root has no Next.js). **`backend/.vercelignore`** trims Expo/native paths for CLI uploads.
+
+### Healthy build log (Git deploy)
+
+A successful **`current-backend`** Git deploy on `main` should take **1–3 minutes**, not milliseconds. You should see lines like:
+
+```
+Cloning github.com/brannonglover/current (Branch: main, Commit: …)
+Running "install" command: npm ci …
+added … packages
+Detected Next.js version: 15.x
+Running "build" command: npm run build …
+▲ Next.js 15.x
+Creating an optimized production build …
+Compiled successfully
+Build Completed in /vercel/output [1m–3m typical]
+Deployment completed
+```
+
+If the log shows **`Build Completed in /vercel/output [69ms]`** (or any sub-second time) with **no** `npm ci` / `npm install` and **no** `next build`, the deployment is empty — API routes were never compiled. Fix dashboard settings below, then push to `main` (do not **Redeploy** a bad snapshot).
+
+### Fix: instant build (~69ms, no npm install / no next build)
+
+**Root cause:** Vercel is **not** running the Next.js builder. Common dashboard misconfigurations:
+
+| Symptom in log | Likely cause | Dashboard fix |
+|----------------|--------------|---------------|
+| ~69ms, no install, no Next.js lines | **Root Directory empty** (builds Expo root) or **Framework Preset = Other** | Root Directory → **`backend`**; Framework → **Next.js** (auto) |
+| `Build Completed in /vercel/output [69ms]` after clone | **Output Directory** = `backend/.next` while Root Directory is already **`backend`** | **Reset** Output Directory to default (empty → **`.next`**) |
+| No `Detected Next.js` | Root Directory empty or wrong project linked | Confirm project **`current-backend`**, not Expo **`current`** |
+
+**Dashboard (`current-backend`) checklist:**
+
+1. **Settings → General → Root Directory:** **`backend`**
+2. **Settings → Build and Deployment → Framework Preset:** **Next.js** (or auto-detected from `backend/package.json`)
+3. **Install Command:** **Reset** to default (repo sets `npm ci` in `backend/vercel.json`; do **not** use `cd backend && …`)
+4. **Build Command:** **Reset** to default (repo sets `npm run build` in `backend/vercel.json`)
+5. **Output Directory:** **Reset** to default — empty field → **`.next`**, **not** `backend/.next`
+6. **Settings → Git:** repo **`brannonglover/current`**, production branch **`main`**
+7. Trigger a fresh deploy: **push to `main`** or `npm run vercel:backend:prod` from repo root — **not** **Redeploy** on a broken deployment
 
 ### Fix: `Command "cd backend && npm ci" exited with 1`
 
@@ -122,7 +161,7 @@ This almost always means a **stale dashboard override** left over from when Root
 4. **Build Command**: same — **Reset** to default (`npm run build`).
 5. **Deployments** → latest failed deployment → **⋯** → **Redeploy** (or push an empty commit).
 
-Do **not** set Install Command to `cd backend && npm ci` when Root Directory is `backend`. Repo config does not set install/build commands — only **`backend/vercel.json`** (crons). There is **no** repo-root `vercel.json`.
+Do **not** set Install Command to `cd backend && npm ci` when Root Directory is `backend`. **`backend/vercel.json`** pins `npm ci` and `npm run build` (no `cd backend`). Repo-root **`vercel.json`** only runs when Root Directory is wrongly left empty — it exits with an error instead of a silent 69ms deploy.
 
 
 ### Fix: `The specified Root Directory "backend" does not exist` (35 deployment files)
