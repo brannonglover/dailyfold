@@ -96,22 +96,29 @@ services/            API client, recommendations
 
 ## Deploy backend (Vercel)
 
-The Expo app lives at the repo root; the API is **`backend/`** only. The API imports shared modules from **`catalog/`** at the repo root, so Vercel must upload the full repository — not only `backend/`.
+The Expo app lives at the repo root; the API is **`backend/`** only. The API imports shared modules from **`catalog/`** at the repo root (`../../catalog/…` from `backend/`).
 
-**Root Directory:** In Vercel → Project → Settings → General, leave **Root Directory empty** (`.` / repository root). Do **not** set it to `backend`; that uploads ~35 files and the build fails resolving `../../catalog/…`.
+**Root Directory (required):** In Vercel → Project → Settings → General → **Root Directory**, set **`backend`**. Vercel detects Next.js from `backend/package.json`. Git clones the **full repo**, so `catalog/` is still on disk during build; `backend/next.config.ts` sets `outputFileTracingRoot` to the monorepo root so serverless bundles include `catalog/`.
 
-Repo-root `vercel.json` runs install/build inside `backend/` and keeps the ingest cron. `backend/next.config.ts` sets `outputFileTracingRoot` to the monorepo root so serverless bundles include `catalog/`.
+Do **not** leave Root Directory empty — the repo root `package.json` is Expo-only (no `next`), and Git builds fail with “No Next.js version detected” even if install runs `cd backend && npm ci`.
 
 | Setting | Value |
 |---------|--------|
-| Root Directory | **empty** (`.` ) |
-| Framework Preset | Next.js |
-| Install Command | `cd backend && npm ci` (default from `vercel.json`) |
-| Build Command | `cd backend && npm ci && npm run build` (default from `vercel.json`) |
+| Root Directory | **`backend`** |
+| Framework Preset | Next.js (auto-detected) |
+| Install Command | *(default)* `npm install` in `backend/` |
+| Build Command | *(default)* `npm run build` in `backend/` |
 
-**CLI:** run `vercel` from the **repository root** (not `cd backend`). Link the **`current-backend`** project (not `current` — that is the Expo app and uploads too many files).
+Config lives in **`backend/vercel.json`** (ingest cron). **`backend/.vercelignore`** trims Expo/native paths for CLI uploads.
 
-Root `.vercelignore` keeps `node_modules`, `.expo`, and native folders out of the upload. If you still hit a file-count limit, use `vercel --archive=tgz`.
+### Git vs CLI
+
+| Method | Where to run | Notes |
+|--------|----------------|-------|
+| **Git** (push / PR) | — | Set Root Directory to **`backend`** in the dashboard, then redeploy. Full repo is cloned; no `cd backend` overrides needed. |
+| **CLI** | **Repository root** | `vercel link` → **`current-backend`**. Run `vercel` from the repo root — **not** `cd backend && vercel` (that breaks cwd with Root Directory `backend`). Use `vercel --archive=tgz` if you hit the 15k file limit. |
+
+Repo-root `.vercelignore` is only for legacy CLI deploys before Root Directory was set to `backend`; prefer **`backend/.vercelignore`**.
 
 1. Log in (fixes `The specified token is not valid`):
 

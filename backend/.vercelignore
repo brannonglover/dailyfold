@@ -1,0 +1,31 @@
+# Expo / mobile at repo root (not needed for API)
+../.expo
+../dist
+../web-build
+../ios
+../android
+../.kotlin
+../node_modules
+
+# Dependencies (installed on Vercel)
+node_modules
+
+# Local / secrets
+.env
+.env.*
+!.env.example
+../.env
+../.env.*
+
+# Build artifacts
+.next
+*.tsbuildinfo
+
+# Data & tooling
+data
+../.git
+../.DS_Store
+*.log
+../coverage
+../.cursor
+../.agent-transcripts
