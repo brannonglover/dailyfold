@@ -51,7 +51,9 @@
     "api:watch": "npm run ingest:watch --prefix backend",
     "api:stop": "node scripts/api-check.mjs stop",
     "api:check": "node scripts/api-check.mjs probe",
-    "api:restart": "node scripts/api-check.mjs stop && node scripts/start-api.mjs"
+    "api:restart": "node scripts/api-check.mjs stop && node scripts/start-api.mjs",
+    "vercel:backend": "vercel",
+    "vercel:backend:prod": "vercel --prod"
   },
   "private": true
 }

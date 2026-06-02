@@ -108,6 +108,7 @@ Do **not** leave Root Directory empty — the repo root `package.json` is Expo-o
 | Framework Preset | Next.js (auto-detected) |
 | Install Command | *(default)* `npm install` in `backend/` |
 | Build Command | *(default)* `npm run build` in `backend/` |
+| Output Directory | *(default)* **`.next`** — **not** `backend/.next` |
 
 Config lives in **`backend/vercel.json`** (ingest cron). **`backend/.vercelignore`** trims Expo/native paths for CLI uploads.
 
@@ -124,12 +125,39 @@ This almost always means a **stale dashboard override** left over from when Root
 Do **not** set Install Command to `cd backend && npm ci` when Root Directory is `backend`. Repo config does not set install/build commands — only **`backend/vercel.json`** (crons). There is **no** repo-root `vercel.json`.
 
 
+### Fix: `The specified Root Directory "backend" does not exist` (35 deployment files)
+
+**Root cause:** This is **not** caused by repo-root `.vercelignore` (it does **not** ignore `backend/`; Git builds normally download **~160+** files). The failure happens when the upload root is already the **`backend/`** tree (~**35** files) **and** the dashboard still has Root Directory = **`backend`**. Vercel then looks for `backend/backend/`, which does not exist.
+
+Common triggers:
+
+| Trigger | What went wrong |
+|---------|------------------|
+| `cd backend && vercel --prod` | CLI cwd is `backend/`; upload has no `backend/` prefix |
+| **Redeploy** on a failed production deploy | Reuses the same **35-file** CLI snapshot (`gitDirty: 1` in deployment meta) |
+| **Output Directory** = `backend/.next` | Wrong when Root Directory is already `backend`; reset to default **`.next`** |
+
+**Verify in deployment logs:** `Downloading 35 deployment files…` → CLI-from-`backend/` or redeploy of that upload. Healthy Git/CLI-from-repo-root: **`Downloading 163 deployment files…`** (approx.).
+
+**Dashboard (`current-backend`):**
+
+1. **Settings → General → Root Directory:** **`backend`** (unchanged).
+2. **Settings → Build and Deployment → Output Directory:** **Reset** to platform default (empty → **`.next`**). Remove **`backend/.next`**.
+3. **Settings → Git:** Connect **`brannonglover/current`**, production branch **`main`**, if not linked (deployments with only CLI + `gitDirty` often mean production was never promoted from a full-repo build).
+4. **Deployments:** Do **not** use **Redeploy** on failed production builds. Either **push to `main`** (Git) or from repo root: `npm run vercel:backend:prod`.
+5. **Settings → Build and Deployment:** Install/Build commands **Reset** to defaults (no `cd backend && …`).
+
+**Monorepo + `catalog/`:** Root Directory **`backend`** is correct. Vercel must clone the **full** repo (Git or `vercel` from repo root) so `catalog/` exists beside `backend/`. `backend/next.config.ts` sets `outputFileTracingRoot` to the repo root for serverless tracing.
+
+**Repo-root `.vercelignore`:** Keeps Expo/native paths off CLI uploads from the **repo root** only. It does **not** remove the `backend/` directory from Git deployments.
+
+
 ### Git vs CLI
 
 | Method | Where to run | Notes |
 |--------|----------------|-------|
 | **Git** (push / PR) | — | Set Root Directory to **`backend`** in the dashboard, then redeploy. Full repo is cloned; no `cd backend` overrides needed. |
-| **CLI** | **Repository root** | `vercel link` → **`current-backend`**. Run `vercel` from the repo root — **not** `cd backend && vercel` (that breaks cwd with Root Directory `backend`). Use `vercel --archive=tgz` if you hit the 15k file limit. |
+| **CLI** | **Repository root** | `vercel link` → **`current-backend`**. Run `npm run vercel:backend` / `npm run vercel:backend:prod` from the repo root — **not** `cd backend && vercel` (→ **35 files**, Root Directory error). Use `vercel --archive=tgz` if you hit the 15k file limit. |
 
 Repo-root `.vercelignore` is only for legacy CLI deploys before Root Directory was set to `backend`; prefer **`backend/.vercelignore`**.
 

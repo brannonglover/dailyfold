@@ -1,3 +1,6 @@
+# Used for CLI `vercel` from the REPO ROOT only (not `cd backend`).
+# Does not ignore backend/ — Git deploys still include backend/ and catalog/.
+
 # Expo / mobile (not needed for API deploy)
 .expo
 dist
