@@ -43,3 +43,4 @@ yarn-error.*
 
 # API database
 backend/data/
+.vercel

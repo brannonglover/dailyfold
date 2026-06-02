@@ -1,0 +1,30 @@
+# Expo / mobile (not needed for API deploy)
+.expo
+dist
+web-build
+ios
+android
+.kotlin
+
+# Dependencies (installed on Vercel via vercel.json)
+node_modules
+backend/node_modules
+
+# Local / secrets
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+.next
+backend/.next
+*.tsbuildinfo
+
+# Data & tooling
+backend/data
+.git
+.DS_Store
+*.log
+coverage
+.cursor
+.agent-transcripts

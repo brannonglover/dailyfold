@@ -109,7 +109,9 @@ Repo-root `vercel.json` runs install/build inside `backend/` and keeps the inges
 | Install Command | `cd backend && npm ci` (default from `vercel.json`) |
 | Build Command | `cd backend && npm ci && npm run build` (default from `vercel.json`) |
 
-**CLI:** run `vercel` from the **repository root** (not `cd backend`), after `vercel link` on the API project. A `.vercel` folder under `backend/` from an older link still works if project settings use an empty Root Directory.
+**CLI:** run `vercel` from the **repository root** (not `cd backend`). Link the **`current-backend`** project (not `current` — that is the Expo app and uploads too many files).
+
+Root `.vercelignore` keeps `node_modules`, `.expo`, and native folders out of the upload. If you still hit a file-count limit, use `vercel --archive=tgz`.
 
 1. Log in (fixes `The specified token is not valid`):
 
@@ -120,9 +122,12 @@ Repo-root `vercel.json` runs install/build inside `backend/` and keeps the inges
 2. Link and deploy:
 
    ```bash
-   vercel link    # at repo root; choose the API project; Framework: Next.js
-   vercel
+   cd /path/to/current   # repo root
+   vercel link           # choose existing project: current-backend
+   vercel                # or: vercel --archive=tgz
    ```
+
+   Do **not** link at repo root to the **`current`** Vercel project (Expo). Wrong link → `files should NOT have more than 15000 items`.
 
 3. In the Vercel project → **Settings → Environment Variables** (Production and Preview), set:
 
