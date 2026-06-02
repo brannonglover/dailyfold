@@ -43,6 +43,18 @@ async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Respon
 
 async function parseJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(
+        'API returned unauthorized (HTTP ' +
+          response.status +
+          '). On Vercel, turn off Deployment Protection for Production or promote a public production deployment.',
+      );
+    }
+    if (response.status === 404) {
+      throw new Error(
+        'API route not found (HTTP 404). Confirm the backend deployed successfully and EXPO_PUBLIC_API_URL points at that deployment.',
+      );
+    }
     throw new Error(`API error: ${response.status}`);
   }
   return response.json() as Promise<T>;
