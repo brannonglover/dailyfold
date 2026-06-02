@@ -17,7 +17,10 @@ let db: Database.Database | null = null;
 
 function getDb() {
   if (!db) {
-    mkdirSync(dataDir, { recursive: true });
+    const dbDir = path.dirname(dbPath);
+    if (dbDir !== '/tmp') {
+      mkdirSync(dbDir, { recursive: true });
+    }
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
     migrate(db);
