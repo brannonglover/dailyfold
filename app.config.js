@@ -20,6 +20,26 @@ function getVersionCode() {
 const buildNumber = getBuildNumber();
 const versionCode = getVersionCode();
 
+const REQUIRED_EAS_ENV = [
+  "EXPO_PUBLIC_SUPABASE_URL",
+  "EXPO_PUBLIC_SUPABASE_ANON_KEY",
+  "EXPO_PUBLIC_API_URL",
+];
+
+function validateEasBuildEnv() {
+  if (process.env.EAS_BUILD !== "true") return;
+
+  const missing = REQUIRED_EAS_ENV.filter((name) => !process.env[name]?.trim());
+  if (missing.length === 0) return;
+
+  throw new Error(
+    `[app.config.js] Missing required environment variables for EAS build: ${missing.join(", ")}. ` +
+      "Set them with: eas env:create --environment production --name <NAME> --value <VALUE>",
+  );
+}
+
+validateEasBuildEnv();
+
 module.exports = {
   expo: {
     name: "Current",
@@ -74,6 +94,14 @@ module.exports = {
     ],
     experiments: {
       typedRoutes: true,
+    },
+    extra: {
+      eas: {
+        projectId: "c006783f-187e-46e7-aa7c-38c7a5e3848a",
+      },
+      supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
+      supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+      apiUrl: process.env.EXPO_PUBLIC_API_URL,
     },
   },
 };

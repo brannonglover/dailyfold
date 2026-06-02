@@ -1,6 +1,8 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
+import { getPublicEnv } from '@/lib/env';
+
 const API_PORT = 3001;
 
 function getMetroHost(): string | null {
@@ -23,8 +25,15 @@ function isLoopbackUrl(url: string): boolean {
 
 /** Resolve the backend URL for dev (simulator, emulator, or physical device). */
 export function resolveApiUrl(): string {
-  const configured = process.env.EXPO_PUBLIC_API_URL?.trim();
+  const configured = getPublicEnv('EXPO_PUBLIC_API_URL');
   const metroHost = getMetroHost();
+
+  // Standalone production builds have no Metro host; require an explicit API URL.
+  if (!configured && !metroHost && !__DEV__) {
+    throw new Error(
+      'Missing EXPO_PUBLIC_API_URL. Set it as an EAS environment variable for production/TestFlight builds.',
+    );
+  }
 
   if (configured) {
     const normalized = configured.replace(/\/$/, '');
