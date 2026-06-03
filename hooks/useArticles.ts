@@ -3,7 +3,7 @@ import { AppState, AppStateStatus } from 'react-native';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
-import { applyFeedFilters } from '@/services/feedFilters';
+import { applyTrendingNotificationFilters } from '@/services/feedFilters';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import { getEnabledSourceIds, isAllSourcesEnabled } from '@/services/sourcePreferences';
 import { isAllTopicsEnabled } from '@/services/topicPreferences';
@@ -107,7 +107,7 @@ export function useArticles(): UseArticlesResult {
         }
 
         if (user && preferences?.trendingNotificationsEnabled) {
-          const forTrending = applyFeedFilters(data, preferences, sources);
+          const forTrending = applyTrendingNotificationFilters(data, preferences, sources);
           void processHotTrendingNotifications(user.id, forTrending, true, preferences);
         }
       } catch (e) {

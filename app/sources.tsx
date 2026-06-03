@@ -118,12 +118,14 @@ export default function SourcesScreen() {
                           </Text>
                         ) : null}
                       </View>
-                      <Switch
-                        value={enabled}
-                        onValueChange={() => toggleSource(source.id)}
-                        trackColor={{ false: colors.border, true: colors.accentMuted }}
-                        thumbColor={enabled ? colors.accent : colors.textSecondary}
-                      />
+                      <View style={styles.switchWrap}>
+                        <Switch
+                          value={enabled}
+                          onValueChange={() => toggleSource(source.id)}
+                          trackColor={{ false: colors.border, true: colors.accentMuted }}
+                          thumbColor={enabled ? colors.accent : colors.textSecondary}
+                        />
+                      </View>
                     </View>
                   );
                 })}
@@ -187,21 +189,30 @@ const styles = StyleSheet.create({
   },
   cardBody: {
     flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
     gap: 6,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    minWidth: 0,
   },
   name: {
+    flex: 1,
+    flexShrink: 1,
     fontFamily: 'InterSemiBold',
     fontSize: 16,
   },
   description: {
+    flexShrink: 1,
     fontFamily: 'Inter',
     fontSize: 13,
     lineHeight: 18,
+  },
+  switchWrap: {
+    flexShrink: 0,
   },
   note: {
     fontFamily: 'Inter',

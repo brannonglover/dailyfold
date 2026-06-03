@@ -31,3 +31,28 @@ export function applyFeedFilters(
   result = filterArticlesByTopics(result, prefs.enabledTopics, sourcePrimaryByName);
   return filterArticlesBySportTags(result, prefs.enabledSportTags, prefs.enabledTopics);
 }
+
+/**
+ * Trending notification filter pipeline.
+ * Source toggles from the Sources screen always apply; topic/sport filters follow the
+ * same all-topics bypass as the main feed.
+ */
+export function applyTrendingNotificationFilters(
+  articles: Article[],
+  preferences: UserPreferences | null | undefined,
+  sources: FeedSource[],
+): Article[] {
+  if (!preferences) return articles;
+
+  const prefs = normalizeFeedPreferences(preferences);
+  const catalogSources = sources.length > 0 ? sources : FALLBACK_SOURCES;
+  let result = filterArticlesBySources(articles, catalogSources, prefs.enabledSourceIds);
+
+  if (isAllTopicsEnabled(prefs.enabledTopics)) {
+    return result;
+  }
+
+  const sourcePrimaryByName = buildSourcePrimaryTopicMap(catalogSources);
+  result = filterArticlesByTopics(result, prefs.enabledTopics, sourcePrimaryByName);
+  return filterArticlesBySportTags(result, prefs.enabledSportTags, prefs.enabledTopics);
+}

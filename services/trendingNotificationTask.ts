@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 
 import { fetchArticles } from '@/services/articles';
 import { getSessionUser } from '@/services/auth';
-import { applyFeedFilters } from '@/services/feedFilters';
+import { applyTrendingNotificationFilters } from '@/services/feedFilters';
 import {
   getNotificationPermissionGranted,
   notificationsAvailable,
@@ -29,7 +29,7 @@ export async function runTrendingNotificationCheck(): Promise<void> {
   if (!(await getNotificationPermissionGranted())) return;
 
   const [sources, { articles }] = await Promise.all([fetchSources(), fetchArticles()]);
-  const filtered = applyFeedFilters(articles, preferences, sources);
+  const filtered = applyTrendingNotificationFilters(articles, preferences, sources);
   await processHotTrendingNotifications(user.id, filtered, true, preferences);
 }
 

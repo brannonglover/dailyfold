@@ -7,7 +7,7 @@ import { Article, UserPreferences } from '@/types';
 
 /**
  * Whether a hot trending article should trigger a notification for this user.
- * Apply feed filters (topics/sources/sports) before calling this.
+ * Apply `applyTrendingNotificationFilters` (sources + topics/sports) before calling this.
  */
 export function isTrendingNotificationRelevant(
   article: Article,

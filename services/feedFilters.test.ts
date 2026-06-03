@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { CURIOSITY_ORDER } from '@/constants/curiosities';
 import { FALLBACK_SOURCES } from '@/data/sources';
-import { applyFeedFilters } from '@/services/feedFilters';
+import { applyFeedFilters, applyTrendingNotificationFilters } from '@/services/feedFilters';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import { isSportsOnlySourceSelection } from '@/services/sourcePreferences';
 import { Article, UserPreferences } from '@/types';
@@ -157,4 +157,16 @@ test('All topics with every source enabled returns mixed topics from fixture', (
   assert.ok(topics.has('technology'));
   assert.ok(topics.has('sports'));
   assert.ok(topics.has('world'));
+});
+
+test('applyTrendingNotificationFilters always respects disabled sources with all topics', () => {
+  const wired = FALLBACK_SOURCES.find((s) => s.name === 'Wired');
+  assert.ok(wired, 'fixture needs Wired source');
+
+  const enabledIds = FALLBACK_SOURCES.map((s) => s.id).filter((id) => id !== wired!.id);
+  const prefs = basePrefs({ enabledTopics: [], enabledSourceIds: enabledIds });
+
+  const result = applyTrendingNotificationFilters(articles, prefs, FALLBACK_SOURCES);
+  assert.deepEqual(result.map((a) => a.id).sort(), ['sport', 'world']);
+  assert.ok(!result.some((a) => a.source === 'Wired'));
 });
