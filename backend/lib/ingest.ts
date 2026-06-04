@@ -18,7 +18,7 @@ const MAX_FEED_REDIRECTS = 5;
 
 const PARSER_HEADERS = {
   Accept: 'application/rss+xml, application/xml, text/xml, */*',
-  'User-Agent': 'CurrentReader/1.0 (+https://github.com/current-app)',
+  'User-Agent': 'BeaconReader/1.0 (+https://github.com/brannonglover/current)',
 };
 
 const INSECURE_TLS_AGENT = new https.Agent({ rejectUnauthorized: false });

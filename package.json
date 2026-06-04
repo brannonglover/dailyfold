@@ -1,5 +1,5 @@
 {
-  "name": "current",
+  "name": "beacon",
   "main": "index.js",
   "version": "1.3.1",
   "dependencies": {

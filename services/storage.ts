@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import { Topic, UserPreferences } from '@/types';
 
-const PREFS_PREFIX = '@current/prefs/';
+const PREFS_PREFIX = '@beacon/prefs/';
 
 const DEFAULT_TOPIC_SCORES: Record<Topic, number> = {
   technology: 0,

@@ -42,23 +42,23 @@ validateEasBuildEnv();
 
 module.exports = {
   expo: {
-    name: "Current",
-    slug: "current",
+    name: "Beacon",
+    slug: "beacon",
     version,
     orientation: "portrait",
     icon: "./assets/images/icon.png",
-    scheme: "current",
+    scheme: "beacon",
     userInterfaceStyle: "automatic",
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.brannonglover.current",
+      bundleIdentifier: "com.brannonglover.beacon",
       buildNumber,
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
       },
     },
     android: {
-      package: "com.brannonglover.current",
+      package: "com.brannonglover.beacon",
       adaptiveIcon: {
         backgroundColor: "#E6F4FE",
         foregroundImage: "./assets/images/android-icon-foreground.png",

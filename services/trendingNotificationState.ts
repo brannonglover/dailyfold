@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const PREFIX = '@current/trending-notified/';
-const LAST_SENT_PREFIX = '@current/trending-notified-at/';
+const PREFIX = '@beacon/trending-notified/';
+const LAST_SENT_PREFIX = '@beacon/trending-notified-at/';
 const MAX_STORED_IDS = 300;
 
 /** Max trending alerts per hour when the user has no like-based personalization. */

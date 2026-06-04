@@ -5,8 +5,8 @@ export default function Home() {
 
   return (
     <main style={{ fontFamily: 'system-ui, sans-serif', padding: 32, maxWidth: 560 }}>
-      <h1>Current API</h1>
-      <p>RSS ingestion backend for the Current reader app.</p>
+      <h1>Beacon API</h1>
+      <p>RSS ingestion backend for the Beacon reader app.</p>
       <p>
         <strong>{status.articleCount}</strong> articles cached
         {status.lastIngestAt ? (

@@ -136,7 +136,7 @@ export default function LatestScreen() {
           source={require('@/assets/images/logo.png')}
           style={styles.brandLogo}
           contentFit="contain"
-          accessibilityLabel="Current"
+          accessibilityLabel="Beacon"
         />
       }
       emptyMessage={emptyMessage}

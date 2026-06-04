@@ -1,4 +1,4 @@
-# Current
+# Beacon
 
 A clean, modern reading app built with Expo. Scroll through curated articles from magazines and news sources, like what resonates, and get personalized recommendations.
 
@@ -88,7 +88,7 @@ app/                 Expo Router screens
 backend/             Next.js API + RSS ingestion
   lib/feeds.ts       Source configuration
   lib/ingest.ts      RSS fetch + normalize
-  data/current.db    SQLite (local, gitignored)
+  data/beacon.db    SQLite (local, gitignored)
 catalog/             Shared sources, sports tags, HTML decode (app + API)
 components/          UI
 services/            API client, recommendations
@@ -139,7 +139,7 @@ If the log shows **`Build Completed in /vercel/output [69ms]`** (or any sub-seco
 |----------------|--------------|---------------|
 | ~69ms, no install, no Next.js lines | **Root Directory empty** (builds Expo root) or **Framework Preset = Other** | Root Directory → **`backend`**; Framework → **Next.js** (auto) |
 | `Build Completed in /vercel/output [69ms]` after clone | **Output Directory** = `backend/.next` while Root Directory is already **`backend`** | **Reset** Output Directory to default (empty → **`.next`**) |
-| No `Detected Next.js` | Root Directory empty or wrong project linked | Confirm project **`current-backend`**, not Expo **`current`** |
+| No `Detected Next.js` | Root Directory empty or wrong project linked | Confirm project **`current-backend`**, not Expo **`beacon`** |
 
 **Dashboard (`current-backend`) checklist:**
 
@@ -209,12 +209,12 @@ Repo-root `.vercelignore` is only for legacy CLI deploys before Root Directory w
 2. Link and deploy:
 
    ```bash
-   cd /path/to/current   # repo root
+   cd /path/to/beacon   # repo root
    vercel link           # choose existing project: current-backend
    vercel                # or: vercel --archive=tgz
    ```
 
-   Do **not** link at repo root to the **`current`** Vercel project (Expo). Wrong link → `files should NOT have more than 15000 items`.
+   Do **not** link at repo root to the **`beacon`** Vercel project (Expo). Wrong link → `files should NOT have more than 15000 items`.
 
 3. In the Vercel project → **Settings → Environment Variables** (Production and Preview), set:
 

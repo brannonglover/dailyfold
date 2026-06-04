@@ -6,7 +6,7 @@ import { Article } from './types';
 const FETCH_TIMEOUT_MS = 15_000;
 
 const USER_AGENT =
-  'Mozilla/5.0 (compatible; CurrentReader/1.0; +https://github.com/current-app)';
+  'Mozilla/5.0 (compatible; BeaconReader/1.0; +https://github.com/brannonglover/current)';
 
 export interface ReaderContent {
   title: string;

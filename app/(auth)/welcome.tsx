@@ -19,7 +19,7 @@ export default function WelcomeScreen() {
         },
       ]}>
       <View style={styles.hero}>
-        <Text style={[styles.brand, { color: colors.text }]}>Current</Text>
+        <Text style={[styles.brand, { color: colors.text }]}>Beacon</Text>
         <Text style={[themeStyles.headline, styles.tagline, { color: colors.text }]}>
           Stories worth your time
         </Text>

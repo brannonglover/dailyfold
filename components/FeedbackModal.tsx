@@ -48,7 +48,7 @@ export function FeedbackModal({ visible, onClose, userName, userEmail }: Feedbac
     ].filter(Boolean);
 
     const body = [trimmed, '', '---', ...contextLines].join('\n');
-    const mailto = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent('Current app feedback')}&body=${encodeURIComponent(body)}`;
+    const mailto = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent('Beacon app feedback')}&body=${encodeURIComponent(body)}`;
 
     setIsSending(true);
     try {

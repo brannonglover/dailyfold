@@ -13,7 +13,7 @@ import { fetchSources } from '@/services/sources';
 import { getPreferences } from '@/services/storage';
 import { processHotTrendingNotifications } from '@/services/trendingNotifications';
 
-export const TRENDING_NOTIFICATION_TASK = 'current-trending-notifications';
+export const TRENDING_NOTIFICATION_TASK = 'beacon-trending-notifications';
 
 /** Minimum background interval (minutes). Android WorkManager floor is 15. */
 export const TRENDING_NOTIFICATION_INTERVAL_MINUTES = 15;
