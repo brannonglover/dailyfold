@@ -40,10 +40,35 @@ interface ArticleFeedProps {
   subtitle?: string;
   titleTrailing?: React.ReactNode;
   emptyMessage?: string;
+  error?: string | null;
+  notice?: string | null;
   refreshControl?: React.ReactElement<RefreshControlProps>;
   headerExtra?: React.ReactNode;
   onLoadMore?: () => void;
   isLoadingMore?: boolean;
+}
+
+function FeedStatusBanner({
+  error,
+  notice,
+}: {
+  error?: string | null;
+  notice?: string | null;
+}) {
+  const { colors } = useTheme();
+
+  if (!error && !notice) return null;
+
+  return (
+    <View style={styles.statusBanner}>
+      {error ? (
+        <Text style={[styles.statusError, { color: colors.accent }]}>{error}</Text>
+      ) : null}
+      {notice ? (
+        <Text style={[styles.statusNotice, { color: colors.textSecondary }]}>{notice}</Text>
+      ) : null}
+    </View>
+  );
 }
 
 export interface ArticleFeedHandle {
@@ -95,6 +120,8 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     subtitle,
     titleTrailing,
     emptyMessage,
+    error,
+    notice,
     refreshControl,
     headerExtra,
     onLoadMore,
@@ -271,6 +298,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
+        <FeedStatusBanner error={error} notice={notice} />
         {headerExtra}
         <ScrollView
           ref={emptyScrollRef}
@@ -302,6 +330,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
+      <FeedStatusBanner error={error} notice={notice} />
       {headerExtra}
       <View style={styles.listWrap} onLayout={onListLayout}>
         {pageHeight > 0 && snapMetrics && (
@@ -403,5 +432,22 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     textAlign: 'center',
     maxWidth: 300,
+  },
+  statusBanner: {
+    paddingHorizontal: 24,
+    paddingBottom: 10,
+    gap: 6,
+  },
+  statusError: {
+    fontFamily: 'Inter',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  statusNotice: {
+    fontFamily: 'Inter',
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center',
   },
 });

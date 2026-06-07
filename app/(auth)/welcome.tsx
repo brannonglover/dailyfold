@@ -19,7 +19,10 @@ export default function WelcomeScreen() {
         },
       ]}>
       <View style={styles.hero}>
-        <Text style={[styles.brand, { color: colors.text }]}>Phora</Text>
+        <Text style={[styles.brand, { color: colors.text }]}>
+          <Text style={{ color: '#FF7A6B' }}>d</Text>
+          ailyfold
+        </Text>
         <Text style={[themeStyles.headline, styles.tagline, { color: colors.text }]}>
           Stories worth your time
         </Text>
@@ -58,7 +61,7 @@ const styles = StyleSheet.create({
   brand: {
     fontFamily: 'LoraBold',
     fontSize: 42,
-    letterSpacing: -1,
+    letterSpacing: 1,
     marginBottom: 16,
   },
   tagline: {

@@ -13,7 +13,7 @@ npm start
 
 ### Native dev client (`npx expo run:ios`)
 
-This project uses **expo-dev-client**, not Expo Go. After `run:ios`, open the **Phora** app (your icon), not the separate **Expo Go** app.
+This project uses **expo-dev-client**, not Expo Go. After `run:ios`, open the **DailyFold** app (your icon), not the separate **Expo Go** app.
 
 1. Keep Metro running in terminal 2 (`npm start`).
 2. If you see the Expo dev launcher (development servers list), tap your machine’s server (e.g. `http://192.168.x.x:8081`).
@@ -80,19 +80,19 @@ Pull to refresh in the app (`refresh=true` on the API).
 
 Stale Metro bundle. Restart with `npx expo start --dev-client -c`. The current `PreferencesContext` no longer uses that symbol.
 
-### App opens to Expo launcher instead of Phora
+### App opens to Expo launcher instead of DailyFold
 
-You are in the **Phora dev client** (correct app), but it is not connected to Metro yet.
+You are in the **DailyFold dev client** (correct app), but it is not connected to Metro yet.
 
 1. Start Metro: `npm start` (runs `expo start --dev-client --host lan`).
 2. In the launcher, tap the local development server for this project, **or** use manual URL (below).
-3. Do **not** use Expo Go — use the **Phora** app icon installed by `run:ios`.
+3. Do **not** use Expo Go — use the **DailyFold** app icon installed by `run:ios`.
 
 ### “No development servers found” (Metro is running)
 
 Metro can be up while the dev launcher list stays empty — especially on a **physical iPhone**. The launcher only auto-probes `localhost` and your subnet’s `.1` address (often the router), not your Mac’s actual LAN IP.
 
-1. Confirm Metro in a terminal: `npm start` — you should see `Metro waiting on exp+phora://...` and port **8081**.
+1. Confirm Metro in a terminal: `npm start` — you should see `Metro waiting on exp+dailyfold://...` and port **8081**.
 2. Get your Mac’s LAN IP (same Wi‑Fi as the phone):
 
    ```bash
@@ -101,7 +101,7 @@ Metro can be up while the dev launcher list stays empty — especially on a **ph
 
    Example: `192.168.1.94`
 
-3. On the phone, in the **Phora** dev launcher → expand **Enter URL manually** → connect to:
+3. On the phone, in the **DailyFold** dev launcher → expand **Enter URL manually** → connect to:
 
    ```text
    http://YOUR_LAN_IP:8081
@@ -112,10 +112,10 @@ Metro can be up while the dev launcher list stays empty — especially on a **ph
    Or open the deep link Metro prints (scan the QR in the terminal, or paste in Safari):
 
    ```text
-   exp+phora://expo-development-client/?url=http%3A%2F%2F192.168.1.94%3A8081
+   exp+dailyfold://expo-development-client/?url=http%3A%2F%2F192.168.1.94%3A8081
    ```
 
-4. iOS **Settings → Phora → Local Network** must be **On** (otherwise the phone cannot reach your Mac).
+4. iOS **Settings → DailyFold → Local Network** must be **On** (otherwise the phone cannot reach your Mac).
 5. Phone and Mac on the same Wi‑Fi; disable VPN; allow incoming connections for **Node** in **System Settings → Network → Firewall** if enabled.
 6. If Metro was started before `npm start` (e.g. only from an old `expo run:ios` session that exited), run `npm start` again and retry.
 
@@ -129,4 +129,4 @@ Build succeeded but install failed — iOS lockdown rejected the Mac’s pairing
 
 This repo applies a small `@expo/cli` postinstall patch (`scripts/patch-expo-cli.mjs`) to fall back to `xcrun devicectl` when lockdown pairing fails. Re-run `npm install` if you delete `node_modules`.
 
-If it still fails, install from Xcode: open `ios/Phora.xcworkspace`, select your device, press Run. Or use the simulator: `npx expo run:ios`.
+If it still fails, install from Xcode: open `ios/DailyFold.xcworkspace`, select your device, press Run. Or use the simulator: `npx expo run:ios`.

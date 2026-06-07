@@ -1,12 +1,10 @@
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { ParamListBase } from '@react-navigation/native';
-import { Image } from 'expo-image';
 import { useFocusEffect, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet } from 'react-native';
-
 import { ArticleFeedHandle } from '@/components/ArticleFeed';
 import { ArticleFeedScreen } from '@/components/ArticleFeedScreen';
+import { BrandLogo } from '@/components/BrandLogo';
 import { FeedTopicFilterBar } from '@/components/FeedTopicFilterBar';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useArticles } from '@/hooks/useArticles';
@@ -131,14 +129,7 @@ export default function LatestScreen() {
       ref={feedRef}
       articles={filtered}
       title="Latest"
-      titleTrailing={
-        <Image
-          source={require('@/assets/images/logo.png')}
-          style={styles.brandLogo}
-          contentFit="contain"
-          accessibilityLabel="Phora"
-        />
-      }
+      titleTrailing={<BrandLogo />}
       emptyMessage={emptyMessage}
       isLoading={isLoading}
       isRefreshing={isRefreshing}
@@ -152,10 +143,3 @@ export default function LatestScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  brandLogo: {
-    height: 32,
-    width: 104,
-    maxWidth: 120,
-  },
-});

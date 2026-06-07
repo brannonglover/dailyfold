@@ -1,5 +1,5 @@
 import { forwardRef } from 'react';
-import { ActivityIndicator, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, StyleSheet, View } from 'react-native';
 
 import { ArticleFeed, ArticleFeedHandle } from '@/components/ArticleFeed';
 import { useTheme } from '@/hooks/useTheme';
@@ -52,16 +52,6 @@ export const ArticleFeedScreen = forwardRef<ArticleFeedHandle, ArticleFeedScreen
 
   return (
     <View style={styles.flex}>
-      {error ? (
-        <Text style={[styles.error, { color: colors.accent, backgroundColor: colors.background }]}>
-          {error}
-        </Text>
-      ) : null}
-      {notice ? (
-        <Text style={[styles.notice, { color: colors.textSecondary, backgroundColor: colors.background }]}>
-          {notice}
-        </Text>
-      ) : null}
       <ArticleFeed
         ref={ref}
         articles={articles}
@@ -69,6 +59,8 @@ export const ArticleFeedScreen = forwardRef<ArticleFeedHandle, ArticleFeedScreen
         subtitle={subtitle}
         titleTrailing={titleTrailing}
         emptyMessage={emptyMessage}
+        error={error}
+        notice={notice}
         refreshControl={
           onRefresh ? (
             <RefreshControl
@@ -95,19 +87,5 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  error: {
-    fontFamily: 'Inter',
-    fontSize: 12,
-    textAlign: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  notice: {
-    fontFamily: 'Inter',
-    fontSize: 12,
-    textAlign: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
   },
 });

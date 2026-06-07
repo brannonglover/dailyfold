@@ -1,5 +1,5 @@
 import 'react-native-gesture-handler';
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -11,25 +11,12 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { PreferencesProvider } from '@/contexts/PreferencesContext';
 import { AppThemeProvider } from '@/contexts/ThemeContext';
 import { useAppFonts } from '@/constants/Fonts';
-import { useColorScheme } from '@/components/useColorScheme';
 import { useNotificationNavigation } from '@/hooks/useNotificationNavigation';
 import { useTrendingNotificationBackground } from '@/hooks/useTrendingNotificationBackground';
 
 export { ErrorBoundary } from 'expo-router';
 
 SplashScreen.preventAutoHideAsync();
-
-const LightNavTheme = {
-  ...DefaultTheme,
-  colors: {
-    ...DefaultTheme.colors,
-    background: '#FAF9F7',
-    card: '#FAF9F7',
-    text: '#1C1C1C',
-    border: '#E8E6E3',
-    primary: '#E85D4C',
-  },
-};
 
 const DarkNavTheme = {
   ...DarkTheme,
@@ -90,14 +77,13 @@ export default function RootLayout() {
 }
 
 function RootLayoutNav() {
-  const colorScheme = useColorScheme();
   useNotificationNavigation();
   useTrendingNotificationBackground();
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkNavTheme : LightNavTheme}>
+    <ThemeProvider value={DarkNavTheme}>
       <AuthGate>
-        <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+        <StatusBar style="light" />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(tabs)" />

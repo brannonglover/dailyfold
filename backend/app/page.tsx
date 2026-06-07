@@ -5,8 +5,8 @@ export default function Home() {
 
   return (
     <main style={{ fontFamily: 'system-ui, sans-serif', padding: 32, maxWidth: 560 }}>
-      <h1>Phora API</h1>
-      <p>RSS ingestion backend for the Phora reader app.</p>
+      <h1>DailyFold API</h1>
+      <p>RSS ingestion backend for the DailyFold reader app.</p>
       <p>
         <strong>{status.articleCount}</strong> articles cached
         {status.lastIngestAt ? (

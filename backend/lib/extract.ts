@@ -6,7 +6,7 @@ import { Article } from './types';
 const FETCH_TIMEOUT_MS = 15_000;
 
 const USER_AGENT =
-  'Mozilla/5.0 (compatible; PhoraReader/1.0; +https://github.com/brannonglover/current)';
+  'Mozilla/5.0 (compatible; DailyFoldReader/1.0; +https://github.com/brannonglover/current)';
 
 export interface ReaderContent {
   title: string;

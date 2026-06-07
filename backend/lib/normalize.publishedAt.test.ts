@@ -39,7 +39,7 @@ test('parseFeedPublishedAt parses valid RSS dates', () => {
 });
 
 test('upsertArticle preserves published_at when feed has no publish date', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'phora-db-'));
+  const dir = mkdtempSync(path.join(tmpdir(), 'dailyfold-db-'));
   const previousPath = process.env.DATABASE_PATH;
   process.env.DATABASE_PATH = path.join(dir, 'test.db');
   resetDbConnectionForTests();
@@ -73,7 +73,7 @@ test('upsertArticle preserves published_at when feed has no publish date', () =>
 });
 
 test('upsertArticle updates published_at when feed provides a new date', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'phora-db-'));
+  const dir = mkdtempSync(path.join(tmpdir(), 'dailyfold-db-'));
   const previousPath = process.env.DATABASE_PATH;
   process.env.DATABASE_PATH = path.join(dir, 'test.db');
   resetDbConnectionForTests();

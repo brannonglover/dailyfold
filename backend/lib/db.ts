@@ -9,8 +9,8 @@ import { Article, Topic } from './types';
 const dataDir = path.join(process.cwd(), 'data');
 // Vercel serverless only allows writes under /tmp; data/ is read-only there.
 const defaultDbPath = process.env.VERCEL
-  ? path.join('/tmp', 'phora.db')
-  : path.join(dataDir, 'phora.db');
+  ? path.join('/tmp', 'dailyfold.db')
+  : path.join(dataDir, 'dailyfold.db');
 
 function resolveDbPath(): string {
   return process.env.DATABASE_PATH ?? defaultDbPath;

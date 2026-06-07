@@ -3,11 +3,8 @@ import { Tabs } from 'expo-router';
 
 import Colors from '@/constants/Colors';
 import { TAB_BAR_HEIGHT, TAB_BAR_PADDING_BOTTOM, TAB_BAR_PADDING_TOP } from '@/constants/Layout';
-import { useColorScheme } from '@/components/useColorScheme';
-
 export default function TabLayout() {
-  const colorScheme = useColorScheme() ?? 'light';
-  const colors = Colors[colorScheme];
+  const colors = Colors.dark;
 
   return (
     <Tabs

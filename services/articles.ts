@@ -55,6 +55,16 @@ async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Respon
   }
 }
 
+async function parseApiError(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: string };
+    if (body.error?.trim()) return body.error.trim();
+  } catch {
+    // ignore non-JSON bodies
+  }
+  return `API error: ${response.status}`;
+}
+
 async function parseJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
@@ -69,7 +79,7 @@ async function parseJson<T>(response: Response): Promise<T> {
         'API route not found (HTTP 404). Confirm the backend deployed successfully and EXPO_PUBLIC_API_URL points at that deployment.',
       );
     }
-    throw new Error(`API error: ${response.status}`);
+    throw new Error(await parseApiError(response));
   }
   return response.json() as Promise<T>;
 }

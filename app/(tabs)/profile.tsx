@@ -8,20 +8,12 @@ import { FeedbackModal } from '@/components/FeedbackModal';
 import { ProfileNavRow } from '@/components/ProfileNavRow';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
-import { ThemePreference, useThemeContext } from '@/contexts/ThemeContext';
 import { useTheme } from '@/hooks/useTheme';
 import { CURIOSITY_ORDER } from '@/constants/curiosities';
 import { formatInterestLabel } from '@/utils/interestKeywords';
 
 /** Bar fills at this many likes per signal so growth is visible over time. */
 const SCORE_BAR_CAP = 10;
-
-const THEME_OPTIONS: { value: ThemePreference; label: string; icon: keyof typeof Ionicons.glyphMap }[] =
-  [
-    { value: 'light', label: 'Light', icon: 'sunny-outline' },
-    { value: 'dark', label: 'Dark', icon: 'moon-outline' },
-    { value: 'system', label: 'System', icon: 'phone-portrait-outline' },
-  ];
 
 export default function ProfileScreen() {
   const [feedbackVisible, setFeedbackVisible] = useState(false);
@@ -37,7 +29,6 @@ export default function ProfileScreen() {
     trendingNotificationsEnabled,
     setTrendingNotificationsEnabled,
   } = usePreferences();
-  const { preference, setPreference } = useThemeContext();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
@@ -255,38 +246,6 @@ export default function ProfileScreen() {
         detail={`${totalSourceCount} outlets · ${enabledSourceCount} enabled`}
       />
 
-      <Text style={[styles.sectionTitle, { color: colors.textSecondary, marginTop: 24 }]}>
-        Appearance
-      </Text>
-      <View style={[styles.themePicker, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        {THEME_OPTIONS.map((option) => {
-          const selected = preference === option.value;
-          return (
-            <Pressable
-              key={option.value}
-              onPress={() => setPreference(option.value)}
-              style={({ pressed }) => [
-                styles.themeOption,
-                selected && { backgroundColor: colors.accentMuted },
-                pressed && !selected && { opacity: 0.7 },
-              ]}>
-              <Ionicons
-                name={option.icon}
-                size={18}
-                color={selected ? colors.accent : colors.textSecondary}
-              />
-              <Text
-                style={[
-                  styles.themeOptionLabel,
-                  { color: selected ? colors.accent : colors.textSecondary },
-                ]}>
-                {option.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
       <View style={styles.accountActions}>
         <ProfileNavRow
           icon="chatbubble-ellipses-outline"
@@ -484,26 +443,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter',
     fontSize: 13,
     lineHeight: 18,
-  },
-  themePicker: {
-    flexDirection: 'row',
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 4,
-    gap: 4,
-  },
-  themeOption: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  themeOptionLabel: {
-    fontFamily: 'InterMedium',
-    fontSize: 14,
   },
   accountActions: {
     marginTop: 32,

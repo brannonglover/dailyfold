@@ -42,28 +42,27 @@ validateEasBuildEnv();
 
 module.exports = {
   expo: {
-    name: "Phora",
-    slug: "phora",
+    name: "dailyfold",
+    slug: "dailyfold",
     version,
     orientation: "portrait",
     icon: "./assets/images/icon.png",
-    scheme: "phora",
-    userInterfaceStyle: "automatic",
+    scheme: "dailyfold",
+    userInterfaceStyle: "dark",
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.brannonglover.phora",
+      bundleIdentifier: "com.brannonglover.dailyfold",
       buildNumber,
       infoPlist: {
+        CFBundleDisplayName: "dailyfold",
         ITSAppUsesNonExemptEncryption: false,
       },
     },
     android: {
-      package: "com.brannonglover.phora",
+      package: "com.brannonglover.dailyfold",
       adaptiveIcon: {
-        backgroundColor: "#E6F4FE",
-        foregroundImage: "./assets/images/android-icon-foreground.png",
-        backgroundImage: "./assets/images/android-icon-background.png",
-        monochromeImage: "./assets/images/android-icon-monochrome.png",
+        backgroundColor: "#121212",
+        foregroundImage: "./assets/images/adaptive-icon.png",
       },
       predictiveBackGestureEnabled: false,
       versionCode,
@@ -81,14 +80,16 @@ module.exports = {
         {
           image: "./assets/images/splash-icon.png",
           resizeMode: "contain",
-          backgroundColor: "#FAF9F7",
+          backgroundColor: "#121212",
+          // 80% of a 393pt-wide iPhone screen (Expo splash storyboard reference width).
+          imageWidth: 314,
         },
       ],
       "expo-secure-store",
       [
         "expo-notifications",
         {
-          color: "#E85D4C",
+          color: "#FF7A6B",
         },
       ],
       "expo-background-task",
@@ -98,7 +99,7 @@ module.exports = {
     },
     extra: {
       eas: {
-        projectId: "9eb5a4d0-6798-4ce0-91b7-319092b0e4c0",
+        projectId: "4d65f7eb-8fcc-4456-88fb-aa88473e4016",
       },
       supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
       supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
