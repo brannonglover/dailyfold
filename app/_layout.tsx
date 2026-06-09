@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
+import { ArticlesProvider } from '@/contexts/ArticlesContext';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { PreferencesProvider } from '@/contexts/PreferencesContext';
 import { AppThemeProvider } from '@/contexts/ThemeContext';
@@ -68,7 +69,9 @@ export default function RootLayout() {
       <AppThemeProvider>
         <AuthProvider>
           <PreferencesProvider>
-            <RootLayoutNav />
+            <ArticlesProvider>
+              <RootLayoutNav />
+            </ArticlesProvider>
           </PreferencesProvider>
         </AuthProvider>
       </AppThemeProvider>
@@ -103,7 +106,7 @@ function RootLayoutNav() {
               headerShown: true,
               presentation: 'card',
               gestureEnabled: true,
-              fullScreenGestureEnabled: true,
+              fullScreenGestureEnabled: false,
               animationMatchesGesture: true,
               animation: 'slide_from_right',
             }}

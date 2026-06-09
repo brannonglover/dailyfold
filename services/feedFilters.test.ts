@@ -19,6 +19,9 @@ function basePrefs(overrides: Partial<UserPreferences> = {}): UserPreferences {
     enabledTopics: [],
     enabledSportTags: [],
     trendingNotificationsEnabled: false,
+    blockedTopics: [],
+    blockedSportTags: [],
+    blockedKeywords: [],
     folders: [],
     ...overrides,
   };
@@ -170,4 +173,27 @@ test('applyTrendingNotificationFilters always respects disabled sources with all
   const result = applyTrendingNotificationFilters(articles, prefs, FALLBACK_SOURCES);
   assert.deepEqual(result.map((a) => a.id).sort(), ['sport', 'world']);
   assert.ok(!result.some((a) => a.source === 'Wired'));
+});
+
+test('applyFeedFilters removes articles with blocked topics even when all topics are on', () => {
+  const prefs = basePrefs({ enabledTopics: [], blockedTopics: ['technology'] });
+  const result = applyFeedFilters(articles, prefs, FALLBACK_SOURCES);
+  assert.ok(!result.some((a) => a.id === 'tech'));
+});
+
+test('applyFeedFilters removes articles without a real hero image', () => {
+  const withImage = articles[0]!;
+  const imageless: Article = { ...articles[1]!, id: 'no-hero', imageUrl: '' };
+  const legacyPlaceholder: Article = {
+    ...articles[2]!,
+    id: 'legacy-placeholder',
+    imageUrl: 'https://images.unsplash.com/photo-1504711434966-e33886168f5c?w=800&q=80',
+  };
+
+  const result = applyFeedFilters(
+    [withImage, imageless, legacyPlaceholder],
+    basePrefs(),
+    FALLBACK_SOURCES,
+  );
+  assert.deepEqual(result.map((a) => a.id), ['tech']);
 });

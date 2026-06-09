@@ -12,6 +12,7 @@ import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import { isAllSourcesEnabled } from '@/services/sourcePreferences';
 import { isAllTopicsEnabled } from '@/services/topicPreferences';
 import { orderLatestFeed, orderLatestFeedPage } from '@/utils/feedOrdering';
+import { mergePaginatedDisplayFeed } from '@/utils/mergeDisplayFeed';
 import { Article } from '@/types';
 import { getFeedEmptyMessage } from '@/utils/feedEmptyMessage';
 
@@ -28,6 +29,8 @@ export default function LatestScreen() {
     error,
     notice,
     usingDemoArticles,
+    pendingCount,
+    dismissPendingArticles,
     refresh,
     loadMore,
   } = useArticles();
@@ -71,12 +74,13 @@ export default function LatestScreen() {
     const listShrunk = articles.length < prevRawLengthRef.current;
     const filtersChanged = filterKey !== prevFilterKeyRef.current;
 
-    if (
+    const needsFullRebuild =
       generationChanged ||
       listShrunk ||
       filtersChanged ||
-      prevRawLengthRef.current === 0
-    ) {
+      prevRawLengthRef.current === 0;
+
+    if (needsFullRebuild) {
       setDisplayArticles(orderLatestFeed(filteredArticles, orderOpts));
       prevFeedGenerationRef.current = feedGeneration;
       prevFilterKeyRef.current = filterKey;
@@ -84,12 +88,15 @@ export default function LatestScreen() {
       setDisplayArticles((prev) => {
         const seen = new Set(prev.map((a) => a.id));
         const newOnly = filteredArticles.filter((a) => !seen.has(a.id));
-        if (newOnly.length === 0) return prev;
-        return [...orderLatestFeedPage(newOnly, orderOpts), ...prev];
+        return mergePaginatedDisplayFeed(prev, newOnly, filteredArticles, (items) =>
+          orderLatestFeedPage(items, orderOpts),
+        );
       });
     } else if (prevRawLengthRef.current > 0) {
       setDisplayArticles((prev) => {
-        if (prev.length === 0) return prev;
+        if (prev.length === 0 && filteredArticles.length > 0) {
+          return orderLatestFeed(filteredArticles, orderOpts);
+        }
         const byId = new Map(filteredArticles.map((a) => [a.id, a]));
         let changed = false;
         const next = prev.map((a) => {
@@ -151,7 +158,11 @@ export default function LatestScreen() {
       onRefresh={refresh}
       onLoadMore={hasMore ? loadMore : undefined}
       isLoadingMore={isLoadingMore}
+      pendingCount={pendingCount}
+      pendingRefreshHint="pull down or tap Latest"
+      onDismissPending={dismissPendingArticles}
       headerExtra={<FeedTopicFilterBar />}
+      layout="newspaper"
     />
   );
 }

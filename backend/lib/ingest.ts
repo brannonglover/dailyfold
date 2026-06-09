@@ -12,6 +12,8 @@ import {
 } from './db';
 import { FEEDS } from './feeds';
 import { normalizeFeedItem } from './normalize';
+import { enrichArticlesMissingHeroImages } from './ogImage';
+import { Article } from './types';
 
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 const MAX_FEED_REDIRECTS = 5;
@@ -25,8 +27,9 @@ const INSECURE_TLS_AGENT = new https.Agent({ rejectUnauthorized: false });
 
 const PARSER_CUSTOM_FIELDS = {
   item: [
-    ['media:content', 'mediaContent'],
-    ['media:thumbnail', 'mediaThumbnail'],
+    // keepArray: Guardian (and others) ship multiple <media:content> widths; default parser keeps only the first (smallest).
+    ['media:content', 'mediaContent', { keepArray: true }],
+    ['media:thumbnail', 'mediaThumbnail', { keepArray: true }],
     ['media:group', 'mediaGroup'],
     ['media:restriction', 'mediaRestriction'],
     ['dc:accessRights', 'accessRights'],
@@ -156,6 +159,8 @@ export async function ingestFeeds(): Promise<IngestResult> {
     }),
   );
 
+  const pending: { article: Article; feedPublishedAt?: string }[] = [];
+
   for (let i = 0; i < feedResults.length; i += 1) {
     const feedResult = feedResults[i];
     const feed = FEEDS[i];
@@ -176,12 +181,21 @@ export async function ingestFeeds(): Promise<IngestResult> {
       const normalized = normalizeFeedItem(item, feed);
       if (!normalized) continue;
 
-      const action = upsertArticle(normalized.article, {
+      pending.push({
+        article: normalized.article,
         feedPublishedAt: normalized.feedPublishedAt,
       });
-      if (action === 'inserted') result.itemsInserted += 1;
-      else result.itemsUpdated += 1;
     }
+  }
+
+  await enrichArticlesMissingHeroImages(pending.map((entry) => entry.article));
+
+  for (const entry of pending) {
+    const action = upsertArticle(entry.article, {
+      feedPublishedAt: entry.feedPublishedAt,
+    });
+    if (action === 'inserted') result.itemsInserted += 1;
+    else result.itemsUpdated += 1;
   }
 
   result.itemsPruned = pruneOldArticles(MAX_ARTICLE_AGE_DAYS);

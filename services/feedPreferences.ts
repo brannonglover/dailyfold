@@ -2,6 +2,7 @@ import { SPORT_TAG_ORDER } from '@/catalog/sports';
 import { CURIOSITY_ORDER } from '@/constants/curiosities';
 import { SportTag, Topic, UserPreferences } from '@/types';
 
+import { normalizeBlockPreferences } from './blockPreferences';
 import { isSportsTopicActive } from './sportPreferences';
 import { isAllTopicsEnabled } from './topicPreferences';
 
@@ -62,13 +63,28 @@ export function normalizeFeedPreferences(prefs: UserPreferences): UserPreference
 
   const trendingNotificationsEnabled = prefs.trendingNotificationsEnabled === true;
 
+  const blockedTopics = prefs.blockedTopics ?? [];
+  const blockedSportTags = prefs.blockedSportTags ?? [];
+  const blockedKeywords = prefs.blockedKeywords ?? [];
+
   if (
     sameStringArray(enabledTopics, prefs.enabledTopics) &&
     sameStringArray(enabledSportTags, prefs.enabledSportTags) &&
-    trendingNotificationsEnabled === prefs.trendingNotificationsEnabled
+    trendingNotificationsEnabled === prefs.trendingNotificationsEnabled &&
+    sameStringArray(blockedTopics, prefs.blockedTopics ?? []) &&
+    sameStringArray(blockedSportTags, prefs.blockedSportTags ?? []) &&
+    sameStringArray(blockedKeywords, prefs.blockedKeywords ?? [])
   ) {
     return prefs;
   }
 
-  return { ...prefs, enabledTopics, enabledSportTags, trendingNotificationsEnabled };
+  return normalizeBlockPreferences({
+    ...prefs,
+    enabledTopics,
+    enabledSportTags,
+    trendingNotificationsEnabled,
+    blockedTopics,
+    blockedSportTags,
+    blockedKeywords,
+  });
 }

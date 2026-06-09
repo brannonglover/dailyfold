@@ -1,7 +1,7 @@
 import { forwardRef } from 'react';
 import { ActivityIndicator, RefreshControl, StyleSheet, View } from 'react-native';
 
-import { ArticleFeed, ArticleFeedHandle } from '@/components/ArticleFeed';
+import { ArticleFeed, ArticleFeedHandle, ArticleFeedLayout } from '@/components/ArticleFeed';
 import { useTheme } from '@/hooks/useTheme';
 import { Article } from '@/types';
 
@@ -19,6 +19,10 @@ interface ArticleFeedScreenProps {
   onLoadMore?: () => void;
   isLoadingMore?: boolean;
   headerExtra?: React.ReactNode;
+  pendingCount?: number;
+  pendingRefreshHint?: string;
+  onDismissPending?: () => void;
+  layout?: ArticleFeedLayout;
 }
 
 export const ArticleFeedScreen = forwardRef<ArticleFeedHandle, ArticleFeedScreenProps>(
@@ -37,6 +41,10 @@ export const ArticleFeedScreen = forwardRef<ArticleFeedHandle, ArticleFeedScreen
       onLoadMore,
       isLoadingMore,
       headerExtra,
+      pendingCount = 0,
+      pendingRefreshHint,
+      onDismissPending,
+      layout,
     },
     ref,
   ) {
@@ -73,8 +81,12 @@ export const ArticleFeedScreen = forwardRef<ArticleFeedHandle, ArticleFeedScreen
           ) : undefined
         }
         headerExtra={headerExtra}
+        pendingCount={pendingCount}
+        pendingRefreshHint={pendingRefreshHint}
+        onDismissPending={onDismissPending}
         onLoadMore={onLoadMore}
         isLoadingMore={isLoadingMore}
+        layout={layout}
       />
     </View>
   );

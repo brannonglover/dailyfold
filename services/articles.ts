@@ -3,6 +3,7 @@ import { decodeFeedText } from '@/catalog/decodeHtmlText';
 import { resolveArticleImageUrl } from '@/constants/images';
 import { ARTICLES } from '@/data/articles';
 import { Article } from '@/types';
+import { applyArticleStoryFallbacks } from '@/utils/articleStoryFallback';
 
 interface ArticlesResponse {
   articles: Article[];
@@ -95,13 +96,14 @@ function apiUnreachableMessage(): string {
 }
 
 function withResolvedArticleFields(articles: Article[]): Article[] {
-  return articles.map((article) => ({
+  const resolved = articles.map((article) => ({
     ...article,
     title: decodeFeedText(article.title),
     excerpt: decodeFeedText(article.excerpt),
     body: decodeFeedText(article.body),
     imageUrl: resolveArticleImageUrl(article.imageUrl),
   }));
+  return applyArticleStoryFallbacks(resolved);
 }
 
 function buildArticlesSearchParams(options?: FetchArticlesOptions): URLSearchParams {

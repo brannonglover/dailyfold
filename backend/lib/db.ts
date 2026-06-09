@@ -4,6 +4,8 @@ import path from 'path';
 
 import { inferSportTags, type SportTag } from '../../catalog/sports';
 
+import type { ReaderBlock } from './extract';
+
 import { Article, Topic } from './types';
 
 const dataDir = path.join(process.cwd(), 'data');
@@ -92,9 +94,30 @@ function migrate(database: Database.Database) {
 
 export interface CachedReaderContent {
   title: string;
-  paragraphs: string[];
+  blocks: ReaderBlock[];
   readTimeMinutes: number;
   source: 'extracted' | 'feed';
+  /** True when cache predates inline-image block extraction (paragraph strings only). */
+  legacyTextOnlyFormat?: boolean;
+}
+
+function parseStoredReaderBlocks(raw: string): {
+  blocks: ReaderBlock[];
+  legacyTextOnlyFormat: boolean;
+} {
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    return { blocks: [], legacyTextOnlyFormat: false };
+  }
+
+  if (typeof parsed[0] === 'string') {
+    return {
+      blocks: parsed.map((text) => ({ type: 'paragraph' as const, text: text as string })),
+      legacyTextOnlyFormat: true,
+    };
+  }
+
+  return { blocks: parsed as ReaderBlock[], legacyTextOnlyFormat: false };
 }
 
 interface ReaderContentRow {
@@ -338,11 +361,14 @@ export function getCachedReaderContent(articleId: string): CachedReaderContent |
 
   if (!row) return undefined;
 
+  const { blocks, legacyTextOnlyFormat } = parseStoredReaderBlocks(row.paragraphs);
+
   return {
     title: row.title,
-    paragraphs: JSON.parse(row.paragraphs) as string[],
+    blocks,
     readTimeMinutes: row.read_time_minutes,
     source: row.source as CachedReaderContent['source'],
+    legacyTextOnlyFormat,
   };
 }
 
@@ -365,7 +391,7 @@ export function saveReaderContent(articleId: string, content: CachedReaderConten
     .run({
       article_id: articleId,
       title: content.title,
-      paragraphs: JSON.stringify(content.paragraphs),
+      paragraphs: JSON.stringify(content.blocks),
       read_time_minutes: content.readTimeMinutes,
       source: content.source,
     });

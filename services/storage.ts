@@ -17,6 +17,7 @@ const DEFAULT_TOPIC_SCORES: Record<Topic, number> = {
   sports: 0,
   art: 0,
   gardening: 0,
+  gaming: 0,
 };
 
 export async function getPreferences(userId: string): Promise<UserPreferences> {
@@ -32,6 +33,9 @@ export async function getPreferences(userId: string): Promise<UserPreferences> {
       enabledTopics: [],
       enabledSportTags: [],
       trendingNotificationsEnabled: false,
+      blockedTopics: [],
+      blockedSportTags: [],
+      blockedKeywords: [],
       folders: [],
     };
   }
@@ -46,6 +50,9 @@ export async function getPreferences(userId: string): Promise<UserPreferences> {
     enabledTopics: parsed.enabledTopics ?? [],
     enabledSportTags: parsed.enabledSportTags ?? [],
     trendingNotificationsEnabled: parsed.trendingNotificationsEnabled ?? false,
+    blockedTopics: parsed.blockedTopics ?? [],
+    blockedSportTags: parsed.blockedSportTags ?? [],
+    blockedKeywords: parsed.blockedKeywords ?? [],
     folders: parsed.folders ?? [],
   });
 }

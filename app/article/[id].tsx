@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { ArticleReader } from '@/components/ArticleReader';
 import { useTheme } from '@/hooks/useTheme';
@@ -78,7 +78,7 @@ export default function ArticleScreen() {
           headerBackTitle: 'Back',
           contentStyle: { backgroundColor: colors.background },
           gestureEnabled: true,
-          fullScreenGestureEnabled: Platform.OS === 'ios',
+          fullScreenGestureEnabled: false,
           animationMatchesGesture: true,
           animation: 'slide_from_right',
         }}

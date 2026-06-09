@@ -2,8 +2,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { ArticleActions } from '@/components/ArticleActions';
 import { ArticleImage } from '@/components/ArticleImage';
+import { ArticleSourceMenu } from '@/components/ArticleSourceMenu';
 import { CURIOSITY_LABELS } from '@/constants/curiosities';
 import {
   ARTICLE_CARD_HERO_VIGNETTE_GRADIENT_LOCATIONS,
@@ -15,9 +15,12 @@ import { useTheme } from '@/hooks/useTheme';
 import { rememberOpenArticle } from '@/services/articleSession';
 import { Article } from '@/types';
 
+type ArticleCardVariant = 'default' | 'hero' | 'compact' | 'featured';
+
 interface ArticleCardProps {
   article: Article;
   height: number;
+  variant?: ArticleCardVariant;
   /** When false, taps are ignored (e.g. user just scrolled the feed). */
   allowPress?: () => boolean;
 }
@@ -41,14 +44,12 @@ function withAlpha(hex: string, alpha: number) {
     .padStart(2, '0');
   return `${hex}${alphaHex}`;
 }
-/** ArticleActions row (padding + buttons + icons) — keep in sync with ArticleActions styles */
-const ACTIONS_BAR_HEIGHT = 70;
 /** Keeps excerpt + CTA above the feed bottom vignette overlay */
 const VIGNETTE_TEXT_CLEARANCE = Math.round(FEED_SCROLL_PERSISTENT_GRADIENT_HEIGHT * 0.4);
 const EXCERPT_FONT_SIZE = 16;
 const EXCERPT_LINE_HEIGHT = 24;
 const EXCERPT_LINES = 2;
-/** 48px theoretical; +4px so Inter’s ascenders don’t clip the second line in a fixed slot */
+/** 48px theoretical; +4px so Inter's ascenders don't clip the second line in a fixed slot */
 const EXCERPT_SLOT_HEIGHT = EXCERPT_LINES * EXCERPT_LINE_HEIGHT + 4;
 const TITLE_LINE_HEIGHT = 32;
 const READ_MORE_LINE_HEIGHT = 22;
@@ -71,12 +72,12 @@ function getCardImageHeight(cardHeight: number): number {
   if (cardHeight <= 0) return 0;
 
   const byRatio = Math.round(cardHeight * IMAGE_HEIGHT_RATIO);
-  const byTextBudget = cardHeight - ACTIONS_BAR_HEIGHT - TEXT_BLOCK_MIN_HEIGHT;
+  const byTextBudget = cardHeight - TEXT_BLOCK_MIN_HEIGHT;
   const budgeted = Math.min(IMAGE_HEIGHT_MAX, byRatio, byTextBudget);
 
   if (budgeted >= HERO_IMAGE_MIN_HEIGHT) return budgeted;
 
-  const minCardForHero = ACTIONS_BAR_HEIGHT + HERO_IMAGE_MIN_HEIGHT + 24;
+  const minCardForHero = HERO_IMAGE_MIN_HEIGHT + 24;
   if (cardHeight >= minCardForHero) {
     return Math.min(IMAGE_HEIGHT_MAX, HERO_IMAGE_MIN_HEIGHT, byRatio);
   }
@@ -84,7 +85,154 @@ function getCardImageHeight(cardHeight: number): number {
   return Math.max(0, budgeted);
 }
 
-export function ArticleCard({ article, height, allowPress }: ArticleCardProps) {
+const OVERLAY_TITLE_COLOR = '#FFFFFF';
+const OVERLAY_META_COLOR = 'rgba(255,255,255,0.92)';
+const OVERLAY_TEXT_SHADOW = {
+  textShadowColor: 'rgba(0,0,0,0.75)',
+  textShadowOffset: { width: 0, height: 1 },
+  textShadowRadius: 6,
+} as const;
+/** Narrow bottom feather for compact/featured only — hero relies on the text panel. */
+const NEWSPAPER_OVERLAY_SCRIM_HEIGHT_RATIO = 0.28;
+const NEWSPAPER_OVERLAY_SCRIM_COLORS = [
+  'rgba(0,0,0,0)',
+  'rgba(0,0,0,0)',
+  'rgba(0,0,0,0.1)',
+  'rgba(0,0,0,0.3)',
+] as const;
+const NEWSPAPER_OVERLAY_SCRIM_LOCATIONS = [0, 0.45, 0.78, 1] as const;
+/** Localized scrim behind meta + title — keeps the rest of the hero unobstructed. */
+const NEWSPAPER_TEXT_PANEL_GRADIENT = {
+  hero: {
+    colors: ['rgba(0,0,0,0)', 'rgba(0,0,0,0.52)', 'rgba(0,0,0,0.68)'] as const,
+    locations: [0, 0.32, 1] as const,
+  },
+  featured: {
+    colors: ['rgba(0,0,0,0)', 'rgba(0,0,0,0.46)', 'rgba(0,0,0,0.58)'] as const,
+    locations: [0, 0.3, 1] as const,
+  },
+  compact: {
+    colors: ['rgba(0,0,0,0)', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.52)'] as const,
+    locations: [0, 0.28, 1] as const,
+  },
+} as const;
+
+function NewspaperOverlayCard({
+  article,
+  height,
+  variant,
+  allowPress,
+}: {
+  article: Article;
+  height: number;
+  variant: 'hero' | 'compact' | 'featured';
+  allowPress?: () => boolean;
+}) {
+  const { colors } = useTheme();
+  const router = useRouter();
+  const imageHeight = height;
+  const isHero = variant === 'hero';
+  const isFeatured = variant === 'featured';
+  const requiresSubscription = article.requiresSubscription === true;
+  const scrimHeight = Math.round(imageHeight * NEWSPAPER_OVERLAY_SCRIM_HEIGHT_RATIO);
+  const textPanelGradient = NEWSPAPER_TEXT_PANEL_GRADIENT[variant];
+
+  function openArticle() {
+    if (allowPress && !allowPress()) return;
+    rememberOpenArticle(article);
+    router.push(`/article/${article.id}`);
+  }
+
+  return (
+    <View style={[styles.card, { height, backgroundColor: colors.background }]}>
+      <View style={[styles.newspaperImageWrap, { height: imageHeight }]}>
+        <Pressable
+          onPress={openArticle}
+          accessibilityRole="button"
+          accessibilityLabel={`Read ${article.title}`}
+          style={({ pressed }) => [StyleSheet.absoluteFill, pressed && styles.pressed]}>
+          <ArticleImage
+            uri={article.imageUrl}
+            recyclingKey={article.id}
+            style={styles.image}
+            source={article.source}
+            sourceLogo={article.sourceLogo}
+            compact={!isHero && !isFeatured}
+          />
+        </Pressable>
+        {!isHero ? (
+          <LinearGradient
+            colors={[...NEWSPAPER_OVERLAY_SCRIM_COLORS]}
+            locations={[...NEWSPAPER_OVERLAY_SCRIM_LOCATIONS]}
+            style={[styles.newspaperScrim, { height: scrimHeight }]}
+            pointerEvents="none"
+          />
+        ) : null}
+        <View
+          style={[
+            styles.newspaperOverlay,
+            isHero
+              ? styles.newspaperOverlayHero
+              : isFeatured
+                ? styles.newspaperOverlayFeatured
+                : styles.newspaperOverlayCompact,
+          ]}
+          pointerEvents="box-none">
+          <Pressable
+            onPress={openArticle}
+            accessibilityRole="button"
+            accessibilityLabel={`Read ${article.title}`}
+            style={({ pressed }) => [pressed && styles.pressed]}>
+            <LinearGradient
+              colors={[...textPanelGradient.colors]}
+              locations={[...textPanelGradient.locations]}
+              style={[
+                styles.newspaperTextPanel,
+                isHero
+                  ? styles.newspaperTextPanelHero
+                  : isFeatured
+                    ? styles.newspaperTextPanelFeatured
+                    : styles.newspaperTextPanelCompact,
+              ]}>
+              <View style={styles.newspaperMetaRow}>
+                <ArticleSourceMenu article={article} bottomOffset={TAB_BAR_HEIGHT} tone="onImage" />
+                <View style={styles.metaEnd}>
+                  {requiresSubscription ? (
+                    <View style={styles.newspaperSubBadge}>
+                      <Text style={styles.newspaperSubBadgeText}>May need subscription</Text>
+                    </View>
+                  ) : null}
+                  <Text style={styles.newspaperMeta}>{formatDate(article.publishedAt)}</Text>
+                </View>
+              </View>
+              <Text
+                style={[
+                  styles.newspaperTitle,
+                  isHero
+                    ? styles.newspaperTitleHero
+                    : isFeatured
+                      ? styles.newspaperTitleFeatured
+                      : styles.newspaperTitleCompact,
+                ]}
+                numberOfLines={isHero ? 4 : isFeatured ? 4 : 3}
+                ellipsizeMode="tail">
+                {article.title}
+              </Text>
+            </LinearGradient>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+export function ArticleCard({ article, height, variant = 'default', allowPress }: ArticleCardProps) {
+  if (variant === 'hero' || variant === 'compact' || variant === 'featured') {
+    return (
+      <NewspaperOverlayCard article={article} height={height} variant={variant} allowPress={allowPress} />
+    );
+  }
+
   const { colors } = useTheme();
   const router = useRouter();
   const imageHeight = getCardImageHeight(height);
@@ -100,34 +248,36 @@ export function ArticleCard({ article, height, allowPress }: ArticleCardProps) {
 
   return (
     <View style={[styles.card, { height, backgroundColor: colors.background }]}>
-      <Pressable
-        onPress={openArticle}
-        accessibilityRole="button"
-        accessibilityLabel={`Read ${article.title}`}
-        style={({ pressed }) => [styles.content, pressed && styles.pressed]}>
-        <View style={[styles.imageWrap, { height: imageHeight }]}>
-          <ArticleImage
-            uri={article.imageUrl}
-            recyclingKey={article.id}
-            style={styles.image}
-            source={article.source}
-            sourceLogo={article.sourceLogo}
-          />
-          <LinearGradient
-            colors={[
-              withAlpha(colors.background, 0),
-              withAlpha(colors.background, 0),
-              withAlpha(colors.background, 0.75),
-              colors.background,
-            ]}
-            locations={[...ARTICLE_CARD_HERO_VIGNETTE_GRADIENT_LOCATIONS]}
-            style={[styles.imageGradient, { height: heroVignetteHeight }]}
-          />
-        </View>
+      <View style={styles.content}>
+        <Pressable
+          onPress={openArticle}
+          accessibilityRole="button"
+          accessibilityLabel={`Read ${article.title}`}
+          style={({ pressed }) => [styles.heroPressable, pressed && styles.pressed]}>
+          <View style={[styles.imageWrap, { height: imageHeight }]}>
+            <ArticleImage
+              uri={article.imageUrl}
+              recyclingKey={article.id}
+              style={styles.image}
+              source={article.source}
+              sourceLogo={article.sourceLogo}
+            />
+            <LinearGradient
+              colors={[
+                withAlpha(colors.background, 0),
+                withAlpha(colors.background, 0),
+                withAlpha(colors.background, 0.75),
+                colors.background,
+              ]}
+              locations={[...ARTICLE_CARD_HERO_VIGNETTE_GRADIENT_LOCATIONS]}
+              style={[styles.imageGradient, { height: heroVignetteHeight }]}
+            />
+          </View>
+        </Pressable>
 
         <View style={[styles.textBlock, { paddingBottom: VIGNETTE_TEXT_CLEARANCE }]}>
           <View style={styles.metaRow}>
-            <Text style={[styles.source, { color: colors.accent }]}>{article.source}</Text>
+            <ArticleSourceMenu article={article} bottomOffset={TAB_BAR_HEIGHT} />
             <View style={styles.metaEnd}>
               {requiresSubscription ? (
                 <View style={[styles.subBadge, { backgroundColor: colors.border }]}>
@@ -142,41 +292,45 @@ export function ArticleCard({ article, height, allowPress }: ArticleCardProps) {
             </View>
           </View>
 
-          {article.topics.length > 0 ? (
-            <View style={styles.topics}>
-              {article.topics.map((topic) => (
-                <View key={topic} style={[styles.topicPill, { backgroundColor: colors.border }]}>
-                  <Text style={[styles.topicText, { color: colors.textSecondary }]}>
-                    {CURIOSITY_LABELS[topic]}
-                  </Text>
-                </View>
-              ))}
+          <Pressable
+            onPress={openArticle}
+            accessibilityRole="button"
+            accessibilityLabel={`Read ${article.title}`}
+            style={({ pressed }) => [styles.tappable, pressed && styles.pressed]}>
+            {article.topics.length > 0 ? (
+              <View style={styles.topics}>
+                {article.topics.map((topic) => (
+                  <View key={topic} style={[styles.topicPill, { backgroundColor: colors.border }]}>
+                    <Text style={[styles.topicText, { color: colors.textSecondary }]}>
+                      {CURIOSITY_LABELS[topic]}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            <View style={styles.titleRegion}>
+              <Text style={[styles.title, { color: colors.text }]}>{article.title}</Text>
             </View>
-          ) : null}
 
-          <View style={styles.titleRegion}>
-            <Text style={[styles.title, { color: colors.text }]}>{article.title}</Text>
-          </View>
+            {hasExcerpt ? (
+              <View style={styles.excerptSlot}>
+                <Text
+                  style={[styles.excerpt, { color: colors.textSecondary }]}
+                  numberOfLines={EXCERPT_LINES}
+                  ellipsizeMode="tail"
+                  allowFontScaling={false}>
+                  {article.excerpt}
+                </Text>
+              </View>
+            ) : null}
 
-          {hasExcerpt ? (
-            <View style={styles.excerptSlot}>
-              <Text
-                style={[styles.excerpt, { color: colors.textSecondary }]}
-                numberOfLines={EXCERPT_LINES}
-                ellipsizeMode="tail"
-                allowFontScaling={false}>
-                {article.excerpt}
-              </Text>
-            </View>
-          ) : null}
+            <View style={styles.textBlockSpacer} />
 
-          <View style={styles.textBlockSpacer} />
-
-          <Text style={[styles.readMore, { color: colors.accent }]}>Continue reading</Text>
+            <Text style={[styles.readMore, { color: colors.accent }]}>Continue reading</Text>
+          </Pressable>
         </View>
-      </Pressable>
-
-      <ArticleActions article={article} modalBottomOffset={TAB_BAR_HEIGHT} />
+      </View>
     </View>
   );
 }
@@ -189,6 +343,13 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     minHeight: 0,
+  },
+  tappable: {
+    flex: 1,
+    minHeight: 0,
+  },
+  heroPressable: {
+    flexShrink: 0,
   },
   pressed: {
     opacity: 0.92,
@@ -248,12 +409,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 0.2,
   },
-  source: {
-    fontFamily: 'InterSemiBold',
-    fontSize: 13,
-    letterSpacing: 0.3,
-    flexShrink: 1,
-  },
   meta: {
     fontFamily: 'Inter',
     fontSize: 12,
@@ -297,5 +452,102 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: READ_MORE_LINE_HEIGHT,
     marginTop: 4,
+  },
+  newspaperImageWrap: {
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  newspaperScrim: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  newspaperOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 20,
+  },
+  newspaperOverlayHero: {
+    paddingBottom: 16,
+  },
+  newspaperOverlayCompact: {
+    paddingBottom: 12,
+    paddingHorizontal: 12,
+  },
+  newspaperOverlayFeatured: {
+    paddingBottom: 14,
+    paddingHorizontal: 20,
+  },
+  newspaperTextPanel: {
+    borderRadius: 10,
+    overflow: 'hidden',
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    paddingTop: 18,
+  },
+  newspaperTextPanelHero: {
+    paddingTop: 22,
+    paddingBottom: 16,
+  },
+  newspaperTextPanelFeatured: {
+    paddingTop: 18,
+    paddingBottom: 14,
+  },
+  newspaperTextPanelCompact: {
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingTop: 16,
+    paddingBottom: 12,
+  },
+  newspaperMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+    gap: 8,
+  },
+  newspaperMeta: {
+    fontFamily: 'Inter',
+    fontSize: 11,
+    color: OVERLAY_META_COLOR,
+    flexShrink: 0,
+    ...OVERLAY_TEXT_SHADOW,
+  },
+  newspaperSubBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
+  newspaperSubBadgeText: {
+    fontFamily: 'InterMedium',
+    fontSize: 10,
+    letterSpacing: 0.2,
+    color: OVERLAY_META_COLOR,
+    ...OVERLAY_TEXT_SHADOW,
+  },
+  newspaperTitle: {
+    fontFamily: 'LoraBold',
+    color: OVERLAY_TITLE_COLOR,
+    letterSpacing: -0.3,
+    flexShrink: 0,
+    ...OVERLAY_TEXT_SHADOW,
+    textShadowColor: 'rgba(0,0,0,0.85)',
+    textShadowRadius: 8,
+  },
+  newspaperTitleHero: {
+    fontSize: 26,
+    lineHeight: 32,
+  },
+  newspaperTitleCompact: {
+    fontSize: 15,
+    lineHeight: 19,
+  },
+  newspaperTitleFeatured: {
+    fontSize: 20,
+    lineHeight: 26,
   },
 });

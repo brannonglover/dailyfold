@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 
-import { upgradeFeedImageUrl } from './normalize';
+import { normalizeFeedItem, upgradeFeedImageUrl } from './normalize';
+import type { FeedConfig } from './types';
 
 function run(label: string, fn: () => void) {
   try {
@@ -12,12 +13,56 @@ function run(label: string, fn: () => void) {
   }
 }
 
-run('Guardian width=140 → 960', () => {
+run('Guardian signed URL keeps original width', () => {
   const input =
     'https://i.guim.co.uk/img/media/3fa5549e324cf27a4b2597905a7f1e3c3b9b825f/0_0_3524_2818/master/3524.jpg?width=140&quality=85&auto=format&fit=max&s=abc';
   const out = upgradeFeedImageUrl(input);
+  assert.equal(out, input);
+});
+
+run('Guardian unsigned URL still upgrades small width', () => {
+  const input =
+    'https://i.guim.co.uk/img/media/3fa5549e324cf27a4b2597905a7f1e3c3b9b825f/0_0_3524_2818/master/3524.jpg?width=140&quality=85&auto=format&fit=max';
+  const out = upgradeFeedImageUrl(input);
   assert.match(out, /width=960/);
   assert.doesNotMatch(out, /width=140/);
+});
+
+run('Guardian RSS picks largest signed media:content', () => {
+  const feed: FeedConfig = {
+    id: 'guardian',
+    url: 'https://www.theguardian.com/world/rss',
+    source: 'The Guardian',
+    topics: ['world', 'politics'],
+    primaryTopic: 'world',
+  };
+
+  const normalized = normalizeFeedItem(
+    {
+      title: 'Test story',
+      link: 'https://www.theguardian.com/world/2026/jun/09/test-story',
+      mediaContent: [
+        {
+          $: {
+            width: '140',
+            url: 'https://i.guim.co.uk/img/media/abc/0_0_1200_800/master/1200.jpg?width=140&quality=85&auto=format&fit=max&s=small',
+          },
+        },
+        {
+          $: {
+            width: '700',
+            url: 'https://i.guim.co.uk/img/media/abc/0_0_1200_800/master/1200.jpg?width=700&quality=85&auto=format&fit=max&s=large',
+          },
+        },
+      ],
+    },
+    feed,
+  );
+
+  assert.equal(
+    normalized?.article.imageUrl,
+    'https://i.guim.co.uk/img/media/abc/0_0_1200_800/master/1200.jpg?width=700&quality=85&auto=format&fit=max&s=large',
+  );
 });
 
 run('BBC ichef 240 → 976', () => {

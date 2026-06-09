@@ -11,7 +11,8 @@ export type Topic =
   | 'world'
   | 'sports'
   | 'art'
-  | 'gardening';
+  | 'gardening'
+  | 'gaming';
 
 export type { SportTag } from '@/catalog/sports';
 
@@ -78,5 +79,11 @@ export interface UserPreferences {
   enabledSportTags: SportTag[];
   /** Local alerts for hot stories in the trending window. */
   trendingNotificationsEnabled: boolean;
+  /** Topics hidden via "Not for me" on an article. */
+  blockedTopics: Topic[];
+  /** Sport/league tags hidden via "Not for me". */
+  blockedSportTags: SportTag[];
+  /** Title keywords hidden via "Show less like this". */
+  blockedKeywords: string[];
   folders: LikedFolder[];
 }

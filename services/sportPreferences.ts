@@ -3,7 +3,7 @@ import { Article, SportTag, Topic } from '@/types';
 
 import { isAllTopicsEnabled } from './topicPreferences';
 
-function articleSportTags(article: Article): SportTag[] {
+export function articleSportTags(article: Article): SportTag[] {
   if (!article.topics.includes('sports')) return [];
   const text = `${article.title} ${article.excerpt}`;
   // Re-derive tags from content so stale broad source defaults do not leak into filters.

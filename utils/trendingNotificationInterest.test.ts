@@ -16,6 +16,9 @@ function basePrefs(overrides: Partial<UserPreferences> = {}): UserPreferences {
     enabledTopics: [],
     enabledSportTags: [],
     trendingNotificationsEnabled: true,
+    blockedTopics: [],
+    blockedSportTags: [],
+    blockedKeywords: [],
     folders: [],
     ...overrides,
   };

@@ -19,7 +19,8 @@ export type Topic =
   | 'world'
   | 'sports'
   | 'art'
-  | 'gardening';
+  | 'gardening'
+  | 'gaming';
 
 export interface SourceCatalogEntry {
   id: string;
@@ -1272,6 +1273,101 @@ export const SOURCE_CATALOG: SourceCatalogEntry[] = [
     primaryTopic: 'art',
     topics: ['art', 'culture'],
     logoDomain: 'smithsonianmag.com',
+  },
+
+  // —— Video games ——
+  {
+    id: 'ign',
+    url: 'https://feeds.ign.com/ign/all',
+    name: 'IGN',
+    description: 'Game news, reviews, and entertainment',
+    primaryTopic: 'gaming',
+    topics: ['gaming'],
+    logoDomain: 'ign.com',
+  },
+  {
+    id: 'kotaku',
+    url: 'https://kotaku.com/rss',
+    name: 'Kotaku',
+    description: 'Video game culture, news, and opinion',
+    primaryTopic: 'gaming',
+    topics: ['gaming', 'culture'],
+  },
+  {
+    id: 'polygon',
+    url: 'https://www.polygon.com/rss/index.xml',
+    name: 'Polygon',
+    description: 'Games, entertainment, and guides',
+    primaryTopic: 'gaming',
+    topics: ['gaming', 'culture'],
+  },
+  {
+    id: 'eurogamer',
+    url: 'https://www.eurogamer.net/feed',
+    name: 'Eurogamer',
+    description: 'Game news, reviews, and features',
+    primaryTopic: 'gaming',
+    topics: ['gaming'],
+  },
+  {
+    id: 'rock-paper-shotgun',
+    url: 'https://www.rockpapershotgun.com/feed',
+    name: 'Rock Paper Shotgun',
+    description: 'PC gaming news, reviews, and analysis',
+    primaryTopic: 'gaming',
+    topics: ['gaming'],
+    logoDomain: 'rockpapershotgun.com',
+  },
+  {
+    id: 'pc-gamer',
+    url: 'https://www.pcgamer.com/rss/',
+    name: 'PC Gamer',
+    description: 'PC games, hardware, and esports',
+    primaryTopic: 'gaming',
+    topics: ['gaming'],
+    logoDomain: 'pcgamer.com',
+  },
+  {
+    id: 'gamesradar',
+    url: 'https://www.gamesradar.com/feeds.xml',
+    name: 'GamesRadar+',
+    description: 'Game news, reviews, and upcoming releases',
+    primaryTopic: 'gaming',
+    topics: ['gaming'],
+  },
+  {
+    id: 'gamespot',
+    url: 'https://www.gamespot.com/feeds/news/',
+    name: 'GameSpot',
+    description: 'Game news, reviews, and videos',
+    primaryTopic: 'gaming',
+    topics: ['gaming'],
+  },
+  {
+    id: 'nintendolife',
+    url: 'https://www.nintendolife.com/feeds/latest',
+    name: 'Nintendo Life',
+    description: 'Nintendo news, reviews, and community',
+    primaryTopic: 'gaming',
+    topics: ['gaming'],
+  },
+  {
+    id: 'push-square',
+    url: 'https://www.pushsquare.com/feeds/latest',
+    name: 'Push Square',
+    description: 'PlayStation news, reviews, and guides',
+    primaryTopic: 'gaming',
+    topics: ['gaming'],
+    logoDomain: 'pushsquare.com',
+  },
+  {
+    id: 'gamesbeat',
+    url: 'https://gamesbeat.com/feed/',
+    name: 'GamesBeat',
+    description: 'Game industry news and business analysis',
+    primaryTopic: 'gaming',
+    topics: ['gaming', 'business'],
+    logoDomain: 'gamesbeat.com',
   },
 
   // —— Gardening ——

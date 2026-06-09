@@ -14,7 +14,10 @@ interface ArticleActionsProps {
   modalBottomOffset?: number;
 }
 
-export function ArticleActions({ article, modalBottomOffset }: ArticleActionsProps) {
+export function ArticleActions({
+  article,
+  modalBottomOffset,
+}: ArticleActionsProps) {
   const { colors } = useTheme();
   const { isLiked, toggleLike } = usePreferences();
   const liked = isLiked(article.id);
@@ -85,6 +88,7 @@ export function ArticleActions({ article, modalBottomOffset }: ArticleActionsPro
             {liked ? 'Share' : 'Share link'}
           </Text>
         </Pressable>
+
       </View>
 
       <FolderPickerModal
@@ -100,13 +104,16 @@ export function ArticleActions({ article, modalBottomOffset }: ArticleActionsPro
 const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 24,
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 20,
     paddingVertical: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   actionButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: 88,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

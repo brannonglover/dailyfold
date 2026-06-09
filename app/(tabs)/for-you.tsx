@@ -8,6 +8,7 @@ import { getPersonalizedFeed, hasLikedArticles } from '@/services/recommendation
 import { isAllSourcesEnabled } from '@/services/sourcePreferences';
 import { getForYouEmptyMessage } from '@/utils/feedEmptyMessage';
 import { orderPersonalizedFeed } from '@/utils/feedOrdering';
+import { mergePaginatedDisplayFeed } from '@/utils/mergeDisplayFeed';
 import { Article } from '@/types';
 
 export default function ForYouScreen() {
@@ -25,6 +26,8 @@ export default function ForYouScreen() {
     error,
     notice,
     usingDemoArticles,
+    pendingCount,
+    dismissPendingArticles,
     refresh,
   } = useArticles();
 
@@ -52,8 +55,7 @@ export default function ForYouScreen() {
       setDisplayArticles((prev) => {
         const seen = new Set(prev.map((a) => a.id));
         const newOnly = ranked.filter((a) => !seen.has(a.id));
-        if (newOnly.length === 0) return prev;
-        return [...orderPersonalizedFeed(newOnly), ...prev];
+        return mergePaginatedDisplayFeed(prev, newOnly, ranked, orderPersonalizedFeed);
       });
     } else if (prevRawLengthRef.current > 0) {
       setDisplayArticles((prev) => {
@@ -117,6 +119,8 @@ export default function ForYouScreen() {
       error={error}
       notice={notice}
       onRefresh={refresh}
+      pendingCount={pendingCount}
+      onDismissPending={dismissPendingArticles}
       headerExtra={<FeedTopicFilterBar />}
     />
   );

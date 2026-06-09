@@ -1,24 +1,27 @@
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { ScrollView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ArticleActions } from '@/components/ArticleActions';
 import { ArticleImage } from '@/components/ArticleImage';
+import { ArticleSourceMenu } from '@/components/ArticleSourceMenu';
 import { SubscriptionBanner } from '@/components/SubscriptionBanner';
 import { useTheme } from '@/hooks/useTheme';
 import { fetchArticleReaderContent } from '@/services/articleContent';
+import { ARTICLE_NO_IMAGE, isArticlePlaceholderImageUrl, resolveArticleImageUrl } from '@/constants/images';
 import { Article } from '@/types';
-import { ArticleReaderContent } from '@/types/articleContent';
-import { resolveReaderParagraphLayout } from '@/utils/articleParagraphs';
+import { ArticleReaderBlock, ArticleReaderContent } from '@/types/articleContent';
+import { resolveReaderBlockLayout } from '@/utils/articleParagraphs';
 import { hasOpenablePublisherUrl, openPublisherArticle } from '@/utils/openPublisherBrowser';
 
 interface ArticleReaderProps {
@@ -31,6 +34,55 @@ function formatDate(iso: string) {
     day: 'numeric',
     year: 'numeric',
   });
+}
+
+function ReaderBlockView({
+  block,
+  colors,
+}: {
+  block: ArticleReaderBlock;
+  colors: ReturnType<typeof useTheme>['colors'];
+}) {
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    setLoadFailed(false);
+  }, [block.type === 'image' ? block.url : null]);
+
+  if (block.type === 'paragraph') {
+    return (
+      <Text style={[styles.paragraph, { color: colors.text }]}>
+        {block.text}
+      </Text>
+    );
+  }
+
+  const uri = resolveArticleImageUrl(block.url);
+  if (loadFailed || uri === ARTICLE_NO_IMAGE || isArticlePlaceholderImageUrl(uri)) {
+    return null;
+  }
+
+  return (
+    <View style={styles.inlineImageBlock}>
+      <View style={[styles.inlineImageWrap, { backgroundColor: colors.surface }]}>
+        <Image
+          source={{ uri }}
+          style={styles.inlineImage}
+          contentFit="contain"
+          transition={200}
+          cachePolicy="memory-disk"
+          accessibilityRole="image"
+          accessibilityLabel={block.alt ?? block.caption ?? 'Article image'}
+          onError={() => setLoadFailed(true)}
+        />
+      </View>
+      {block.caption ? (
+        <Text style={[styles.inlineImageCaption, { color: colors.textSecondary }]}>
+          {block.caption}
+        </Text>
+      ) : null}
+    </View>
+  );
 }
 
 export function ArticleReader({ article }: ArticleReaderProps) {
@@ -65,25 +117,28 @@ export function ArticleReader({ article }: ArticleReaderProps) {
     };
   }, [article.id]);
 
-  const extractedParagraphs =
-    readerContent && readerContent.paragraphs.length > 0 ? readerContent.paragraphs : null;
-  const { feedLede, bodyParagraphs } = resolveReaderParagraphLayout({
+  const extractedBlocks =
+    readerContent && readerContent.blocks.length > 0 ? readerContent.blocks : null;
+  const { feedLede, bodyBlocks } = resolveReaderBlockLayout({
     article,
-    extractedParagraphs,
+    extractedBlocks,
   });
   const feedLedeText =
     isLoadingContent && article.excerpt.trim() ? article.excerpt.trim() : feedLede;
   const showFeedLede = !!feedLedeText;
-  const paragraphs = bodyParagraphs;
-  const hasReadableBody = paragraphs.length > 0;
+  const hasReadableBody = bodyBlocks.length > 0;
   const showLoadMoreError = contentError && !isLoadingContent && !hasReadableBody;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]}
         showsVerticalScrollIndicator={false}
-        bounces
-        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
+        showsHorizontalScrollIndicator={false}
+        alwaysBounceHorizontal={false}
+        directionalLockEnabled
+        bounces>
         <View style={styles.imageWrap}>
           <ArticleImage
             uri={article.imageUrl}
@@ -99,7 +154,7 @@ export function ArticleReader({ article }: ArticleReaderProps) {
 
         <View style={styles.content}>
           <View style={styles.metaRow}>
-            <Text style={[styles.source, { color: colors.accent }]}>{article.source}</Text>
+            <ArticleSourceMenu article={article} />
             <Text style={[styles.meta, { color: colors.textSecondary }]}>
               {formatDate(article.publishedAt)}
             </Text>
@@ -163,10 +218,12 @@ export function ArticleReader({ article }: ArticleReaderProps) {
           ) : null}
 
           {!isLoadingContent
-            ? paragraphs.map((paragraph, index) => (
-                <Text key={index} style={[styles.paragraph, { color: colors.text }]}>
-                  {paragraph}
-                </Text>
+            ? bodyBlocks.map((block, index) => (
+                <ReaderBlockView
+                  key={`${block.type}:${index}`}
+                  block={block}
+                  colors={colors}
+                />
               ))
             : null}
 
@@ -193,6 +250,14 @@ export function ArticleReader({ article }: ArticleReaderProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    overflow: 'hidden',
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    width: '100%',
   },
   imageWrap: {
     height: 280,
@@ -210,8 +275,11 @@ const styles = StyleSheet.create({
     height: 100,
   },
   content: {
+    width: '100%',
+    maxWidth: '100%',
     paddingHorizontal: 24,
     paddingTop: 8,
+    overflow: 'hidden',
   },
   metaRow: {
     flexDirection: 'row',
@@ -305,6 +373,32 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 30,
     marginBottom: 20,
+    width: '100%',
+    flexShrink: 1,
+  },
+  inlineImageBlock: {
+    marginBottom: 24,
+    gap: 8,
+    width: '100%',
+    maxWidth: '100%',
+  },
+  inlineImageWrap: {
+    width: '100%',
+    maxWidth: '100%',
+    minHeight: 180,
+    maxHeight: 360,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  inlineImage: {
+    width: '100%',
+    height: 280,
+  },
+  inlineImageCaption: {
+    fontFamily: 'Inter',
+    fontSize: 13,
+    lineHeight: 18,
+    fontStyle: 'italic',
   },
   publisherLink: {
     flexDirection: 'row',

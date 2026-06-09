@@ -10,6 +10,15 @@ export const TAB_BAR_PADDING_TOP = 8;
 /** Peek fraction of feed viewport to reveal the next card edge */
 export const FEED_SCROLL_PEEK_RATIO = 0.03;
 
+/** Newspaper trial: hero card height as a fraction of the feed viewport */
+export const NEWSPAPER_HERO_HEIGHT_RATIO = 0.58;
+
+/** Newspaper trial: fixed height for below-the-fold compact story cards */
+export const NEWSPAPER_COMPACT_CARD_HEIGHT = 220;
+
+/** Newspaper trial: full-width featured/trending story cards below the hero */
+export const NEWSPAPER_FEATURED_CARD_HEIGHT = 280;
+
 /** Height of the persistent bottom vignette on feed cards */
 export const FEED_SCROLL_PERSISTENT_GRADIENT_HEIGHT = 64;
 

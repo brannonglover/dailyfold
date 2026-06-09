@@ -18,6 +18,7 @@ const TOPICS: Topic[] = [
   'sports',
   'art',
   'gardening',
+  'gaming',
 ];
 
 /** Client renders an in-app placeholder when empty. */
@@ -25,6 +26,41 @@ const PLACEHOLDER_IMAGE = '';
 
 function stripHtml(html: string): string {
   return stripAndDecodeHtml(html);
+}
+
+function extractHtmlParagraphTexts(html: string): string[] {
+  const paragraphs: string[] = [];
+  const pattern = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+  for (const match of html.matchAll(pattern)) {
+    const text = stripHtml(match[1] ?? '');
+    if (text) paragraphs.push(text);
+  }
+  return paragraphs;
+}
+
+function plainParagraphTexts(text: string): string[] {
+  return text
+    .split(/\n+/)
+    .map((part) => stripHtml(part))
+    .filter(Boolean);
+}
+
+/** RSS items often ship a standfirst plus teaser paragraphs; keep them separate. */
+function feedItemParagraphs(item: {
+  content?: string;
+  summary?: string;
+  contentSnippet?: string;
+}): string[] {
+  const html = item.content ?? item.summary ?? '';
+  const fromHtml = html ? extractHtmlParagraphTexts(html) : [];
+  if (fromHtml.length > 0) return fromHtml;
+
+  const snippet = item.contentSnippet ?? '';
+  const fromSnippet = snippet ? plainParagraphTexts(snippet) : [];
+  if (fromSnippet.length > 0) return fromSnippet;
+
+  const plain = stripHtml(html || snippet);
+  return plain ? [plain] : [];
 }
 
 function hashId(input: string): string {
@@ -73,13 +109,28 @@ function isImageMedia(attrs: { medium?: string; type?: string; url?: string }): 
 function isDisplayableImageUrl(url: string): boolean {
   if (/\.m3u8(\?|$)/i.test(url)) return false;
   if (/\.(mp4|webm|mov|avi)(\?|$)/i.test(url)) return false;
-  return /\.(jpe?g|png|gif|webp|avif|bmp|svg)(\?|$)/i.test(url) || /\/image\//i.test(url);
+  if (/\.(jpe?g|png|gif|webp|avif|bmp|svg)(\?|$)/i.test(url) || /\/image\//i.test(url)) {
+    return true;
+  }
+  if (/espncdn\.com/i.test(url)) {
+    return (
+      /\/combiner\/i\?/i.test(url) ||
+      /\/photo\//i.test(url) ||
+      /\/media\/motion\//i.test(url)
+    );
+  }
+  return false;
 }
 
 /** Bump common RSS/CDN thumbnail params so feed heroes are not upscaled from tiny sources. */
 export function upgradeFeedImageUrl(url: string): string {
   try {
     const parsed = new URL(url);
+
+    // Guardian CDN signs URLs per width; changing query params without a new signature returns 401.
+    if (parsed.hostname.endsWith('guim.co.uk') && parsed.searchParams.has('s')) {
+      return url;
+    }
 
     if (parsed.hostname.endsWith('guim.co.uk')) {
       const width = Number(parsed.searchParams.get('width'));
@@ -260,6 +311,10 @@ function inferExtraTopics(text: string, base: Topic[], feedPrimaryTopic?: Topic)
       'sports',
     ],
     [/\b(garden|gardening|landscap|horticultur|backyard|perennial|vegetable patch)\b/, 'gardening'],
+    [
+      /\b(video game|video games|gaming|playstation|xbox|nintendo|steam deck|steam|esports|e-sports|multiplayer|single-player|dlc|gameplay|open world|indie game|game developer|game studio|fps|rpg|mmorpg|battle royale|speedrun|game release|game trailer|patch notes|game update)\b/,
+      'gaming',
+    ],
     [/\b(art|artist|gallery|museum|painting|sculpture|exhibition|curator)\b/, 'art'],
     [/\b(ai|artificial intelligence|machine learning|software|tech)\b/, 'technology'],
     [/\b(health|medical|medicine|wellness|diet)\b/, 'health'],
@@ -349,11 +404,15 @@ export function normalizeFeedItem(
   const title = decodeFeedText(item.title);
   if (!url || !title) return null;
 
-  const rawBody = item.content ?? item.summary ?? item.contentSnippet ?? '';
-  const plain = stripHtml(rawBody || item.contentSnippet || '');
-  const excerptSource = item.contentSnippet ?? item.summary ?? plain;
-  const excerpt = stripHtml(excerptSource).slice(0, 280);
-  const body = plain.slice(0, 8000) || excerpt;
+  const paragraphs = feedItemParagraphs(item);
+  const fallbackPlain = stripHtml(
+    item.content ?? item.summary ?? item.contentSnippet ?? '',
+  );
+  const excerpt = (paragraphs[0] ?? fallbackPlain).slice(0, 280);
+  const body = (paragraphs.length > 0 ? paragraphs.join('\n\n') : fallbackPlain).slice(
+    0,
+    8000,
+  ) || excerpt;
 
   const feedPublishedAt = parseFeedPublishedAt(item.isoDate ?? item.pubDate);
   // Placeholder for inserts without a feed date; upsert uses SQLite now and preserves on re-ingest.

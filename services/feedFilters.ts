@@ -1,4 +1,5 @@
 import { FALLBACK_SOURCES } from '@/data/sources';
+import { filterArticlesByBlocks } from '@/services/blockPreferences';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import {
   buildSourcePrimaryTopicMap,
@@ -7,6 +8,12 @@ import {
 import { filterArticlesBySportTags } from '@/services/sportPreferences';
 import { filterArticlesByTopics, isAllTopicsEnabled } from '@/services/topicPreferences';
 import { Article, FeedSource, UserPreferences } from '@/types';
+import { hasRealHeroImage } from '@/utils/articleStoryMatch';
+
+/** Drop feed rows without a real hero image (after story fallbacks at fetch). */
+export function filterArticlesWithRealHeroImage(articles: Article[]): Article[] {
+  return articles.filter(hasRealHeroImage);
+}
 
 /**
  * Client-side feed filter pipeline.
@@ -18,18 +25,23 @@ export function applyFeedFilters(
   preferences: UserPreferences | null | undefined,
   sources: FeedSource[],
 ): Article[] {
-  if (!preferences) return articles;
+  let result = articles;
 
-  const prefs = normalizeFeedPreferences(preferences);
-  if (isAllTopicsEnabled(prefs.enabledTopics)) {
-    return articles;
+  if (preferences) {
+    const prefs = normalizeFeedPreferences(preferences);
+    const catalogSources = sources.length > 0 ? sources : FALLBACK_SOURCES;
+
+    if (!isAllTopicsEnabled(prefs.enabledTopics)) {
+      result = filterArticlesBySources(result, catalogSources, prefs.enabledSourceIds);
+      const sourcePrimaryByName = buildSourcePrimaryTopicMap(catalogSources);
+      result = filterArticlesByTopics(result, prefs.enabledTopics, sourcePrimaryByName);
+      result = filterArticlesBySportTags(result, prefs.enabledSportTags, prefs.enabledTopics);
+    }
+
+    result = filterArticlesByBlocks(result, prefs);
   }
 
-  const catalogSources = sources.length > 0 ? sources : FALLBACK_SOURCES;
-  let result = filterArticlesBySources(articles, catalogSources, prefs.enabledSourceIds);
-  const sourcePrimaryByName = buildSourcePrimaryTopicMap(catalogSources);
-  result = filterArticlesByTopics(result, prefs.enabledTopics, sourcePrimaryByName);
-  return filterArticlesBySportTags(result, prefs.enabledSportTags, prefs.enabledTopics);
+  return filterArticlesWithRealHeroImage(result);
 }
 
 /**
@@ -54,5 +66,6 @@ export function applyTrendingNotificationFilters(
 
   const sourcePrimaryByName = buildSourcePrimaryTopicMap(catalogSources);
   result = filterArticlesByTopics(result, prefs.enabledTopics, sourcePrimaryByName);
-  return filterArticlesBySportTags(result, prefs.enabledSportTags, prefs.enabledTopics);
+  result = filterArticlesBySportTags(result, prefs.enabledSportTags, prefs.enabledTopics);
+  return filterArticlesByBlocks(result, prefs);
 }

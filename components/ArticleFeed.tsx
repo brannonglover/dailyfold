@@ -28,11 +28,24 @@ import { ArticleCard } from '@/components/ArticleCard';
 import { FeedBottomVignette } from '@/components/FeedBottomVignette';
 import { FeedEndStretch } from '@/components/FeedEndStretch';
 import { FeedHeader } from '@/components/FeedHeader';
-import { FEED_SCROLL_PEEK_RATIO } from '@/constants/Layout';
+import { FeedPendingBanner } from '@/components/FeedPendingBanner';
+import {
+  FEED_SCROLL_PEEK_RATIO,
+  NEWSPAPER_COMPACT_CARD_HEIGHT,
+  NEWSPAPER_FEATURED_CARD_HEIGHT,
+  NEWSPAPER_HERO_HEIGHT_RATIO,
+} from '@/constants/Layout';
 import { useTheme } from '@/hooks/useTheme';
 import { Article } from '@/types';
+import {
+  buildNewspaperFeaturedIds,
+  groupNewspaperFeedRows,
+  NewspaperFeedRow,
+} from '@/utils/newspaperFeedRows';
 
 const AnimatedFlatList = Animated.createAnimatedComponent(FlatList<Article>);
+
+export type ArticleFeedLayout = 'snap' | 'newspaper';
 
 interface ArticleFeedProps {
   articles: Article[];
@@ -44,8 +57,13 @@ interface ArticleFeedProps {
   notice?: string | null;
   refreshControl?: React.ReactElement<RefreshControlProps>;
   headerExtra?: React.ReactNode;
+  pendingCount?: number;
+  pendingRefreshHint?: string;
+  onDismissPending?: () => void;
   onLoadMore?: () => void;
   isLoadingMore?: boolean;
+  /** Visual trial: hero story above the fold, compact cards below */
+  layout?: ArticleFeedLayout;
 }
 
 function FeedStatusBanner({
@@ -124,8 +142,12 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     notice,
     refreshControl,
     headerExtra,
+    pendingCount = 0,
+    pendingRefreshHint,
+    onDismissPending,
     onLoadMore,
     isLoadingMore,
+    layout = 'snap',
   },
   ref,
 ) {
@@ -138,6 +160,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   const pendingScrollToTopRef = useRef(false);
   const scrollCompleteRef = useRef<(() => void) | null>(null);
   const listRef = useAnimatedRef<FlatList<Article>>();
+  const newspaperListRef = useRef<FlatList<NewspaperFeedRow>>(null);
   const emptyScrollRef = useRef<ScrollView>(null);
   const scrollY = useSharedValue(0);
   const isAnimatingScroll = useSharedValue(false);
@@ -145,7 +168,11 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   const maxScrollOffset = useSharedValue(0);
   const endPullDistance = useSharedValue(0);
   const feedScrollRef = useRef({ dragging: false, endedAt: 0 });
-  const loadMoreGateRef = useRef(false);
+  const loadMoreTriggeredAtLengthRef = useRef(0);
+  const prevPendingCountRef = useRef(0);
+  const pendingScrollBaselineRef = useRef(0);
+  const userInitiatedScrollRef = useRef(false);
+  const emptyPendingDismissedRef = useRef(false);
 
   const allowCardPress = useCallback(() => {
     if (feedScrollRef.current.dragging) return false;
@@ -154,7 +181,20 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
   const onFeedScrollBeginDrag = useCallback(() => {
     feedScrollRef.current.dragging = true;
-  }, []);
+    if (pendingCount > 0) {
+      userInitiatedScrollRef.current = true;
+    }
+  }, [pendingCount]);
+
+  const onEmptyFeedScroll = useCallback(
+    (offsetY: number) => {
+      if (pendingCount <= 0 || !onDismissPending || emptyPendingDismissedRef.current) return;
+      if (offsetY < 24) return;
+      emptyPendingDismissedRef.current = true;
+      onDismissPending();
+    },
+    [pendingCount, onDismissPending],
+  );
 
   const markFeedScrollEnded = useCallback(() => {
     feedScrollRef.current.dragging = false;
@@ -206,6 +246,11 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       return Promise.resolve();
     }
 
+    if (layout === 'newspaper') {
+      newspaperListRef.current?.scrollToOffset({ offset: 0, animated: true });
+      return Promise.resolve();
+    }
+
     if (activeIndexRef.current === 0 && !isAnimatingToTopRef.current) {
       return Promise.resolve();
     }
@@ -219,7 +264,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       pendingScrollToTopRef.current = true;
       setFreeScroll(true);
     });
-  }, [articles.length]);
+  }, [articles.length, layout]);
 
   useEffect(() => {
     if (!freeScroll || !pendingScrollToTopRef.current || pageHeight <= 0) return;
@@ -280,25 +325,56 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   useImperativeHandle(ref, () => ({ scrollToTop }), [scrollToTop]);
 
   useEffect(() => {
+    if (pendingCount > 0 && prevPendingCountRef.current === 0) {
+      pendingScrollBaselineRef.current = activeIndex;
+      userInitiatedScrollRef.current = false;
+      emptyPendingDismissedRef.current = false;
+    }
+    prevPendingCountRef.current = pendingCount;
+  }, [pendingCount, activeIndex]);
+
+  useEffect(() => {
+    if (pendingCount <= 0 || !onDismissPending) return;
+    if (isAnimatingToTopRef.current) return;
+    if (!userInitiatedScrollRef.current) return;
+    if (activeIndex === pendingScrollBaselineRef.current) return;
+    onDismissPending();
+  }, [activeIndex, pendingCount, onDismissPending]);
+
+  useEffect(() => {
     if (!onLoadMore || isLoadingMore) return;
     if (activeIndex < articles.length - 4) {
-      loadMoreGateRef.current = false;
+      loadMoreTriggeredAtLengthRef.current = 0;
       return;
     }
-    if (loadMoreGateRef.current) return;
-    loadMoreGateRef.current = true;
+    if (loadMoreTriggeredAtLengthRef.current >= articles.length) return;
+    loadMoreTriggeredAtLengthRef.current = articles.length;
     onLoadMore();
   }, [activeIndex, articles.length, onLoadMore, isLoadingMore]);
 
-  useEffect(() => {
-    if (!isLoadingMore) loadMoreGateRef.current = false;
-  }, [isLoadingMore]);
+  const onNewspaperScroll = useCallback(
+    (offsetY: number) => {
+      if (pendingCount <= 0 || !onDismissPending) return;
+      if (offsetY < 24) return;
+      if (!userInitiatedScrollRef.current) return;
+      onDismissPending();
+    },
+    [pendingCount, onDismissPending],
+  );
+
+  const onNewspaperEndReached = useCallback(() => {
+    if (!onLoadMore || isLoadingMore) return;
+    if (loadMoreTriggeredAtLengthRef.current >= articles.length) return;
+    loadMoreTriggeredAtLengthRef.current = articles.length;
+    onLoadMore();
+  }, [onLoadMore, isLoadingMore, articles.length]);
 
   if (articles.length === 0) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
         <FeedStatusBanner error={error} notice={notice} />
+        <FeedPendingBanner count={pendingCount} refreshHint={pendingRefreshHint} />
         {headerExtra}
         <ScrollView
           ref={emptyScrollRef}
@@ -307,7 +383,10 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             headerExtra ? styles.emptyScrollContentAnchored : styles.emptyScrollContentCentered
           }
           refreshControl={refreshControl}
-          alwaysBounceVertical={!!refreshControl}>
+          alwaysBounceVertical={!!refreshControl}
+          scrollEventThrottle={16}
+          onScrollBeginDrag={onFeedScrollBeginDrag}
+          onScroll={(event) => onEmptyFeedScroll(event.nativeEvent.contentOffset.y)}>
           {headerExtra ? (
             <View style={styles.emptyStateAnchored}>
               <View style={[styles.emptyIconWrap, { backgroundColor: colors.surface }]}>
@@ -327,10 +406,99 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     );
   }
 
+  if (layout === 'newspaper') {
+    const heroArticle = articles[0];
+    const belowFoldArticles = articles.slice(1);
+    const featuredIds = buildNewspaperFeaturedIds(articles);
+    const newspaperRows = groupNewspaperFeedRows(belowFoldArticles, featuredIds);
+    const heroHeight =
+      pageHeight > 0 ? normalizeHeight(Math.round(pageHeight * NEWSPAPER_HERO_HEIGHT_RATIO)) : 0;
+
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
+        <FeedStatusBanner error={error} notice={notice} />
+        <FeedPendingBanner count={pendingCount} refreshHint={pendingRefreshHint} />
+        {headerExtra}
+        <View style={styles.listWrap} onLayout={onListLayout}>
+          {pageHeight > 0 && heroHeight > 0 ? (
+            <FlatList
+              ref={newspaperListRef}
+              data={newspaperRows}
+              keyExtractor={(item) => item.id}
+              ListHeaderComponent={
+                heroArticle ? (
+                  <ArticleCard
+                    article={heroArticle}
+                    height={heroHeight}
+                    variant="hero"
+                    allowPress={allowCardPress}
+                  />
+                ) : null
+              }
+              renderItem={({ item: row }) => {
+                if (row.type === 'featured') {
+                  return (
+                    <View style={[styles.newspaperFeaturedRow, { borderTopColor: colors.border }]}>
+                      <ArticleCard
+                        article={row.article}
+                        height={NEWSPAPER_FEATURED_CARD_HEIGHT}
+                        variant="featured"
+                        allowPress={allowCardPress}
+                      />
+                    </View>
+                  );
+                }
+
+                return (
+                  <View style={[styles.newspaperGridRow, { borderTopColor: colors.border }]}>
+                    {row.articles.map((article, index) => (
+                      <View
+                        key={article.id}
+                        style={[
+                          styles.newspaperGridCell,
+                          index > 0 && [
+                            styles.newspaperGridCellDivider,
+                            { borderLeftColor: colors.border },
+                          ],
+                        ]}>
+                        <ArticleCard
+                          article={article}
+                          height={NEWSPAPER_COMPACT_CARD_HEIGHT}
+                          variant="compact"
+                          allowPress={allowCardPress}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                );
+              }}
+              style={[styles.list, { height: pageHeight }]}
+              contentContainerStyle={styles.newspaperListContent}
+              showsVerticalScrollIndicator={false}
+              refreshControl={refreshControl}
+              scrollEventThrottle={16}
+              onScrollBeginDrag={() => {
+                onFeedScrollBeginDrag();
+                userInitiatedScrollRef.current = true;
+              }}
+              onScroll={(event) => onNewspaperScroll(event.nativeEvent.contentOffset.y)}
+              onScrollEndDrag={markFeedScrollEnded}
+              onMomentumScrollEnd={markFeedScrollEnded}
+              onEndReached={onNewspaperEndReached}
+              onEndReachedThreshold={0.4}
+            />
+          ) : null}
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
       <FeedStatusBanner error={error} notice={notice} />
+      <FeedPendingBanner count={pendingCount} refreshHint={pendingRefreshHint} />
       {headerExtra}
       <View style={styles.listWrap} onLayout={onListLayout}>
         {pageHeight > 0 && snapMetrics && (
@@ -366,8 +534,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             onMomentumScrollEnd={markFeedScrollEnded}
             onViewableItemsChanged={onViewableItemsChanged.current}
             viewabilityConfig={viewabilityConfig.current}
-            onEndReached={onLoadMore}
-            onEndReachedThreshold={0.35}
             getItemLayout={(_, index) => ({
               length: snapMetrics.snapHeight,
               offset: snapMetrics.snapHeight * index,
@@ -449,5 +615,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     textAlign: 'center',
+  },
+  newspaperListContent: {
+    paddingBottom: 16,
+  },
+  newspaperFeaturedRow: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  newspaperGridRow: {
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  newspaperGridCell: {
+    flex: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  newspaperGridCellDivider: {
+    borderLeftWidth: StyleSheet.hairlineWidth,
   },
 });

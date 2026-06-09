@@ -29,9 +29,10 @@ export async function GET(
 
     if (!refresh) {
       const cached = getCachedReaderContent(id);
-      if (cached && cached.paragraphs.length > 0) {
+      if (cached && cached.blocks.length > 0 && !cached.legacyTextOnlyFormat) {
+        const { legacyTextOnlyFormat: _legacy, ...content } = cached;
         return jsonResponse(
-          { content: cached, requiresSubscription: article.requiresSubscription },
+          { content, requiresSubscription: article.requiresSubscription },
           origin,
         );
       }
@@ -42,7 +43,13 @@ export async function GET(
     const subscriptionPublisher = FEEDS.find((f) => f.source === articleSource)?.subscriptionPublisher;
 
     if (
-      detectRequiresSubscriptionFromExtraction(extracted.paragraphs, article, subscriptionPublisher) &&
+      detectRequiresSubscriptionFromExtraction(
+        extracted.blocks
+          .filter((block) => block.type === 'paragraph')
+          .map((block) => block.text),
+        article,
+        subscriptionPublisher,
+      ) &&
       !article.requiresSubscription
     ) {
       setArticleRequiresSubscription(id, true);

@@ -27,6 +27,13 @@ import {
   filterArticlesByTopics,
   isAllTopicsEnabled,
 } from '@/services/topicPreferences';
+import {
+  addBlockedKeywordsFromArticle,
+  addBlockedSportTag,
+  addBlockedTopic,
+  disableSourceInPreferences,
+  findSourceIdForArticle,
+} from '@/services/blockPreferences';
 import { applyFeedFilters } from '@/services/feedFilters';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import {
@@ -79,6 +86,10 @@ interface PreferencesContextValue {
   getFoldersForArticle: (articleId: string) => LikedFolder[];
   trendingNotificationsEnabled: boolean;
   setTrendingNotificationsEnabled: (enabled: boolean) => Promise<TrendingNotificationsToggleResult>;
+  hideSourceFromArticle: (article: Article) => Promise<void>;
+  hideTopicFromArticle: (article: Article, topic: Topic) => Promise<void>;
+  hideSportTagFromArticle: (article: Article, tag: SportTag) => Promise<void>;
+  hideSimilarToArticle: (article: Article) => Promise<void>;
 }
 
 const PreferencesContext = createContext<PreferencesContextValue | null>(null);
@@ -391,6 +402,42 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     [user, preferences, persist],
   );
 
+  const hideSourceFromArticle = useCallback(
+    async (article: Article) => {
+      if (!user || !preferences || sources.length === 0) return;
+      const sourceId = findSourceIdForArticle(article, sources);
+      if (!sourceId) return;
+      const next = disableSourceInPreferences(preferences, sources, sourceId);
+      if (!next) return;
+      await persist(next);
+    },
+    [user, preferences, sources, persist],
+  );
+
+  const hideTopicFromArticle = useCallback(
+    async (_article: Article, topic: Topic) => {
+      if (!user || !preferences) return;
+      await persist(addBlockedTopic(preferences, topic));
+    },
+    [user, preferences, persist],
+  );
+
+  const hideSportTagFromArticle = useCallback(
+    async (_article: Article, tag: SportTag) => {
+      if (!user || !preferences) return;
+      await persist(addBlockedSportTag(preferences, tag));
+    },
+    [user, preferences, persist],
+  );
+
+  const hideSimilarToArticle = useCallback(
+    async (article: Article) => {
+      if (!user || !preferences) return;
+      await persist(addBlockedKeywordsFromArticle(preferences, article));
+    },
+    [user, preferences, persist],
+  );
+
   const toggleTopic = useCallback(
     async (topic: Topic) => {
       if (!user || !preferences) return;
@@ -479,6 +526,10 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       getFoldersForArticle,
       trendingNotificationsEnabled,
       setTrendingNotificationsEnabled,
+      hideSourceFromArticle,
+      hideTopicFromArticle,
+      hideSportTagFromArticle,
+      hideSimilarToArticle,
     }),
     [
       preferences,
@@ -510,6 +561,10 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       getFoldersForArticle,
       trendingNotificationsEnabled,
       setTrendingNotificationsEnabled,
+      hideSourceFromArticle,
+      hideTopicFromArticle,
+      hideSportTagFromArticle,
+      hideSimilarToArticle,
     ],
   );
 

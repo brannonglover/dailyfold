@@ -11,7 +11,8 @@ export type Topic =
   | 'world'
   | 'sports'
   | 'art'
-  | 'gardening';
+  | 'gardening'
+  | 'gaming';
 
 export type { SportTag } from '../../catalog/sports';
 
