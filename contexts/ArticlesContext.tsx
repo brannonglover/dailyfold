@@ -21,6 +21,7 @@ import { Article } from '@/types';
 import { ingestNoticeForFetch } from '@/utils/ingestNotice';
 import { shouldShowArticleFeedLoading } from '@/utils/feedLoadingState';
 import {
+  mergeArticleFeed,
   newcomersFromFeedMerge,
   updateExistingFeedArticles,
 } from '@/utils/mergeArticleFeed';
@@ -100,12 +101,14 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   const loadMoreInFlightRef = useRef(false);
   const warmCacheUsedRef = useRef(false);
   const articlesRef = useRef<Article[]>([]);
+  const pendingArticlesRef = useRef<Article[]>([]);
   const fetchGenerationRef = useRef(0);
   const loadRef = useRef<
     ((mode: LoadMode, forceRefresh?: boolean, cursor?: string) => Promise<void>) | undefined
   >(undefined);
 
   articlesRef.current = articles;
+  pendingArticlesRef.current = pendingArticles;
 
   const pendingCount = useMemo(
     () => applyFeedFilters(pendingArticles, preferences, sources).length,
@@ -383,9 +386,26 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     };
   }, [sourceIdsKey]);
 
+  const applyPendingArticles = useCallback(() => {
+    const pending = pendingArticlesRef.current;
+    if (pending.length === 0) return false;
+
+    setArticles((prev) => {
+      const merged = mergeArticleFeed(prev, pending);
+      if (user) {
+        void saveFeedSnapshot(user.id, sourceIdsKey, merged);
+      }
+      return merged;
+    });
+    setPendingArticles([]);
+    setFeedGeneration((g) => g + 1);
+    return true;
+  }, [user, sourceIdsKey]);
+
   const refresh = useCallback(async () => {
+    if (applyPendingArticles()) return;
     await load('refresh', true);
-  }, [load]);
+  }, [applyPendingArticles, load]);
 
   const loadMore = useCallback(async () => {
     if (!hasMore || !nextCursor || loadMoreInFlightRef.current) return;

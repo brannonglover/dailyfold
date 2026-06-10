@@ -75,6 +75,7 @@ interface ArticleFeedProps {
   headerExtra?: React.ReactNode;
   pendingCount?: number;
   pendingRefreshHint?: string;
+  onApplyPending?: () => void;
   onDismissPending?: () => void;
   onLoadMore?: () => void;
   isLoadingMore?: boolean;
@@ -166,6 +167,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     headerExtra,
     pendingCount = 0,
     pendingRefreshHint,
+    onApplyPending,
     onDismissPending,
     onLoadMore,
     isLoadingMore,
@@ -391,12 +393,24 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     onLoadMore();
   }, [onLoadMore, isLoadingMore, articles.length]);
 
+  const handleApplyPending = useCallback(() => {
+    if (pendingCount <= 0 || !onApplyPending) return;
+    void (async () => {
+      await scrollToTop();
+      onApplyPending();
+    })();
+  }, [pendingCount, onApplyPending, scrollToTop]);
+
   if (articles.length === 0) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
         <FeedStatusBanner error={error} notice={notice} />
-        <FeedPendingBanner count={pendingCount} refreshHint={pendingRefreshHint} />
+        <FeedPendingBanner
+          count={pendingCount}
+          refreshHint={pendingRefreshHint}
+          onPress={handleApplyPending}
+        />
         {headerExtra}
         <ScrollView
           ref={emptyScrollRef}
@@ -440,7 +454,11 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
         <FeedStatusBanner error={error} notice={notice} />
-        <FeedPendingBanner count={pendingCount} refreshHint={pendingRefreshHint} />
+        <FeedPendingBanner
+          count={pendingCount}
+          refreshHint={pendingRefreshHint}
+          onPress={handleApplyPending}
+        />
         {headerExtra}
         <View style={styles.listWrap} onLayout={onListLayout}>
           {pageHeight > 0 && heroHeight > 0 ? (
@@ -521,7 +539,11 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
       <FeedStatusBanner error={error} notice={notice} />
-      <FeedPendingBanner count={pendingCount} refreshHint={pendingRefreshHint} />
+      <FeedPendingBanner
+        count={pendingCount}
+        refreshHint={pendingRefreshHint}
+        onPress={handleApplyPending}
+      />
       {headerExtra}
       <View style={styles.listWrap} onLayout={onListLayout}>
         {pageHeight > 0 && snapMetrics && (

@@ -83,6 +83,7 @@ export const ArticleFeedScreen = forwardRef<ArticleFeedHandle, ArticleFeedScreen
         headerExtra={headerExtra}
         pendingCount={pendingCount}
         pendingRefreshHint={pendingRefreshHint}
+        onApplyPending={onRefresh}
         onDismissPending={onDismissPending}
         onLoadMore={onLoadMore}
         isLoadingMore={isLoadingMore}
