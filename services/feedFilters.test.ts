@@ -253,6 +253,58 @@ test('Sports topic filter still returns every matching sports story', () => {
   assert.equal(result.length, 6);
 });
 
+test('applyFeedFilters removes Guardian live blog without hero even after silent refresh shape', () => {
+  const imagelessLive: Article = {
+    id: 'guardian-live',
+    title: 'Middle East crisis live: Trump teases another Iran attack',
+    excerpt: 'excerpt',
+    body: 'body',
+    source: 'The Guardian',
+    imageUrl: '',
+    topics: ['world'],
+    readTimeMinutes: 3,
+    publishedAt: recent(10 * 60 * 1000),
+    url: 'https://www.theguardian.com/world/live/2026/jun/10/example-live',
+  };
+  const withImage: Article = {
+    ...articles[0]!,
+    id: 'wired-hero',
+  };
+
+  const result = applyFeedFilters([imagelessLive, withImage], basePrefs(), FALLBACK_SOURCES);
+  assert.deepEqual(result.map((a) => a.id), ['wired-hero']);
+});
+
+test('applyFeedFilters swaps imageless Guardian for sibling story with hero image', () => {
+  const imagelessLive: Article = {
+    id: 'guardian-live',
+    title: 'Floods Hit Region – live',
+    excerpt: 'excerpt',
+    body: 'body',
+    source: 'The Guardian',
+    imageUrl: '',
+    topics: ['world'],
+    readTimeMinutes: 3,
+    publishedAt: recent(10 * 60 * 1000),
+    url: 'https://www.theguardian.com/world/live/2026/jun/10/floods-live',
+  };
+  const bbc: Article = {
+    id: 'bbc-floods',
+    title: 'Floods Hit Region',
+    excerpt: 'excerpt',
+    body: 'body',
+    source: 'BBC News',
+    imageUrl: 'https://cdn.bbc.co.uk/floods.jpg',
+    topics: ['world'],
+    readTimeMinutes: 3,
+    publishedAt: recent(20 * 60 * 1000),
+    url: 'https://www.bbc.co.uk/news/floods',
+  };
+
+  const result = applyFeedFilters([imagelessLive, bbc], basePrefs(), FALLBACK_SOURCES);
+  assert.deepEqual(result.map((a) => a.id), ['bbc-floods']);
+});
+
 test('applyFeedFilters removes articles without a real hero image', () => {
   const withImage = articles[0]!;
   const imageless: Article = { ...articles[1]!, id: 'no-hero', imageUrl: '' };

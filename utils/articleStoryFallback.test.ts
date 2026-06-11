@@ -191,7 +191,18 @@ test('pickBestHeroImageAlternate prefers catalog-ranked source', () => {
   assert.equal(pickBestHeroImageAlternate([cnn, bbc]).id, 'bbc');
 });
 
-test('applyArticleStoryFallbacks keeps lone imageless copy when no sibling has a hero', () => {
+test('normalizeStoryTitle strips live blog suffixes and live colons', () => {
+  assert.equal(
+    normalizeStoryTitle('Middle East crisis live: Trump teases attack'),
+    normalizeStoryTitle('Middle East crisis: Trump teases attack'),
+  );
+  assert.equal(
+    normalizeStoryTitle('Water cannon deployed in Belfast – live'),
+    normalizeStoryTitle('Water cannon deployed in Belfast'),
+  );
+});
+
+test('applyArticleStoryFallbacks drops lone imageless copy when no sibling has a hero', () => {
   const espn = article({
     id: 'espn-iwobi',
     title: "Iwobi: 'No regrets' about choosing Nigeria",
@@ -211,7 +222,7 @@ test('applyArticleStoryFallbacks keeps lone imageless copy when no sibling has a
 
   assert.deepEqual(
     result.map((item) => item.id),
-    ['espn-iwobi', 'bbc-other'],
+    ['bbc-other'],
   );
 });
 

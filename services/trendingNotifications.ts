@@ -1,4 +1,7 @@
+import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
+
+import { articlePath } from '@/utils/notificationArticleLink';
 
 import {
   ensureTrendingNotificationChannel,
@@ -29,7 +32,10 @@ export async function presentHotTrendingNotification(article: Article): Promise<
   await scheduleLocalNotification({
     title: 'Trending now',
     body: `${article.title} — ${article.source}`,
-    data: { articleId: article.id },
+    data: {
+      articleId: article.id,
+      url: Linking.createURL(articlePath(article.id)),
+    },
     ...(Platform.OS === 'android' ? { channelId: TRENDING_CHANNEL_ID } : {}),
   });
 }

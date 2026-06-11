@@ -46,6 +46,19 @@ test('mergePaginatedDisplayFeed prepends when new items are earlier in the sourc
   );
 });
 
+test('mergePaginatedDisplayFeed drops display rows no longer in the filtered source list', () => {
+  const source = [article('a'), article('c'), article('d')];
+  const prev = [article('a'), article('b'), article('c')];
+  const newOnly = [article('d')];
+
+  const merged = mergePaginatedDisplayFeed(prev, newOnly, source, (items) => items);
+
+  assert.deepEqual(
+    merged.map((item) => item.id),
+    ['a', 'c', 'd'],
+  );
+});
+
 test('mergePaginatedDisplayFeed spreads prepended batches against the feed head', () => {
   const source = [
     article('n1', 'ESPN NFL'),

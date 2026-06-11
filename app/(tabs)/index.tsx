@@ -99,13 +99,14 @@ export default function LatestScreen() {
         }
         const byId = new Map(filteredArticles.map((a) => [a.id, a]));
         let changed = false;
-        const next = prev.map((a) => {
-          const updated = byId.get(a.id);
-          if (!updated) return a;
-          if (updated !== a) changed = true;
-          return updated;
-        });
-        return changed ? next : prev;
+        const next = prev
+          .filter((a) => byId.has(a.id))
+          .map((a) => {
+            const updated = byId.get(a.id)!;
+            if (updated !== a) changed = true;
+            return updated;
+          });
+        return changed || next.length !== prev.length ? next : prev;
       });
     }
 

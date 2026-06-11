@@ -1,5 +1,5 @@
 import { stripAndDecodeHtml } from '@/catalog/decodeHtmlText';
-import { isArticlePlaceholderImageUrl } from '@/constants/images';
+import { ARTICLE_NO_IMAGE, isArticlePlaceholderImageUrl, resolveArticleImageUrl } from '@/constants/images';
 import { SOURCE_CATALOG } from '@/catalog/sources';
 import { Article } from '@/types';
 
@@ -7,13 +7,17 @@ const SOURCE_RANK = new Map(SOURCE_CATALOG.map((entry, index) => [entry.name, in
 
 /** True when the feed hero should be treated as missing (empty, legacy, or placeholder URL). */
 export function hasRealHeroImage(article: Article): boolean {
-  return !isArticlePlaceholderImageUrl(article.imageUrl);
+  const resolved = resolveArticleImageUrl(article.imageUrl);
+  return resolved !== ARTICLE_NO_IMAGE && !isArticlePlaceholderImageUrl(resolved);
 }
 
 /** Normalize headline text for cross-outlet story matching. */
 export function normalizeStoryTitle(title: string): string {
   let normalized = stripAndDecodeHtml(title).trim().toLowerCase();
   normalized = normalized.replace(/\s*[-–—|]\s*[^-|–—]{2,48}$/u, '').trim();
+  normalized = normalized.replace(/\s+live\s*:\s*/gu, ': ');
+  normalized = normalized.replace(/\s*[-–—]\s*live(?:\s+updates?)?\s*$/u, '').trim();
+  normalized = normalized.replace(/\s+live\s*$/u, '').trim();
   normalized = normalized.replace(/["""''`]/g, '');
   normalized = normalized.replace(/[^\p{L}\p{N}\s]/gu, ' ');
   return normalized.replace(/\s+/g, ' ').trim();
@@ -59,10 +63,11 @@ export function articlesAreSameStory(a: Article, b: Article): boolean {
   return storyTitlesMatch(a.title, b.title);
 }
 
-/** Prefer a real hero image, then catalog source rank and recency. */
-export function pickBestStoryRepresentative(candidates: Article[]): Article {
+/** Prefer a real hero image, then catalog source rank and recency. Null when no candidate has a hero. */
+export function pickBestStoryRepresentative(candidates: Article[]): Article | null {
   const withImage = candidates.filter(hasRealHeroImage);
-  return pickBestHeroImageAlternate(withImage.length > 0 ? withImage : candidates);
+  if (withImage.length === 0) return null;
+  return pickBestHeroImageAlternate(withImage);
 }
 
 /** Cluster feed rows that describe the same story (union of pairwise matches). */

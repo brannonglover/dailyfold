@@ -160,7 +160,7 @@ function bundledDemoArticle(id: string): Article | undefined {
 
 export async function fetchArticleById(id: string): Promise<Article | undefined> {
   try {
-    const response = await fetch(`${API_URL}/api/articles/${id}`, {
+    const response = await fetchWithTimeout(`${API_URL}/api/articles/${id}`, {
       headers: { Accept: 'application/json' },
     });
     if (response.ok) {

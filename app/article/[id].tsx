@@ -4,14 +4,14 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { ArticleReader } from '@/components/ArticleReader';
 import { useTheme } from '@/hooks/useTheme';
-import { getRememberedArticle } from '@/services/articleSession';
+import { getRememberedArticle, rememberOpenArticle } from '@/services/articleSession';
 import { fetchArticleById } from '@/services/articles';
 import { Article } from '@/types';
+import { isValidArticleRouteId } from '@/utils/notificationArticleLink';
 
 function resolveArticleId(id: string | string[] | undefined): string | undefined {
-  if (typeof id === 'string') return id;
-  if (Array.isArray(id)) return id[0];
-  return undefined;
+  const raw = typeof id === 'string' ? id : Array.isArray(id) ? id[0] : undefined;
+  return isValidArticleRouteId(raw) ? raw : undefined;
 }
 
 export default function ArticleScreen() {
@@ -38,9 +38,13 @@ export default function ArticleScreen() {
     fetchArticleById(articleId)
       .then((fetched) => {
         if (fetched) {
+          rememberOpenArticle(fetched);
           setArticle(fetched);
           return;
         }
+        if (!remembered) setArticle(undefined);
+      })
+      .catch(() => {
         if (!remembered) setArticle(undefined);
       })
       .finally(() => setIsLoading(false));
@@ -48,9 +52,21 @@ export default function ArticleScreen() {
 
   if (isLoading) {
     return (
-      <View style={[styles.centered, { backgroundColor: colors.background }]}>
-        <ActivityIndicator color={colors.text} />
-      </View>
+      <>
+        <Stack.Screen
+          options={{
+            title: 'Loading…',
+            headerStyle: { backgroundColor: colors.background },
+            headerShadowVisible: false,
+            headerTintColor: colors.text,
+            headerBackTitle: 'Back',
+            contentStyle: { backgroundColor: colors.background },
+          }}
+        />
+        <View style={[styles.centered, { backgroundColor: colors.background }]}>
+          <ActivityIndicator color={colors.text} />
+        </View>
+      </>
     );
   }
 

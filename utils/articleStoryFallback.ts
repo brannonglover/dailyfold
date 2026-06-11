@@ -18,6 +18,7 @@ export function applyArticleStoryFallbacks(articles: Article[]): Article[] {
   for (const indices of clusters) {
     const group = indices.map((index) => articles[index]!);
     const representative = pickBestStoryRepresentative(group);
+    if (!representative) continue;
     for (const index of indices) {
       representativeByIndex.set(index, representative);
     }
@@ -27,8 +28,8 @@ export function applyArticleStoryFallbacks(articles: Article[]): Article[] {
   const result: Article[] = [];
 
   for (let index = 0; index < articles.length; index += 1) {
-    const representative = representativeByIndex.get(index) ?? articles[index]!;
-    if (emittedIds.has(representative.id)) continue;
+    const representative = representativeByIndex.get(index);
+    if (!representative || emittedIds.has(representative.id)) continue;
     result.push(representative);
     emittedIds.add(representative.id);
   }

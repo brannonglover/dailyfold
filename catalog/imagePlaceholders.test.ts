@@ -26,6 +26,15 @@ test('isArticlePlaceholderImageUrl flags generic placeholder paths', () => {
   );
 });
 
+test('isArticlePlaceholderImageUrl flags Guardian RSS logo assets', () => {
+  assert.equal(
+    isArticlePlaceholderImageUrl(
+      'https://assets.guim.co.uk/images/guardian-logo-rss.c45beb1bafa34b347ac333af2e6fe23f.png',
+    ),
+    true,
+  );
+});
+
 test('isArticlePlaceholderImageUrl allows normal article photos', () => {
   assert.equal(
     isArticlePlaceholderImageUrl(
