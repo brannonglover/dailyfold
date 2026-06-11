@@ -122,9 +122,12 @@ function makeTrendingBadge(
 /**
  * Feed cards that should show a trending badge and which label to use.
  *
+ * Badges are limited to large card surfaces — hero and newspaper featured rows.
+ * Compact grid cards never receive a badge from this builder.
+ *
  * - Hero (#1): always — sticky head, including multi-day stories still pinned at top.
- * - Hot burst/breaking or newspaper featured row: "Trending".
- * - Regular compact-grid articles: no badge unless hot or featured.
+ * - Newspaper featured row (outlet burst leaders): "Trending".
+ * - Compact grid / other hot-but-not-featured stories: no badge.
  * - Multi-day badges append duration (e.g. "Trending · 2d") once publish spans 2+ calendar days.
  */
 export function buildFeedTrendingBadgeByArticleId(
@@ -155,7 +158,7 @@ export function buildFeedTrendingBadgeByArticleId(
       return;
     }
 
-    if (isHot || isFeatured) {
+    if (isFeatured) {
       badges.set(article.id, makeTrendingBadge(article, nowMs, 'trending'));
     }
   });

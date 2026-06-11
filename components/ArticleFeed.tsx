@@ -661,7 +661,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
                               height={NEWSPAPER_COMPACT_CARD_HEIGHT}
                               variant="compact"
                               allowPress={allowCardPress}
-                              trendingBadge={feedTrendingBadges.get(article.id)}
                             />
                           </View>
                         </View>

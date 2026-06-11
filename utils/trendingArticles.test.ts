@@ -106,7 +106,7 @@ test('buildFeedTrendingBadgeByArticleId marks sticky multi-day hero with duratio
   assert.equal(badges.has('fresh'), false);
 });
 
-test('buildFeedTrendingBadgeByArticleId includes featured and hot stories', () => {
+test('buildFeedTrendingBadgeByArticleId badges hero and featured burst leaders only', () => {
   const now = Date.now();
   const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
 
@@ -125,10 +125,10 @@ test('buildFeedTrendingBadgeByArticleId includes featured and hot stories', () =
   assert.deepEqual(badges.get('hero'), { kind: 'trending', days: 0 });
   assert.deepEqual(badges.get('burst-a'), { kind: 'trending', days: 0 });
   assert.equal(badges.has('plain'), false);
-  assert.deepEqual(badges.get('burst-b'), { kind: 'trending', days: 0 });
+  assert.equal(badges.has('burst-b'), false);
 });
 
-test('buildFeedTrendingBadgeByArticleId skips in-window compact articles that are not hot', () => {
+test('buildFeedTrendingBadgeByArticleId skips hot compact-grid articles without featured row', () => {
   const now = Date.now();
   const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
 
@@ -144,9 +144,24 @@ test('buildFeedTrendingBadgeByArticleId skips in-window compact articles that ar
 
   assert.deepEqual(badges.get('hero'), { kind: 'trending', days: 0 });
   assert.equal(badges.has('p1'), false);
-  assert.deepEqual(badges.get('g1'), { kind: 'trending', days: 0 });
-  assert.deepEqual(badges.get('g2'), { kind: 'trending', days: 0 });
+  assert.equal(badges.has('g1'), false);
+  assert.equal(badges.has('g2'), false);
   assert.equal(badges.has('i1'), false);
+});
+
+test('buildFeedTrendingBadgeByArticleId skips breaking-only stories outside featured row', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+
+  const articles = [
+    article('hero', 'Wire', recent(20 * 60 * 1000)),
+    article('breaking', 'Fox News', recent(15 * 60 * 1000)),
+  ];
+
+  const badges = buildFeedTrendingBadgeByArticleId(articles, { nowMs: now });
+
+  assert.deepEqual(badges.get('hero'), { kind: 'trending', days: 0 });
+  assert.equal(badges.has('breaking'), false);
 });
 
 test('buildFeedTrendingBadgeByArticleId marks in-window hero that is not hot', () => {

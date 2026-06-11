@@ -1,6 +1,6 @@
 {
   "name": "dailyfold-api",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "private": true,
   "scripts": {
     "dev": "WATCHPACK_POLLING=true CHOKIDAR_USEPOLLING=true NODE_OPTIONS='--use-system-ca' next dev -p 3001 -H 0.0.0.0",
