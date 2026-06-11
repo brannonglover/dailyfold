@@ -244,13 +244,24 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   const pendingScrollBaselineRef = useRef(0);
   const userInitiatedScrollRef = useRef(false);
   const emptyPendingDismissedRef = useRef(false);
+  const articleOrderKey = useMemo(
+    () => articles.map((article) => article.id).join('\0'),
+    [articles],
+  );
+  const newspaperFeaturedIdsRef = useRef(new Set<string>());
+  const newspaperFeaturedOrderKeyRef = useRef('');
+  if (layout === 'newspaper' && articleOrderKey !== newspaperFeaturedOrderKeyRef.current) {
+    newspaperFeaturedOrderKeyRef.current = articleOrderKey;
+    newspaperFeaturedIdsRef.current = buildNewspaperFeaturedIds(articles);
+  }
+  const newspaperFeaturedIds =
+    layout === 'newspaper' ? newspaperFeaturedIdsRef.current : new Set<string>();
   const feedTrendingBadges = useMemo(
     () =>
       buildFeedTrendingBadgeByArticleId(articles, {
-        featuredIds:
-          layout === 'newspaper' ? buildNewspaperFeaturedIds(articles) : new Set<string>(),
+        featuredIds: newspaperFeaturedIds,
       }),
-    [articles, layout],
+    [articles, newspaperFeaturedIds],
   );
   const articlesRef = useRef(articles);
   articlesRef.current = articles;
@@ -267,9 +278,10 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     }
   }, [pendingCount]);
 
-  const onEmptyFeedScroll = useCallback(
+  const maybeDismissPendingAfterScroll = useCallback(
     (offsetY: number) => {
       if (pendingCount <= 0 || !onDismissPending || emptyPendingDismissedRef.current) return;
+      if (!userInitiatedScrollRef.current) return;
       if (offsetY < 24) return;
       emptyPendingDismissedRef.current = true;
       onDismissPending();
@@ -518,13 +530,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
       const offsetY = contentOffset.y;
 
-      if (pendingCount > 0 && onDismissPending && !emptyPendingDismissedRef.current) {
-        if (offsetY >= 24 && userInitiatedScrollRef.current) {
-          emptyPendingDismissedRef.current = true;
-          onDismissPending();
-        }
-      }
-
       if (!onLoadMore || isLoadingMore || pageHeight <= 0) return;
       const distanceFromEnd =
         contentSize.height - (offsetY + layoutMeasurement.height);
@@ -535,7 +540,15 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         requestLoadMore();
       }
     },
-    [pendingCount, onDismissPending, onLoadMore, isLoadingMore, pageHeight, requestLoadMore],
+    [onLoadMore, isLoadingMore, pageHeight, requestLoadMore],
+  );
+
+  const onNewspaperScrollEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      markFeedScrollEnded();
+      maybeDismissPendingAfterScroll(event.nativeEvent.contentOffset.y);
+    },
+    [markFeedScrollEnded, maybeDismissPendingAfterScroll],
   );
 
   const onNewspaperEndReached = useCallback(() => {
@@ -550,6 +563,16 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     })();
   }, [pendingCount, onApplyPending, scrollToTop]);
 
+  const pendingBannerOverlay = (
+    <View style={styles.pendingBannerOverlay} pointerEvents="box-none">
+      <FeedPendingBanner
+        count={pendingCount}
+        refreshHint={pendingRefreshHint}
+        onPress={handleApplyPending}
+      />
+    </View>
+  );
+
   const showLoadMoreFooter = !!onLoadMore && !!isLoadingMore;
   const loadMoreListFooter = showLoadMoreFooter ? <FeedLoadMoreFooter /> : null;
 
@@ -558,38 +581,41 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
         <FeedStatusBanner error={error} notice={notice} />
-        <FeedPendingBanner
-          count={pendingCount}
-          refreshHint={pendingRefreshHint}
-          onPress={handleApplyPending}
-        />
         {headerExtra}
-        <ScrollView
-          ref={emptyScrollRef}
-          style={styles.emptyBody}
-          contentContainerStyle={
-            headerExtra ? styles.emptyScrollContentAnchored : styles.emptyScrollContentCentered
-          }
-          refreshControl={refreshControl}
-          alwaysBounceVertical={!!refreshControl}
-          scrollEventThrottle={16}
-          onScrollBeginDrag={onFeedScrollBeginDrag}
-          onScroll={(event) => onEmptyFeedScroll(event.nativeEvent.contentOffset.y)}>
-          {headerExtra ? (
-            <View style={styles.emptyStateAnchored}>
-              <View style={[styles.emptyIconWrap, { backgroundColor: colors.surface }]}>
-                <Ionicons name="heart-outline" size={28} color={colors.textSecondary} />
+        <View style={styles.listWrap}>
+          <ScrollView
+            ref={emptyScrollRef}
+            style={styles.emptyBody}
+            contentContainerStyle={
+              headerExtra ? styles.emptyScrollContentAnchored : styles.emptyScrollContentCentered
+            }
+            refreshControl={refreshControl}
+            alwaysBounceVertical={!!refreshControl}
+            scrollEventThrottle={16}
+            onScrollBeginDrag={onFeedScrollBeginDrag}
+            onScrollEndDrag={(event) =>
+              maybeDismissPendingAfterScroll(event.nativeEvent.contentOffset.y)
+            }
+            onMomentumScrollEnd={(event) =>
+              maybeDismissPendingAfterScroll(event.nativeEvent.contentOffset.y)
+            }>
+            {headerExtra ? (
+              <View style={styles.emptyStateAnchored}>
+                <View style={[styles.emptyIconWrap, { backgroundColor: colors.surface }]}>
+                  <Ionicons name="heart-outline" size={28} color={colors.textSecondary} />
+                </View>
+                <Text style={[styles.emptyTextAnchored, { color: colors.textSecondary }]}>
+                  {emptyMessage ?? 'No articles yet.'}
+                </Text>
               </View>
-              <Text style={[styles.emptyTextAnchored, { color: colors.textSecondary }]}>
+            ) : (
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
                 {emptyMessage ?? 'No articles yet.'}
               </Text>
-            </View>
-          ) : (
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              {emptyMessage ?? 'No articles yet.'}
-            </Text>
-          )}
-        </ScrollView>
+            )}
+          </ScrollView>
+          {pendingBannerOverlay}
+        </View>
       </View>
     );
   }
@@ -597,7 +623,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   if (layout === 'newspaper') {
     const heroArticle = articles[0];
     const belowFoldArticles = articles.slice(1);
-    const featuredIds = buildNewspaperFeaturedIds(articles);
+    const featuredIds = newspaperFeaturedIds;
     const newspaperRows = groupNewspaperFeedRows(belowFoldArticles, featuredIds);
     newspaperRowsCountRef.current = newspaperRows.length;
     const heroHeight =
@@ -607,11 +633,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
         <FeedStatusBanner error={error} notice={notice} />
-        <FeedPendingBanner
-          count={pendingCount}
-          refreshHint={pendingRefreshHint}
-          onPress={handleApplyPending}
-        />
         {headerExtra}
         <View style={styles.listWrap} onLayout={onListLayout}>
           {pageHeight > 0 && heroHeight > 0 ? (
@@ -679,8 +700,8 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
                 userInitiatedScrollRef.current = true;
               }}
               onScroll={onNewspaperScroll}
-              onScrollEndDrag={markFeedScrollEnded}
-              onMomentumScrollEnd={markFeedScrollEnded}
+              onScrollEndDrag={onNewspaperScrollEnd}
+              onMomentumScrollEnd={onNewspaperScrollEnd}
               onViewableItemsChanged={onNewspaperViewableItemsChanged.current}
               viewabilityConfig={newspaperViewabilityConfig.current}
               onEndReached={onNewspaperEndReached}
@@ -689,6 +710,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
               ListFooterComponent={loadMoreListFooter}
             />
           ) : null}
+          {pendingBannerOverlay}
         </View>
       </View>
     );
@@ -698,11 +720,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
       <FeedStatusBanner error={error} notice={notice} />
-      <FeedPendingBanner
-        count={pendingCount}
-        refreshHint={pendingRefreshHint}
-        onPress={handleApplyPending}
-      />
       {headerExtra}
       <View style={styles.listWrap} onLayout={onListLayout}>
         {pageHeight > 0 && snapMetrics && (
@@ -759,6 +776,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         {pageHeight > 0 && isAtEnd && !freeScroll && !onLoadMore && (
           <FeedEndStretch pullDistance={endPullDistance} />
         )}
+        {pendingBannerOverlay}
       </View>
     </View>
   );
@@ -886,5 +904,12 @@ const styles = StyleSheet.create({
     bottom: 24,
     zIndex: 8,
     alignItems: 'center',
+  },
+  pendingBannerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
   },
 });

@@ -1,4 +1,5 @@
 import { Article } from '@/types';
+import { articleFeedCardFieldsEqual } from '@/utils/mergeDisplayFeed';
 import { spreadArticlesBySource, spreadAgainstFeedHead } from '@/utils/feedOrdering';
 
 /** Articles in `incoming` that are not already in `prev`. */
@@ -16,7 +17,8 @@ export function updateExistingFeedArticles(prev: Article[], incoming: Article[])
   const next = prev.map((item) => {
     const updated = incomingById.get(item.id);
     if (!updated) return item;
-    if (updated !== item) changed = true;
+    if (updated === item || articleFeedCardFieldsEqual(item, updated)) return item;
+    changed = true;
     return updated;
   });
   return changed ? next : prev;

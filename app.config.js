@@ -93,6 +93,7 @@ module.exports = {
         },
       ],
       "expo-background-task",
+      "expo-video",
     ],
     experiments: {
       typedRoutes: true,

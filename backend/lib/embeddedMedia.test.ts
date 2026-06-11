@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  detectVideoProvider,
   normalizeEspnCdnImageUrl,
+  normalizeVideoPlaybackUrl,
   parseBundesligaEmbeddedImages,
+  parseJsonLdVideoEntries,
+  parsePageEmbeddedVideos,
   parsePageVideoThumbnailUrls,
   supplementBlocksWithEmbeddedImages,
 } from './embeddedMedia';
@@ -28,11 +32,64 @@ const ESPN_VIDEO_FIXTURE = `
 </head>
 <body><video poster="https://cdn.example.com/poster.jpg"></video></body>`;
 
+const ESPN_PLAYABLE_VIDEO_FIXTURE = `
+<head>
+  <script type="application/ld+json">
+    {"@type":"VideoObject","name":"Morocco injury update","thumbnailURL":"https://cdn.example.com/poster.jpg","contentUrl":"https://cdn.example.com/highlights.mp4"}
+  </script>
+</head>`;
+
+const YOUTUBE_IFRAME_FIXTURE = `
+<body>
+  <iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ" title="Clip"></iframe>
+</body>`;
+
 test('parsePageVideoThumbnailUrls reads JSON-LD, preload, and poster sources', () => {
   const urls = parsePageVideoThumbnailUrls(ESPN_VIDEO_FIXTURE);
   assert.equal(urls.length, 2);
   assert.match(urls[0]!, /Morocco_face_injury_crisis/);
   assert.equal(urls[1], 'https://cdn.example.com/poster.jpg');
+});
+
+test('detectVideoProvider recognizes common hosts and file extensions', () => {
+  assert.equal(detectVideoProvider('https://www.youtube.com/watch?v=abc123'), 'youtube');
+  assert.equal(detectVideoProvider('https://youtu.be/abc123'), 'youtube');
+  assert.equal(detectVideoProvider('https://vimeo.com/123456789'), 'vimeo');
+  assert.equal(detectVideoProvider('https://cdn.example.com/clip.mp4'), 'file');
+  assert.equal(detectVideoProvider('https://cdn.example.com/image.jpg'), undefined);
+});
+
+test('normalizeVideoPlaybackUrl converts watch URLs to embed URLs', () => {
+  assert.equal(
+    normalizeVideoPlaybackUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ'),
+    'https://www.youtube.com/embed/dQw4w9WgXcQ',
+  );
+  assert.equal(
+    normalizeVideoPlaybackUrl('https://vimeo.com/123456789'),
+    'https://player.vimeo.com/video/123456789',
+  );
+  assert.equal(
+    normalizeVideoPlaybackUrl('https://cdn.example.com/clip.mp4'),
+    'https://cdn.example.com/clip.mp4',
+  );
+});
+
+test('parseJsonLdVideoEntries extracts playable contentUrl values', () => {
+  const videos = parseJsonLdVideoEntries(ESPN_PLAYABLE_VIDEO_FIXTURE);
+  assert.equal(videos.length, 1);
+  assert.equal(videos[0]?.url, 'https://cdn.example.com/highlights.mp4');
+  assert.equal(videos[0]?.provider, 'file');
+  assert.equal(videos[0]?.poster, 'https://cdn.example.com/poster.jpg');
+});
+
+test('parsePageEmbeddedVideos reads iframe embeds', () => {
+  const videos = parsePageEmbeddedVideos(
+    YOUTUBE_IFRAME_FIXTURE,
+    'https://example.com/article',
+  );
+  assert.equal(videos.length, 1);
+  assert.equal(videos[0]?.provider, 'youtube');
+  assert.equal(videos[0]?.url, 'https://www.youtube.com/embed/dQw4w9WgXcQ');
 });
 
 test('normalizeEspnCdnImageUrl unwraps combiner photo paths', () => {
@@ -57,6 +114,28 @@ test('supplementBlocksWithEmbeddedImages prepends video thumbnail when no images
 
   assert.equal(next[0]?.type, 'image');
   assert.match(next[0]?.type === 'image' ? next[0].url : '', /Morocco_face_injury_crisis/);
+});
+
+test('supplementBlocksWithEmbeddedImages inserts playable video blocks', () => {
+  const blocks: ReaderBlock[] = [
+    { type: 'paragraph', text: 'Watch the latest highlights from the match below.' },
+  ];
+
+  const next = supplementBlocksWithEmbeddedImages(
+    blocks,
+    ESPN_PLAYABLE_VIDEO_FIXTURE,
+    'https://www.espn.com/soccer/story',
+  );
+
+  const videoBlock = next.find((block) => block.type === 'video');
+  assert.equal(videoBlock?.type, 'video');
+  assert.equal(videoBlock.url, 'https://cdn.example.com/highlights.mp4');
+  const watchIdx = next.findIndex(
+    (block) => block.type === 'paragraph' && block.text.includes('Watch the latest highlights'),
+  );
+  const videoIdx = next.findIndex((block) => block.type === 'video');
+  assert.ok(watchIdx >= 0);
+  assert.ok(videoIdx > watchIdx);
 });
 
 test('parseBundesligaEmbeddedImages returns image blocks only', () => {

@@ -8,11 +8,16 @@ import { BrandLogo } from '@/components/BrandLogo';
 import { FeedTopicFilterBar } from '@/components/FeedTopicFilterBar';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useArticles } from '@/hooks/useArticles';
+import { useDisplayOrderLock } from '@/hooks/useDisplayOrderLock';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import { isAllSourcesEnabled } from '@/services/sourcePreferences';
 import { isAllTopicsEnabled } from '@/services/topicPreferences';
 import { orderLatestFeed, orderLatestFeedPage } from '@/utils/feedOrdering';
-import { mergePaginatedDisplayFeed } from '@/utils/mergeDisplayFeed';
+import {
+  insertDisplayNewcomersAtSourceOrder,
+  mergePaginatedDisplayFeed,
+  updateDisplayArticlesInPlace,
+} from '@/utils/mergeDisplayFeed';
 import { Article } from '@/types';
 import { getFeedEmptyMessage } from '@/utils/feedEmptyMessage';
 
@@ -39,6 +44,9 @@ export default function LatestScreen() {
   const prevFeedGenerationRef = useRef(0);
   const prevRawLengthRef = useRef(0);
   const prevFilterKeyRef = useRef('');
+  const syncDisplayHandledRef = useRef(false);
+  const { markInitialDisplay, shouldAllowFullRebuild, shouldAllowSilentMerge, lockEpoch } =
+    useDisplayOrderLock(isRefreshing);
 
   const filterKey = useMemo(
     () =>
@@ -63,17 +71,19 @@ export default function LatestScreen() {
     }, [navigation, refresh]),
   );
 
-  useLayoutEffect(() => {
-    const filteredArticles = filterFeedArticles(articles);
+  const orderOpts = useMemo(() => {
     const allTopics =
       !preferences ||
       isAllTopicsEnabled(normalizeFeedPreferences(preferences).enabledTopics);
-    const orderOpts = { diversifyTopics: allTopics };
+    return { diversifyTopics: allTopics };
+  }, [preferences]);
 
+  useLayoutEffect(() => {
+    syncDisplayHandledRef.current = false;
+    const filteredArticles = filterFeedArticles(articles);
     const generationChanged = feedGeneration !== prevFeedGenerationRef.current;
     const listShrunk = articles.length < prevRawLengthRef.current;
     const filtersChanged = filterKey !== prevFilterKeyRef.current;
-
     const needsFullRebuild =
       generationChanged ||
       listShrunk ||
@@ -81,10 +91,17 @@ export default function LatestScreen() {
       prevRawLengthRef.current === 0;
 
     if (needsFullRebuild) {
-      setDisplayArticles(orderLatestFeed(filteredArticles, orderOpts));
-      prevFeedGenerationRef.current = feedGeneration;
-      prevFilterKeyRef.current = filterKey;
+      syncDisplayHandledRef.current = true;
+      if (shouldAllowFullRebuild(filtersChanged, prevFilterKeyRef.current, filterKey)) {
+        setDisplayArticles(orderLatestFeed(filteredArticles, orderOpts));
+        markInitialDisplay();
+        prevFeedGenerationRef.current = feedGeneration;
+        prevFilterKeyRef.current = filterKey;
+      } else {
+        setDisplayArticles((prev) => updateDisplayArticlesInPlace(prev, filteredArticles));
+      }
     } else if (articles.length > prevRawLengthRef.current) {
+      syncDisplayHandledRef.current = true;
       setDisplayArticles((prev) => {
         const seen = new Set(prev.map((a) => a.id));
         const newOnly = filteredArticles.filter((a) => !seen.has(a.id));
@@ -92,35 +109,49 @@ export default function LatestScreen() {
           orderLatestFeedPage(items, orderOpts),
         );
       });
-    } else if (prevRawLengthRef.current > 0) {
-      setDisplayArticles((prev) => {
-        if (prev.length === 0 && filteredArticles.length > 0) {
-          return orderLatestFeed(filteredArticles, orderOpts);
-        }
-
-        const prevIds = new Set(prev.map((article) => article.id));
-        const newOnly = filteredArticles.filter((article) => !prevIds.has(article.id));
-        if (newOnly.length > 0) {
-          return mergePaginatedDisplayFeed(prev, newOnly, filteredArticles, (items) =>
-            orderLatestFeedPage(items, orderOpts),
-          );
-        }
-
-        const byId = new Map(filteredArticles.map((a) => [a.id, a]));
-        let changed = false;
-        const next = prev
-          .filter((a) => byId.has(a.id))
-          .map((a) => {
-            const updated = byId.get(a.id)!;
-            if (updated !== a) changed = true;
-            return updated;
-          });
-        return changed || next.length !== prev.length ? next : prev;
-      });
     }
 
     prevRawLengthRef.current = articles.length;
-  }, [articles, feedGeneration, filterFeedArticles, preferences, filterKey]);
+  }, [
+    articles,
+    feedGeneration,
+    filterFeedArticles,
+    filterKey,
+    orderOpts,
+    markInitialDisplay,
+    shouldAllowFullRebuild,
+  ]);
+
+  useEffect(() => {
+    if (syncDisplayHandledRef.current) return;
+
+    const filteredArticles = filterFeedArticles(articles);
+    setDisplayArticles((prev) => {
+      if (prev.length === 0 && filteredArticles.length > 0) {
+        return orderLatestFeed(filteredArticles, orderOpts);
+      }
+
+      if (!shouldAllowSilentMerge()) {
+        return updateDisplayArticlesInPlace(prev, filteredArticles);
+      }
+
+      const prevIds = new Set(prev.map((article) => article.id));
+      const newOnly = filteredArticles.filter((article) => !prevIds.has(article.id));
+      if (newOnly.length > 0) {
+        return insertDisplayNewcomersAtSourceOrder(prev, newOnly, filteredArticles);
+      }
+
+      return updateDisplayArticlesInPlace(prev, filteredArticles);
+    });
+  }, [
+    articles,
+    feedGeneration,
+    filterFeedArticles,
+    filterKey,
+    lockEpoch,
+    orderOpts,
+    shouldAllowSilentMerge,
+  ]);
 
   const filtered = displayArticles;
 

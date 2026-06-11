@@ -6,7 +6,11 @@ import {
   isPlaceholderImageElement,
 } from '../../catalog/imagePlaceholders';
 
-import { supplementBlocksWithEmbeddedImages } from './embeddedMedia';
+import {
+  detectVideoProvider,
+  normalizeVideoPlaybackUrl,
+  supplementBlocksWithEmbeddedImages,
+} from './embeddedMedia';
 import { Article } from './types';
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -16,7 +20,8 @@ const USER_AGENT =
 
 export type ReaderBlock =
   | { type: 'paragraph'; text: string }
-  | { type: 'image'; url: string; alt?: string; caption?: string };
+  | { type: 'image'; url: string; alt?: string; caption?: string }
+  | { type: 'video'; url: string; poster?: string; provider?: string; caption?: string };
 
 export interface ReaderContent {
   title: string;
@@ -134,6 +139,32 @@ function pushImageUrl(
   });
 }
 
+function pushVideoBlock(
+  blocks: ReaderBlock[],
+  url: string,
+  baseUrl: string,
+  options?: { poster?: string; caption?: string },
+) {
+  const resolved = resolveImageUrl(url, baseUrl);
+  if (!resolved) return;
+
+  const provider = detectVideoProvider(resolved);
+  const playbackUrl = normalizeVideoPlaybackUrl(resolved, provider);
+  if (!playbackUrl) return;
+
+  const poster = options?.poster
+    ? resolveImageUrl(options.poster, baseUrl) ?? undefined
+    : undefined;
+
+  blocks.push({
+    type: 'video',
+    url: playbackUrl,
+    poster,
+    provider: provider ?? detectVideoProvider(playbackUrl),
+    caption: options?.caption?.trim() || undefined,
+  });
+}
+
 function walkArticleNode(node: Element, blocks: ReaderBlock[], baseUrl: string) {
   const tag = node.tagName.toLowerCase();
 
@@ -170,11 +201,23 @@ function walkArticleNode(node: Element, blocks: ReaderBlock[], baseUrl: string) 
   }
 
   if (tag === 'video') {
-    const poster = node.getAttribute('poster');
-    if (poster) {
+    const poster = node.getAttribute('poster') ?? undefined;
+    const src =
+      node.getAttribute('src') ??
+      node.querySelector('source[src]')?.getAttribute('src') ??
+      undefined;
+    if (src) {
+      pushVideoBlock(blocks, src, baseUrl, { poster });
+    } else if (poster) {
       const url = resolveImageUrl(poster, baseUrl);
       if (url) pushImageUrl(blocks, url);
     }
+    return;
+  }
+
+  if (tag === 'iframe') {
+    const src = node.getAttribute('src');
+    if (src) pushVideoBlock(blocks, src, baseUrl);
     return;
   }
 

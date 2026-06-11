@@ -1,14 +1,18 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { ArticleFeedScreen } from '@/components/ArticleFeedScreen';
-import { FeedTopicFilterBar } from '@/components/FeedTopicFilterBar';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useArticles } from '@/hooks/useArticles';
+import { useDisplayOrderLock } from '@/hooks/useDisplayOrderLock';
 import { getPersonalizedFeed, hasLikedArticles } from '@/services/recommendations';
 import { isAllSourcesEnabled } from '@/services/sourcePreferences';
 import { getForYouEmptyMessage } from '@/utils/feedEmptyMessage';
 import { orderPersonalizedFeed } from '@/utils/feedOrdering';
-import { mergePaginatedDisplayFeed } from '@/utils/mergeDisplayFeed';
+import {
+  insertDisplayNewcomersAtSourceOrder,
+  mergePaginatedDisplayFeed,
+  updateDisplayArticlesInPlace,
+} from '@/utils/mergeDisplayFeed';
 import { Article } from '@/types';
 
 export default function ForYouScreen() {
@@ -36,8 +40,12 @@ export default function ForYouScreen() {
   const [displayArticles, setDisplayArticles] = useState<Article[]>([]);
   const prevFeedGenerationRef = useRef(0);
   const prevRawLengthRef = useRef(0);
+  const syncDisplayHandledRef = useRef(false);
+  const { markInitialDisplay, shouldAllowFullRebuild, shouldAllowSilentMerge, lockEpoch } =
+    useDisplayOrderLock(isRefreshing);
 
   useLayoutEffect(() => {
+    syncDisplayHandledRef.current = false;
     if (!userHasLikedArticles || !preferences) {
       setDisplayArticles([]);
       prevRawLengthRef.current = 0;
@@ -49,41 +57,65 @@ export default function ForYouScreen() {
     const generationChanged = feedGeneration !== prevFeedGenerationRef.current;
 
     if (generationChanged || prevRawLengthRef.current === 0) {
-      setDisplayArticles(orderPersonalizedFeed(ranked));
-      prevFeedGenerationRef.current = feedGeneration;
+      syncDisplayHandledRef.current = true;
+      if (shouldAllowFullRebuild(false, '', '')) {
+        setDisplayArticles(orderPersonalizedFeed(ranked));
+        markInitialDisplay();
+        prevFeedGenerationRef.current = feedGeneration;
+      } else {
+        setDisplayArticles((prev) => updateDisplayArticlesInPlace(prev, ranked));
+      }
     } else if (articles.length > prevRawLengthRef.current) {
+      syncDisplayHandledRef.current = true;
       setDisplayArticles((prev) => {
         const seen = new Set(prev.map((a) => a.id));
         const newOnly = ranked.filter((a) => !seen.has(a.id));
         return mergePaginatedDisplayFeed(prev, newOnly, ranked, orderPersonalizedFeed);
       });
-    } else if (prevRawLengthRef.current > 0) {
-      setDisplayArticles((prev) => {
-        if (prev.length === 0 && ranked.length > 0) {
-          return orderPersonalizedFeed(ranked);
-        }
-
-        const prevIds = new Set(prev.map((article) => article.id));
-        const newOnly = ranked.filter((article) => !prevIds.has(article.id));
-        if (newOnly.length > 0) {
-          return mergePaginatedDisplayFeed(prev, newOnly, ranked, orderPersonalizedFeed);
-        }
-
-        const byId = new Map(ranked.map((a) => [a.id, a]));
-        let changed = false;
-        const next = prev
-          .filter((a) => byId.has(a.id))
-          .map((a) => {
-            const updated = byId.get(a.id)!;
-            if (updated !== a) changed = true;
-            return updated;
-          });
-        return changed || next.length !== prev.length ? next : prev;
-      });
     }
 
     prevRawLengthRef.current = articles.length;
-  }, [articles, feedGeneration, filterFeedArticles, preferences, userHasLikedArticles]);
+  }, [
+    articles,
+    feedGeneration,
+    filterFeedArticles,
+    preferences,
+    userHasLikedArticles,
+    markInitialDisplay,
+    shouldAllowFullRebuild,
+  ]);
+
+  useEffect(() => {
+    if (!userHasLikedArticles || !preferences || syncDisplayHandledRef.current) return;
+
+    const filtered = filterFeedArticles(articles);
+    const ranked = getPersonalizedFeed(filtered, preferences);
+    setDisplayArticles((prev) => {
+      if (prev.length === 0 && ranked.length > 0) {
+        return orderPersonalizedFeed(ranked);
+      }
+
+      if (!shouldAllowSilentMerge()) {
+        return updateDisplayArticlesInPlace(prev, ranked);
+      }
+
+      const prevIds = new Set(prev.map((article) => article.id));
+      const newOnly = ranked.filter((article) => !prevIds.has(article.id));
+      if (newOnly.length > 0) {
+        return insertDisplayNewcomersAtSourceOrder(prev, newOnly, ranked);
+      }
+
+      return updateDisplayArticlesInPlace(prev, ranked);
+    });
+  }, [
+    articles,
+    feedGeneration,
+    filterFeedArticles,
+    preferences,
+    userHasLikedArticles,
+    lockEpoch,
+    shouldAllowSilentMerge,
+  ]);
 
   const personalized = displayArticles;
 
@@ -130,7 +162,6 @@ export default function ForYouScreen() {
       onRefresh={refresh}
       pendingCount={pendingCount}
       onDismissPending={dismissPendingArticles}
-      headerExtra={<FeedTopicFilterBar />}
     />
   );
 }

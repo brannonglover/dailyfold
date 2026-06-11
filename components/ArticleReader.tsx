@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArticleActions } from '@/components/ArticleActions';
 import { ArticleImage } from '@/components/ArticleImage';
 import { ArticleSourceMenu } from '@/components/ArticleSourceMenu';
+import { ArticleVideoBlock } from '@/components/ArticleVideoBlock';
 import { SubscriptionBanner } from '@/components/SubscriptionBanner';
 import { useTheme } from '@/hooks/useTheme';
 import {
@@ -50,7 +51,7 @@ function ReaderBlockView({
 
   useEffect(() => {
     setLoadFailed(false);
-  }, [block.type === 'image' ? block.url : null]);
+  }, [block.type === 'image' ? block.url : block.type === 'video' ? block.url : null]);
 
   if (block.type === 'paragraph') {
     return (
@@ -58,6 +59,10 @@ function ReaderBlockView({
         {block.text}
       </Text>
     );
+  }
+
+  if (block.type === 'video') {
+    return <ArticleVideoBlock block={block} colors={colors} />;
   }
 
   const uri = resolveArticleImageUrl(block.url);

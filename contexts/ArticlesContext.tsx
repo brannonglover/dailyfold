@@ -112,6 +112,8 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   const fetchGenerationRef = useRef(0);
   /** After applying pending stories, silent refreshes may queue more pending but must not mutate the visible feed until a real refresh. */
   const suppressSilentFeedMutationRef = useRef(false);
+  const silentInFlightRef = useRef(false);
+  const dismissedPendingIdsRef = useRef(new Set<string>());
   const loadRef = useRef<
     ((mode: LoadMode, forceRefresh?: boolean, cursor?: string) => Promise<void>) | undefined
   >(undefined);
@@ -174,6 +176,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       if (mode === 'append') {
         setArticles((prev) => appendUniqueArticles(prev, data));
       } else if (mode === 'refresh') {
+        dismissedPendingIdsRef.current.clear();
         setPendingArticles([]);
         setArticles(data);
         setFeedGeneration((g) => g + 1);
@@ -182,9 +185,11 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
           if (mode === 'silent' && prev.length > 0) {
             const newcomers = newcomersFromFeedMerge(prev, data);
             if (newcomers.length > 0) {
-              setPendingArticles((pending) =>
-                appendUniqueArticles(pending, newcomers),
-              );
+              const dismissed = dismissedPendingIdsRef.current;
+              const queueable = newcomers.filter((article) => !dismissed.has(article.id));
+              if (queueable.length > 0) {
+                setPendingArticles((pending) => appendUniqueArticles(pending, queueable));
+              }
             }
             if (suppressSilentFeedMutationRef.current) {
               return prev;
@@ -192,6 +197,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
             return updateExistingFeedArticles(prev, data);
           }
           if (mode === 'initial') {
+            dismissedPendingIdsRef.current.clear();
             setPendingArticles([]);
           }
           return data;
@@ -249,6 +255,8 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     async (mode: LoadMode = 'initial', forceRefresh = false, cursor?: string) => {
       const generation = fetchGenerationRef.current;
 
+      if (mode === 'silent' && silentInFlightRef.current) return;
+
       if (mode === 'refresh') {
         refreshInFlightRef.current += 1;
         setIsRefreshing(true);
@@ -256,6 +264,8 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         setIsLoading(true);
       } else if (mode === 'append') {
         setIsLoadingMore(true);
+      } else if (mode === 'silent') {
+        silentInFlightRef.current = true;
       }
 
       if (mode !== 'append' && mode !== 'silent' && articlesRef.current.length === 0) {
@@ -325,6 +335,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
           }
         }
         if (mode === 'append') setIsLoadingMore(false);
+        if (mode === 'silent') silentInFlightRef.current = false;
       }
     },
     [requestArticles, applyFetchResult],
@@ -374,6 +385,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
 
     fetchGenerationRef.current += 1;
     suppressSilentFeedMutationRef.current = false;
+    dismissedPendingIdsRef.current.clear();
     setPendingArticles([]);
     setNotice(null);
     setNextCursor(null);
@@ -408,6 +420,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     fetchGenerationRef.current += 1;
     cancelScheduledSilentRefresh();
     suppressSilentFeedMutationRef.current = true;
+    dismissedPendingIdsRef.current.clear();
 
     setArticles((prev) => {
       const merged = mergeArticleFeed(prev, pending);
@@ -438,6 +451,9 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   }, [hasMore, nextCursor, load]);
 
   const dismissPendingArticles = useCallback(() => {
+    for (const article of pendingArticlesRef.current) {
+      dismissedPendingIdsRef.current.add(article.id);
+    }
     setPendingArticles([]);
   }, []);
 

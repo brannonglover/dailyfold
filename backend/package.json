@@ -1,6 +1,6 @@
 {
   "name": "dailyfold-api",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "private": true,
   "scripts": {
     "dev": "WATCHPACK_POLLING=true CHOKIDAR_USEPOLLING=true NODE_OPTIONS='--use-system-ca' next dev -p 3001 -H 0.0.0.0",
@@ -12,7 +12,8 @@
     "test:image": "tsx lib/normalize.image.test.ts",
     "test:ogImage": "tsx --test lib/ogImage.test.ts",
     "test:publishedAt": "tsx --test lib/normalize.publishedAt.test.ts",
-    "test:excerpt": "tsx lib/normalize.excerpt.test.ts"
+    "test:excerpt": "tsx lib/normalize.excerpt.test.ts",
+    "test:embeddedMedia": "tsx --test lib/embeddedMedia.test.ts"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

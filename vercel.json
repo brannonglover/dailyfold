@@ -1,4 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "echo 'ERROR: Vercel Root Directory must be backend (see README Deploy backend). Repo root is Expo-only — no Next.js API here.' && exit 1"
+  "framework": null,
+  "buildCommand": "echo 'ERROR: Set Vercel Root Directory to backend (see README Deploy backend). Repo root is Expo-only — no Next.js here.' && exit 1"
 }

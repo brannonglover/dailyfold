@@ -3,7 +3,13 @@ import test from 'node:test';
 
 import { Article } from '@/types';
 import { articleSpreadBucket } from '@/utils/feedOrdering';
-import { mergePaginatedDisplayFeed } from '@/utils/mergeDisplayFeed';
+import {
+  articleFeedCardFieldsEqual,
+  insertDisplayNewcomersAtSourceOrder,
+  isFilterExpansion,
+  mergePaginatedDisplayFeed,
+  updateDisplayArticlesInPlace,
+} from '@/utils/mergeDisplayFeed';
 
 function article(id: string, source = 'Source'): Article {
   return {
@@ -57,6 +63,79 @@ test('mergePaginatedDisplayFeed drops display rows no longer in the filtered sou
     merged.map((item) => item.id),
     ['a', 'c', 'd'],
   );
+});
+
+test('insertDisplayNewcomersAtSourceOrder keeps existing order and slots newcomers by source index', () => {
+  const source = [article('n1'), article('a'), article('n2'), article('b'), article('c')];
+  const prev = [article('a'), article('b')];
+  const newOnly = [article('n1'), article('n2'), article('c')];
+
+  const merged = insertDisplayNewcomersAtSourceOrder(prev, newOnly, source);
+
+  assert.deepEqual(
+    merged.map((item) => item.id),
+    ['n1', 'a', 'n2', 'b', 'c'],
+  );
+});
+
+test('insertDisplayNewcomersAtSourceOrder does not reshuffle the existing head when newcomers arrive', () => {
+  const source = [
+    article('n1', 'ESPN NFL'),
+    article('n2', 'ESPN NFL'),
+    article('n3', 'ESPN NFL'),
+    article('a', 'BBC News'),
+    article('b', 'CNN'),
+  ];
+  const prev = [article('a', 'BBC News'), article('b', 'CNN')];
+  const newOnly = [article('n1', 'ESPN NFL'), article('n2', 'ESPN NFL'), article('n3', 'ESPN NFL')];
+
+  const merged = insertDisplayNewcomersAtSourceOrder(prev, newOnly, source);
+
+  assert.deepEqual(
+    merged.map((item) => item.id),
+    ['n1', 'n2', 'n3', 'a', 'b'],
+  );
+});
+
+test('articleFeedCardFieldsEqual ignores object identity when card fields match', () => {
+  const left = article('a');
+  const right = { ...article('a'), body: 'different-body-not-shown-in-feed' };
+  assert.equal(articleFeedCardFieldsEqual(left, right), true);
+});
+
+test('updateDisplayArticlesInPlace keeps row references when only non-card fields change', () => {
+  const prev = [article('a'), article('b')];
+  const source = [
+    { ...article('a'), body: 'updated-body' },
+    { ...article('b'), body: 'updated-body' },
+  ];
+
+  const next = updateDisplayArticlesInPlace(prev, source);
+
+  assert.equal(next, prev);
+});
+
+test('updateDisplayArticlesInPlace refreshes fields without reordering', () => {
+  const prev = [article('a'), article('b')];
+  const source = [
+    { ...article('a'), title: 'updated-a' },
+    { ...article('b'), title: 'updated-b' },
+  ];
+
+  const next = updateDisplayArticlesInPlace(prev, source);
+
+  assert.deepEqual(
+    next.map((item) => item.id),
+    ['a', 'b'],
+  );
+  assert.equal(next[0]?.title, 'updated-a');
+});
+
+test('isFilterExpansion detects preference widening', () => {
+  const prev = JSON.stringify({ topics: [], sports: [], sources: ['espn'] });
+  const next = JSON.stringify({ topics: [], sports: [], sources: [] });
+  assert.equal(isFilterExpansion(prev, next), true);
+  assert.equal(isFilterExpansion(next, prev), false);
 });
 
 test('mergePaginatedDisplayFeed spreads prepended batches against the feed head', () => {
