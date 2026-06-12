@@ -67,10 +67,12 @@ export interface UserPreferences {
   /** Cached article metadata so Liked survives feed refreshes and pagination. */
   likedArticles: Record<string, Article>;
   topicScores: Record<Topic, number>;
-  /** Outlet names the user likes often (article.source). */
+  /** @deprecated Legacy outlet scores — no longer updated from likes. */
   sourceScores: Record<string, number>;
   /** Title keywords learned from likes for finer-grained ranking. */
   keywordScores: Record<string, number>;
+  /** Sport/league tags learned from liked sports articles. */
+  sportTagScores: Record<string, number>;
   /** Empty array = all sources enabled */
   enabledSourceIds: string[];
   /** Empty array = all topics shown in feeds */

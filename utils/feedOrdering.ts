@@ -239,24 +239,16 @@ export function orderLatestFeedPage(
 }
 
 /**
- * For You: keep affinity rank within each outlet, but interleave outlets and
- * surface the trending window first.
+ * For You: keep affinity rank within each topic, spread outlets inside a topic,
+ * and surface the trending window first.
  */
 export function orderPersonalizedFeed(articles: Article[]): Article[] {
   if (articles.length <= 1) return articles;
 
   const nowMs = Date.now();
-  const burstCounts = sourceBurstCounts(articles, nowMs);
   const [trending, rest] = partitionTrending(articles, nowMs);
-  const queueOrder = { burstCounts };
 
-  const orderedTrending = interleaveBySource(trending, {
-    preserveInputOrder: true,
-    queueOrder,
-  });
-  const orderedRest = interleaveBySource(rest, {
-    preserveInputOrder: true,
-    queueOrder,
-  });
+  const orderedTrending = interleaveByPrimaryTopic(trending, { preserveInputOrder: true });
+  const orderedRest = interleaveByPrimaryTopic(rest, { preserveInputOrder: true });
   return [...orderedTrending, ...orderedRest];
 }

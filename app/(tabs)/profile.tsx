@@ -10,7 +10,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useTheme } from '@/hooks/useTheme';
 import { CURIOSITY_ORDER } from '@/constants/curiosities';
+import { SPORT_TAG_LABELS } from '@/catalog/sports';
 import { formatInterestLabel } from '@/utils/interestKeywords';
+import { SportTag } from '@/types';
 
 /** Bar fills at this many likes per signal so growth is visible over time. */
 const SCORE_BAR_CAP = 10;
@@ -22,7 +24,7 @@ export default function ProfileScreen() {
   const {
     preferences,
     topTopics,
-    topSources,
+    topSportTags,
     topKeywords,
     enabledSourceCount,
     totalSourceCount,
@@ -61,9 +63,9 @@ export default function ProfileScreen() {
     .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score);
 
-  const sourceScoreRows = topSources.map((source) => ({
-    label: source,
-    score: preferences?.sourceScores[source] ?? 0,
+  const sportTagScoreRows = topSportTags.map((tag) => ({
+    label: SPORT_TAG_LABELS[tag as SportTag] ?? tag,
+    score: preferences?.sportTagScores?.[tag] ?? 0,
   }));
 
   const keywordScoreRows = topKeywords.map((keyword) => ({
@@ -117,13 +119,13 @@ export default function ProfileScreen() {
         </View>
       )}
 
-      {(topKeywords.length > 0 || topSources.length > 0) && (
+      {(topKeywords.length > 0 || topSportTags.length > 0) && (
         <>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary, marginTop: 24 }]}>
             Narrower interests
           </Text>
           <Text style={[styles.sectionHelper, { color: colors.textSecondary }]}>
-            Keywords from liked headlines and outlets you return to most.
+            Keywords from liked headlines and sport leagues you follow most.
           </Text>
           {topKeywords.length > 0 && (
             <View style={styles.topics}>
@@ -138,11 +140,13 @@ export default function ProfileScreen() {
               ))}
             </View>
           )}
-          {topSources.length > 0 && (
+          {topSportTags.length > 0 && (
             <View style={[styles.topics, { marginTop: topKeywords.length > 0 ? 8 : 0 }]}>
-              {topSources.map((source) => (
-                <View key={source} style={[styles.topicPill, { backgroundColor: colors.accentMuted }]}>
-                  <Text style={[styles.topicText, { color: colors.accent }]}>{source}</Text>
+              {topSportTags.map((tag) => (
+                <View key={tag} style={[styles.topicPill, { backgroundColor: colors.accentMuted }]}>
+                  <Text style={[styles.topicText, { color: colors.accent }]}>
+                    {SPORT_TAG_LABELS[tag as SportTag] ?? tag}
+                  </Text>
                 </View>
               ))}
             </View>
@@ -154,7 +158,7 @@ export default function ProfileScreen() {
         All topic scores
       </Text>
       <Text style={[styles.sectionHelper, { color: colors.textSecondary }]}>
-        Each like adds 1 point to topics, source, and title keywords. Bars fill at {SCORE_BAR_CAP}{' '}
+        Each like adds 1 point to topics, sport tags, and title keywords. Bars fill at {SCORE_BAR_CAP}{' '}
         points.
       </Text>
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -207,13 +211,13 @@ export default function ProfileScreen() {
         />
       </View>
 
-      {(sourceScoreRows.length > 0 || keywordScoreRows.length > 0) && (
+      {(sportTagScoreRows.length > 0 || keywordScoreRows.length > 0) && (
         <>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary, marginTop: 24 }]}>
-            Source & keyword scores
+            Sport & keyword scores
           </Text>
           <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            {[...sourceScoreRows, ...keywordScoreRows].map(({ label, score }) => (
+            {[...sportTagScoreRows, ...keywordScoreRows].map(({ label, score }) => (
               <View key={label} style={styles.scoreRow}>
                 <Text style={[styles.topicLabel, { color: colors.text, width: 110 }]} numberOfLines={1}>
                   {label}

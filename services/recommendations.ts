@@ -1,16 +1,18 @@
+import { SPORT_TAG_LABELS } from '@/catalog/sports';
 import {
   articleInterestKeywords,
   hasPersonalizationSignals,
 } from '@/services/interestSignals';
+import { articleSportTags } from '@/services/sportPreferences';
 import { formatInterestLabel } from '@/utils/interestKeywords';
-import { Article, UserPreferences } from '@/types';
+import { Article, SportTag, UserPreferences } from '@/types';
 
 /** Broad topic likes — baseline signal. */
 const TOPIC_WEIGHT = 1;
-/** Outlet affinity — strong, specific signal. */
-const SOURCE_WEIGHT = 2;
-/** Title keyword overlap — finer-grained than topics. */
-const KEYWORD_WEIGHT = 1.5;
+/** Title keyword overlap — captures show names, themes, and headline vocabulary. */
+const KEYWORD_WEIGHT = 2;
+/** Sport/league affinity — finer-grained than the sports topic alone. */
+const SPORT_TAG_WEIGHT = 1.5;
 
 function topicAffinityScore(article: Article, prefs: UserPreferences): number {
   return (
@@ -19,21 +21,23 @@ function topicAffinityScore(article: Article, prefs: UserPreferences): number {
   );
 }
 
-function sourceAffinityScore(article: Article, prefs: UserPreferences): number {
-  return (prefs.sourceScores[article.source] ?? 0) * SOURCE_WEIGHT;
-}
-
 function keywordAffinityScore(article: Article, prefs: UserPreferences): number {
   const keywords = articleInterestKeywords(article);
   const raw = keywords.reduce((sum, keyword) => sum + (prefs.keywordScores[keyword] ?? 0), 0);
   return raw * KEYWORD_WEIGHT;
 }
 
+function sportTagAffinityScore(article: Article, prefs: UserPreferences): number {
+  const tags = articleSportTags(article);
+  const raw = tags.reduce((sum, tag) => sum + (prefs.sportTagScores?.[tag] ?? 0), 0);
+  return raw * SPORT_TAG_WEIGHT;
+}
+
 export function articleAffinityScore(article: Article, prefs: UserPreferences): number {
   return (
     topicAffinityScore(article, prefs) +
-    sourceAffinityScore(article, prefs) +
-    keywordAffinityScore(article, prefs)
+    keywordAffinityScore(article, prefs) +
+    sportTagAffinityScore(article, prefs)
   );
 }
 
@@ -80,15 +84,19 @@ export function getTopTopics(prefs: UserPreferences, limit = 3): string[] {
   return topScoredKeys(prefs.topicScores, limit);
 }
 
-export function getTopSources(prefs: UserPreferences, limit = 3): string[] {
-  return topScoredKeys(prefs.sourceScores, limit);
-}
-
 export function getTopKeywords(prefs: UserPreferences, limit = 5): string[] {
   return topScoredKeys(prefs.keywordScores, limit);
 }
 
-/** Subtitle copy for For You — prefers narrow keywords/sources over broad topics. */
+export function getTopSportTags(prefs: UserPreferences, limit = 3): SportTag[] {
+  return topScoredKeys(prefs.sportTagScores ?? {}, limit) as SportTag[];
+}
+
+function formatSportTagLabel(tag: string): string {
+  return SPORT_TAG_LABELS[tag as SportTag] ?? formatInterestLabel(tag);
+}
+
+/** Subtitle copy for For You — prefers narrow keywords and sport tags over broad topics. */
 export function getPersonalizationSummary(prefs: UserPreferences | null, limit = 3): string {
   if (!prefs || !hasPersonalizationSignals(prefs)) {
     return 'Like articles to personalize your feed';
@@ -96,7 +104,7 @@ export function getPersonalizationSummary(prefs: UserPreferences | null, limit =
 
   const labels = [
     ...getTopKeywords(prefs, 2).map(formatInterestLabel),
-    ...getTopSources(prefs, 1),
+    ...getTopSportTags(prefs, 1).map(formatSportTagLabel),
     ...getTopTopics(prefs, 1).map(formatInterestLabel),
   ];
 

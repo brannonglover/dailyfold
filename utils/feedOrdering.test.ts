@@ -8,6 +8,7 @@ import {
   interleaveByPrimaryTopic,
   interleaveBySource,
   orderLatestFeed,
+  orderPersonalizedFeed,
   spreadAgainstFeedHead,
   spreadArticlesBySource,
 } from '@/utils/feedOrdering';
@@ -196,5 +197,30 @@ test('orderLatestFeed diversifyTopics surfaces non-sports in the first cards', (
   assert.ok(
     firstFiveTopics.some((topic) => topic !== 'sports'),
     `expected a non-sports card near the top, got ${firstFiveTopics.join(', ')}`,
+  );
+});
+
+test('orderPersonalizedFeed interleaves by topic, not outlet burst priority', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+
+  const mensHealthCulture = Array.from({ length: 6 }, (_, i) =>
+    article(`mh-${i}`, 'culture', recent(i * 1000), { source: 'Mens Health' }),
+  );
+  const otherCulture = [
+    article('culture-other', 'culture', recent(7_000), { source: 'Vanity Fair' }),
+  ];
+  const tech = [article('tech-0', 'technology', recent(8_000), { source: 'Wired' })];
+
+  const ordered = orderPersonalizedFeed([...mensHealthCulture, ...otherCulture, ...tech]);
+  const firstFourTopics = ordered.slice(0, 4).map((a) => a.topics[0]);
+
+  assert.ok(
+    firstFourTopics.includes('technology'),
+    `expected affinity-ranked non-dominant topics near the top, got ${firstFourTopics.join(', ')}`,
+  );
+  assert.ok(
+    firstFourTopics.filter((topic) => topic === 'culture').length <= 3,
+    `expected topic mixing in For You ordering, got ${firstFourTopics.join(', ')}`,
   );
 });

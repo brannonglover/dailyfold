@@ -47,7 +47,7 @@ import { applyArticleLikeSignals } from '@/services/interestSignals';
 import {
   getPersonalizationSummary,
   getTopKeywords,
-  getTopSources,
+  getTopSportTags,
   getTopTopics,
 } from '@/services/recommendations';
 import { Article, FeedSource, LikedFolder, SportTag, Topic, UserPreferences } from '@/types';
@@ -63,7 +63,7 @@ interface PreferencesContextValue {
   toggleLike: (article: Article) => void;
   rememberLikedArticles: (articles: Article[]) => Promise<void>;
   topTopics: string[];
-  topSources: string[];
+  topSportTags: string[];
   topKeywords: string[];
   personalizationSummary: string;
   enabledSourceCount: number;
@@ -491,8 +491,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     [preferences],
   );
 
-  const topSources = useMemo(
-    () => (preferences ? getTopSources(preferences) : []),
+  const topSportTags = useMemo(
+    () => (preferences ? getTopSportTags(preferences) : []),
     [preferences],
   );
 
@@ -515,7 +515,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       toggleLike,
       rememberLikedArticles,
       topTopics,
-      topSources,
+      topSportTags,
       topKeywords,
       personalizationSummary,
       enabledSourceCount,
@@ -551,7 +551,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       toggleLike,
       rememberLikedArticles,
       topTopics,
-      topSources,
+      topSportTags,
       topKeywords,
       personalizationSummary,
       enabledSourceCount,

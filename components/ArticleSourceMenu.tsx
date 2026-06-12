@@ -62,8 +62,8 @@ const styles = StyleSheet.create({
   trigger: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
-    minWidth: 0,
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
     gap: 3,
     paddingVertical: 6,
     paddingHorizontal: 4,
@@ -74,7 +74,7 @@ const styles = StyleSheet.create({
     opacity: 0.72,
   },
   source: {
-    flex: 1,
+    flexShrink: 1,
     minWidth: 0,
     fontFamily: 'InterSemiBold',
     fontSize: 13,
