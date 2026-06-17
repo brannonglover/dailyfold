@@ -25,12 +25,8 @@ export function useTabDisplayState(
   sync?: TabDisplaySync,
 ) {
   const cached = readTabDisplayCache(tabKey);
-  const [displayArticles, setDisplayArticles] = useState<Article[]>(
-    () => cached?.displayArticles ?? [],
-  );
-  const [displayReady, setDisplayReady] = useState(
-    () => (cached?.displayReady ?? false) || (cached?.displayArticles.length ?? 0) > 0,
-  );
+  const [displayArticles, setDisplayArticles] = useState<Article[]>([]);
+  const [displayReady, setDisplayReady] = useState(false);
   const feedGenerationRef = useRef(cached?.feedGeneration ?? 0);
   const rawLengthRef = useRef(cached?.rawLength ?? 0);
   const filterKeyRef = useRef(cached?.filterKey ?? filterKey);

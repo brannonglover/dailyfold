@@ -24,7 +24,9 @@ import {
   updateDisplayArticlesInPlace,
 } from '@/utils/mergeDisplayFeed';
 import { getFeedEmptyMessage } from '@/utils/feedEmptyMessage';
+import { isFeedInteractionLocked, subscribeFeedInteractionLock } from '@/utils/feedInteractionLock';
 import { prewarmForYouDisplayCache } from '@/utils/forYouPrewarm';
+import { readTabDisplayCache, resolveTabDisplayFeed } from '@/utils/tabDisplayCache';
 
 function LatestScreenContent() {
   const navigation = useNavigation<BottomTabNavigationProp<ParamListBase>>();
@@ -51,7 +53,10 @@ function LatestScreenContent() {
   const [emptyMessage, setEmptyMessage] = useState<string | undefined>();
   const syncDisplayHandledRef = useRef(false);
   const wasFocusedOnTabPressRef = useRef(false);
+  const [feedInteractionEpoch, setFeedInteractionEpoch] = useState(0);
   const isFocused = useIsFocused();
+
+  useEffect(() => subscribeFeedInteractionLock(() => setFeedInteractionEpoch((n) => n + 1)), []);
 
   const filterKey = useMemo(
     () =>
@@ -86,6 +91,14 @@ function LatestScreenContent() {
     markUserRebuild();
     await applyPending();
   }, [markUserRebuild, applyPending]);
+
+  useEffect(() => {
+    if (isLoading && articles.length === 0) {
+      setDisplayArticles([]);
+      setDisplayReady(false);
+      prevRawLengthRef.current = 0;
+    }
+  }, [isLoading, articles.length, setDisplayArticles, setDisplayReady, prevRawLengthRef]);
 
   useFocusEffect(
     useCallback(() => {
@@ -135,6 +148,7 @@ function LatestScreenContent() {
   useDeferAfterFocus(
     isFocused,
     () => {
+      if (isFeedInteractionLocked()) return;
       syncDisplayHandledRef.current = false;
       if (articles.length === 0) {
         startTransition(() => {
@@ -147,9 +161,15 @@ function LatestScreenContent() {
 
       if (isCacheFresh(feedGeneration, articles.length, filterKey)) {
         prevRawLengthRef.current = articles.length;
-        if (!displayReady && displayArticles.length > 0) {
+        prevFeedGenerationRef.current = feedGeneration;
+        prevFilterKeyRef.current = filterKey;
+        const cached = readTabDisplayCache('latest');
+        startTransition(() => {
+          if (displayArticles.length === 0 && cached && cached.displayArticles.length > 0) {
+            setDisplayArticles(cached.displayArticles);
+          }
           setDisplayReady(true);
-        }
+        });
         return;
       }
 
@@ -216,6 +236,7 @@ function LatestScreenContent() {
 
           return updateDisplayArticlesInPlace(prev, filteredArticles);
         });
+        setDisplayReady(true);
       });
     },
     [
@@ -230,19 +251,42 @@ function LatestScreenContent() {
       markInitialDisplay,
       shouldAllowFullRebuild,
       shouldAllowSilentMerge,
+      feedInteractionEpoch,
     ],
   );
 
-  const filtered = useMemo(() => {
-    if (displayArticles.length > 0) return displayArticles;
-    if (articles.length === 0) return [];
-    return [];
-  }, [displayArticles, articles.length]);
-
-  const visiblePendingCount = useMemo(
-    () => pendingCountForFeed(filtered),
-    [pendingCountForFeed, filtered],
+  const filtered = useMemo(
+    () =>
+      resolveTabDisplayFeed({
+        contextLoading: isLoading,
+        displayArticles,
+        displayReady,
+        tabKey: 'latest',
+        feedGeneration,
+        rawLength: articles.length,
+        filterKey,
+      }),
+    [
+      isLoading,
+      displayArticles,
+      displayReady,
+      feedGeneration,
+      articles.length,
+      filterKey,
+    ],
   );
+
+  useEffect(() => {
+    if (!isFocused) return;
+    if (filtered.length > 0 && !displayReady) {
+      setDisplayReady(true);
+    }
+  }, [isFocused, filtered.length, displayReady, setDisplayReady]);
+
+  const visiblePendingCount = useMemo(() => {
+    if (isLoading || filtered.length === 0) return 0;
+    return pendingCountForFeed(filtered);
+  }, [isLoading, filtered, pendingCountForFeed]);
 
   useEffect(() => {
     if (filtered.length === 0) return;
@@ -292,7 +336,7 @@ function LatestScreenContent() {
   ]);
 
   const isBuildingFeed =
-    isFocused && !displayReady && displayArticles.length === 0 && articles.length > 0;
+    isFocused && !isLoading && articles.length > 0 && filtered.length === 0;
 
   return (
     <ArticleFeedScreen

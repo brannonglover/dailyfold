@@ -1,12 +1,22 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { NotForMeModal } from '@/components/NotForMeModal';
-import { FALLBACK_SOURCES } from '@/data/sources';
+import { usePreferences } from '@/contexts/PreferencesContext';
+import { useSourceMenu } from '@/contexts/SourceMenuContext';
 import { useTheme } from '@/hooks/useTheme';
-import { warmNotForMeOptions } from '@/services/notForMeOptions';
+import { scheduleWarmNotForMeOptions } from '@/services/notForMeOptionsSchedule';
 import { Article } from '@/types';
+import { acquireFeedInteractionLock } from '@/utils/feedInteractionLock';
+import {
+  createSourceMenuGestureState,
+  handleSourceMenuPress,
+  handleSourceMenuPressIn,
+  openSourceMenu,
+  resetSourceMenuGesture,
+} from '@/utils/sourceMenuOpen';
+import { isSourceMenuDismissCooldownActive, markSourceMenuDismissed } from '@/utils/sourceMenuDismiss';
 
 interface ArticleSourceMenuProps {
   article: Article;
@@ -19,23 +29,67 @@ export function ArticleSourceMenu({
   tone = 'default',
 }: ArticleSourceMenuProps) {
   const { colors } = useTheme();
+  const { sources } = usePreferences();
+  const sourceMenu = useSourceMenu();
   const [visible, setVisible] = useState(false);
+  const [sheetMounted, setSheetMounted] = useState(false);
+  const gestureStateRef = useRef(createSourceMenuGestureState());
+  const isHosted = sourceMenu != null;
+  const isMenuOpenForThisArticle = isHosted && sourceMenu.openArticleId === article.id;
   const accentColor = tone === 'onImage' ? '#FFFFFF' : colors.accent;
-  const handleClose = useCallback(() => setVisible(false), []);
-  const handleOpen = useCallback(() => setVisible(true), []);
+
+  const openLocal = useCallback(() => {
+    if (isSourceMenuDismissCooldownActive()) return;
+    setSheetMounted(true);
+    setVisible(true);
+  }, []);
+
+  const openSheet = useCallback(() => {
+    if (isHosted && sourceMenu.isOpen) return;
+    openSourceMenu(article, sourceMenu?.openSourceMenu ?? null, openLocal);
+  }, [article, sourceMenu, openLocal, isHosted]);
+
   const handlePressIn = useCallback(() => {
-    warmNotForMeOptions(article, FALLBACK_SOURCES);
-  }, [article]);
+    handleSourceMenuPressIn(gestureStateRef.current, openSheet);
+  }, [openSheet]);
+
+  const handlePress = useCallback(() => {
+    handleSourceMenuPress(gestureStateRef.current, openSheet);
+  }, [openSheet]);
+
+  const handlePressOut = useCallback(() => {
+    resetSourceMenuGesture(gestureStateRef.current);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    markSourceMenuDismissed();
+    setVisible(false);
+  }, []);
+
+  useEffect(() => {
+    if (isHosted || !visible) return;
+    return scheduleWarmNotForMeOptions(article, sources);
+  }, [isHosted, visible, article, sources]);
+
+  useEffect(() => {
+    if (isHosted || !visible) return;
+    return acquireFeedInteractionLock();
+  }, [isHosted, visible]);
 
   return (
     <>
       <Pressable
-        onPress={handleOpen}
         onPressIn={handlePressIn}
+        onPress={handlePress}
+        onPressOut={handlePressOut}
+        delayPressIn={0}
+        disabled={isMenuOpenForThisArticle}
+        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
         style={({ pressed }) => [styles.trigger, pressed && styles.triggerPressed]}
         accessibilityRole="button"
         accessibilityLabel={`Source options for ${article.source}`}
-        accessibilityHint="Hide this outlet or show fewer stories like this one">
+        accessibilityHint="Hide this outlet or show fewer stories like this one"
+        accessibilityState={{ disabled: isMenuOpenForThisArticle }}>
         <Text
           style={[
             styles.source,
@@ -54,8 +108,8 @@ export function ArticleSourceMenu({
         />
       </Pressable>
 
-      {visible ? (
-        <NotForMeModal article={article} onClose={handleClose} />
+      {!isHosted && sheetMounted ? (
+        <NotForMeModal article={article} visible={visible} onClose={handleClose} />
       ) : null}
     </>
   );
@@ -87,7 +141,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   sourceOnImage: {
-    textShadowColor: 'rgba(0,0,0,0.75)',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 6,
   },

@@ -62,9 +62,17 @@ import {
   buildFeedTrendingBadgeByArticleId,
   TrendingBadge,
 } from '@/utils/trendingArticles';
+import { shouldAllowFeedLoadMore } from '@/utils/feedLoadMoreGate';
+import { isFeedInteractionLocked } from '@/utils/feedInteractionLock';
+import { readLastFeedListHeight, rememberFeedListHeight } from '@/utils/feedListViewport';
 import { buildLoadMoreTriggerKey } from '@/utils/paginationRevision';
 
-const AnimatedFlatList = Animated.createAnimatedComponent(FlatList<Article>);
+/** Let child pressables (e.g. Source menu) receive taps during scroll deceleration. */
+const FEED_SCROLL_PRESS_PROPS = {
+  keyboardShouldPersistTaps: 'handled' as const,
+  delaysContentTouches: false,
+};
+
 
 /** Start fetching the next page this many snap cards before the end. */
 const SNAP_LOAD_MORE_PREFETCH_ITEMS = 5;
@@ -72,9 +80,6 @@ const SNAP_LOAD_MORE_PREFETCH_ITEMS = 5;
 const NEWSPAPER_LOAD_MORE_PREFETCH_ROWS = 4;
 /** Fraction of viewport height from the bottom that triggers onEndReached (newspaper). */
 const NEWSPAPER_END_REACHED_THRESHOLD = 0.75;
-/** Auto-fetch when content is only slightly taller than the viewport. */
-const SHORT_CONTENT_HEIGHT_RATIO = 1.12;
-
 /** 1px rule between feed articles — explicit View so it stays visible on full-bleed cards. */
 function FeedArticleSeparator({ color, vertical = false }: { color: string; vertical?: boolean }) {
   const thickness = PixelRatio.roundToNearestPixel(FEED_SEPARATOR_WIDTH);
@@ -118,7 +123,7 @@ interface ArticleFeedProps {
   loadMoreCursor?: number;
   /**
    * Bumps when upstream pagination metadata changes (hasMore / nextCursor / append).
-   * Ensures load-more retriggers after silent refresh or duplicate append pages.
+   * Clears load-more dedup so the next user scroll near the end can fetch again.
    */
   loadMoreEpoch?: number;
   /** Visual trial: hero story above the fold, compact cards below */
@@ -286,7 +291,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   ref,
 ) {
   const { colors } = useTheme();
-  const [pageHeight, setPageHeight] = useState(0);
+  const [pageHeight, setPageHeight] = useState(() => readLastFeedListHeight());
   const [activeIndex, setActiveIndex] = useState(0);
   const [freeScroll, setFreeScroll] = useState(false);
   const activeIndexRef = useRef(0);
@@ -346,10 +351,8 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
   const onFeedScrollBeginDrag = useCallback(() => {
     feedScrollRef.current.dragging = true;
-    if (pendingCount > 0) {
-      userInitiatedScrollRef.current = true;
-    }
-  }, [pendingCount]);
+    userInitiatedScrollRef.current = true;
+  }, []);
 
   const maybeDismissPendingAfterScroll = useCallback(
     (offsetY: number) => {
@@ -368,7 +371,9 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   }, []);
 
   const onListLayout = useCallback((e: LayoutChangeEvent) => {
-    setPageHeight(normalizeHeight(e.nativeEvent.layout.height));
+    const height = normalizeHeight(e.nativeEvent.layout.height);
+    rememberFeedListHeight(height);
+    setPageHeight(height);
   }, []);
 
   const onViewableItemsChanged = useRef(
@@ -522,11 +527,13 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   }, [activeIndex, pendingCount, onDismissPending]);
 
   const requestLoadMore = useCallback(() => {
+    if (!shouldAllowFeedLoadMore(userInitiatedScrollRef.current, articles.length)) return;
+    if (isFeedInteractionLocked()) return;
     if (!onLoadMore || !canLoadMore || isLoadingMore) return;
     if (loadMoreTriggeredAtKeyRef.current === loadMoreTriggerKey) return;
     loadMoreTriggeredAtKeyRef.current = loadMoreTriggerKey;
     onLoadMore();
-  }, [onLoadMore, canLoadMore, isLoadingMore, loadMoreTriggerKey]);
+  }, [articles.length, onLoadMore, canLoadMore, isLoadingMore, loadMoreTriggerKey]);
 
   requestLoadMoreRef.current = requestLoadMore;
 
@@ -540,37 +547,8 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   }, [activeIndex, articles.length, canLoadMore, isLoadingMore, layout, onLoadMore, requestLoadMore]);
 
   useEffect(() => {
-    if (!onLoadMore || !canLoadMore || isLoadingMore) return;
-    if (layout === 'newspaper') {
-      const totalRows = newspaperRowsCountRef.current;
-      const lastVisible = newspaperLastVisibleRowRef.current;
-      if (totalRows > 0 && lastVisible >= totalRows - NEWSPAPER_LOAD_MORE_PREFETCH_ROWS) {
-        requestLoadMore();
-      }
-      return;
-    }
-    if (activeIndex >= articles.length - SNAP_LOAD_MORE_PREFETCH_ITEMS) {
-      requestLoadMore();
-    }
-  }, [
-    loadMoreTriggerKey,
-    canLoadMore,
-    isLoadingMore,
-    layout,
-    activeIndex,
-    articles.length,
-    onLoadMore,
-    requestLoadMore,
-  ]);
-
-  const maybeLoadMoreForShortContent = useCallback(
-    (contentHeight: number) => {
-      if (!onLoadMore || !canLoadMore || isLoadingMore || pageHeight <= 0) return;
-      if (contentHeight > pageHeight * SHORT_CONTENT_HEIGHT_RATIO) return;
-      requestLoadMore();
-    },
-    [onLoadMore, canLoadMore, isLoadingMore, pageHeight, requestLoadMore],
-  );
+    loadMoreTriggeredAtKeyRef.current = '';
+  }, [loadMoreTriggerKey]);
 
   const onNewspaperViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
@@ -821,6 +799,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
               ref={newspaperListRef}
               data={newspaperRows}
               keyExtractor={newspaperRowKeyExtractor}
+              {...FEED_SCROLL_PRESS_PROPS}
               initialNumToRender={3}
               maxToRenderPerBatch={2}
               windowSize={5}
@@ -855,7 +834,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
               viewabilityConfig={newspaperViewabilityConfig.current}
               onEndReached={onNewspaperEndReached}
               onEndReachedThreshold={NEWSPAPER_END_REACHED_THRESHOLD}
-              onContentSizeChange={(_, height) => maybeLoadMoreForShortContent(height)}
               ListFooterComponent={loadMoreListFooter}
             />
           ) : null}
@@ -877,6 +855,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             ref={listRef}
             data={articles}
             keyExtractor={articleKeyExtractor}
+            {...FEED_SCROLL_PRESS_PROPS}
             initialNumToRender={2}
             maxToRenderPerBatch={1}
             windowSize={3}
@@ -904,7 +883,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             getItemLayout={getSnapItemLayout}
             onEndReached={requestLoadMore}
             onEndReachedThreshold={0.65}
-            onContentSizeChange={(_, height) => maybeLoadMoreForShortContent(height)}
           />
         )}
         {refreshOverlay}

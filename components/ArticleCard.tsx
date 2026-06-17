@@ -313,33 +313,34 @@ function NewspaperOverlayCard({
           />
         ) : null}
         <View style={styles.newspaperOverlay} pointerEvents="box-none">
-          <Pressable
-            onPress={openArticle}
-            accessibilityRole="button"
-            accessibilityLabel={`Read ${article.title}`}
-            style={({ pressed }) => [styles.newspaperTextPanelPressable, pressed && styles.pressed]}>
-            <LinearGradient
-              colors={[...textPanelGradient.colors]}
-              locations={[...textPanelGradient.locations]}
-              style={[
-                styles.newspaperTextPanel,
-                isHero
-                  ? styles.newspaperTextPanelHero
-                  : isFeatured
-                    ? styles.newspaperTextPanelFeatured
-                    : styles.newspaperTextPanelCompact,
-              ]}>
-              <View style={styles.newspaperMetaRow}>
-                <View style={styles.newspaperMetaSource}>
-                  <ArticleSourceMenu article={article} tone="onImage" />
-                </View>
-                <View style={styles.metaEnd}>
-                  {requiresSubscription ? (
-                    <SubscriptionBadge compact={isCompact} tone="onImage" />
-                  ) : null}
-                  <Text style={styles.newspaperMeta}>{formatDate(article.publishedAt)}</Text>
-                </View>
+          <LinearGradient
+            colors={[...textPanelGradient.colors]}
+            locations={[...textPanelGradient.locations]}
+            pointerEvents="box-none"
+            style={[
+              styles.newspaperTextPanel,
+              isHero
+                ? styles.newspaperTextPanelHero
+                : isFeatured
+                  ? styles.newspaperTextPanelFeatured
+                  : styles.newspaperTextPanelCompact,
+            ]}>
+            <View style={styles.newspaperMetaRow} pointerEvents="box-none">
+              <View style={styles.newspaperMetaSource} pointerEvents="auto">
+                <ArticleSourceMenu article={article} tone="onImage" />
               </View>
+              <View style={styles.metaEnd} pointerEvents="none">
+                {requiresSubscription ? (
+                  <SubscriptionBadge compact={isCompact} tone="onImage" />
+                ) : null}
+                <Text style={styles.newspaperMeta}>{formatDate(article.publishedAt)}</Text>
+              </View>
+            </View>
+            <Pressable
+              onPress={openArticle}
+              accessibilityRole="button"
+              accessibilityLabel={`Read ${article.title}`}
+              style={({ pressed }) => [styles.newspaperTitlePressable, pressed && styles.pressed]}>
               <Text
                 style={[
                   styles.newspaperTitle,
@@ -353,8 +354,8 @@ function NewspaperOverlayCard({
                 ellipsizeMode="tail">
                 {article.title}
               </Text>
-            </LinearGradient>
-          </Pressable>
+            </Pressable>
+          </LinearGradient>
         </View>
       </View>
     </View>
@@ -739,7 +740,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
   },
-  newspaperTextPanelPressable: {
+  newspaperTitlePressable: {
     width: '100%',
   },
   newspaperTextPanel: {

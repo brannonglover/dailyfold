@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   InteractionManager,
@@ -18,6 +18,7 @@ import { ArticleImage } from '@/components/ArticleImage';
 import { ArticleSourceMenu } from '@/components/ArticleSourceMenu';
 import { ArticleVideoBlock } from '@/components/ArticleVideoBlock';
 import { SubscriptionBanner } from '@/components/SubscriptionBanner';
+import { SourceMenuHost } from '@/contexts/SourceMenuContext';
 import { useOpenPublisherArticle } from '@/hooks/useOpenPublisherArticle';
 import { useTheme } from '@/hooks/useTheme';
 import {
@@ -142,11 +143,14 @@ export function ArticleReader({ article }: ArticleReaderProps) {
   const [isLoadingContent, setIsLoadingContent] = useState(
     () => !getCachedReaderContent(article.id),
   );
+  const activeContentArticleIdRef = useRef(article.id);
 
   useEffect(() => {
     let cancelled = false;
+    const contentArticleId = article.id;
+    activeContentArticleIdRef.current = contentArticleId;
 
-    const cached = getCachedReaderContent(article.id);
+    const cached = getCachedReaderContent(contentArticleId);
     if (cached) {
       setReaderContent(cached);
       setContentError(false);
@@ -159,15 +163,18 @@ export function ArticleReader({ article }: ArticleReaderProps) {
 
     const task = InteractionManager.runAfterInteractions(() => {
       if (cancelled) return;
-      fetchArticleReaderContent(article.id)
+      fetchArticleReaderContent(contentArticleId)
         .then((content) => {
-          if (!cancelled) setReaderContent(content);
+          if (cancelled || activeContentArticleIdRef.current !== contentArticleId) return;
+          setReaderContent(content);
         })
         .catch(() => {
-          if (!cancelled) setContentError(true);
+          if (cancelled || activeContentArticleIdRef.current !== contentArticleId) return;
+          setContentError(true);
         })
         .finally(() => {
-          if (!cancelled) setIsLoadingContent(false);
+          if (cancelled || activeContentArticleIdRef.current !== contentArticleId) return;
+          setIsLoadingContent(false);
         });
     });
 
@@ -192,10 +199,13 @@ export function ArticleReader({ article }: ArticleReaderProps) {
   const showLoadMoreError = contentError && !isLoadingContent && !hasReadableBody;
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]}
+    <SourceMenuHost>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]}
+          keyboardShouldPersistTaps="handled"
+          delaysContentTouches={false}
         showsVerticalScrollIndicator={false}
         showsHorizontalScrollIndicator={false}
         alwaysBounceHorizontal={false}
@@ -307,8 +317,9 @@ export function ArticleReader({ article }: ArticleReaderProps) {
         </View>
       </ScrollView>
 
-      <ArticleActions article={article} />
-    </View>
+        <ArticleActions article={article} />
+      </View>
+    </SourceMenuHost>
   );
 }
 

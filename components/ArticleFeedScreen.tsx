@@ -3,6 +3,7 @@ import { ActivityIndicator, RefreshControl, StyleSheet, Text, View } from 'react
 
 import { ArticleFeed, ArticleFeedHandle, ArticleFeedLayout } from '@/components/ArticleFeed';
 import { FeedHeader } from '@/components/FeedHeader';
+import { SourceMenuHost } from '@/contexts/SourceMenuContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Article } from '@/types';
 
@@ -79,8 +80,9 @@ export const ArticleFeedScreen = memo(
   }
 
   return (
-    <View style={styles.flex}>
-      <ArticleFeed
+    <SourceMenuHost>
+      <View style={styles.flex}>
+        <ArticleFeed
         ref={ref}
         articles={articles}
         title={title}
@@ -115,7 +117,8 @@ export const ArticleFeedScreen = memo(
         onFeedClick={onFeedClick}
         isRefreshing={isRefreshing}
       />
-    </View>
+      </View>
+    </SourceMenuHost>
   );
   }),
 );

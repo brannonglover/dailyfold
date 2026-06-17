@@ -13,7 +13,7 @@ import { AppState, AppStateStatus, InteractionManager } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { takeWarmArticleCache } from '@/services/articleCache';
-import { fetchArticles, FetchArticlesResult, resolveArticleDisplayFields } from '@/services/articles';
+import { fetchArticles, ARTICLE_PAGE_SIZE, FetchArticlesResult, resolveArticleDisplayFields } from '@/services/articles';
 import { loadFeedSnapshot, saveFeedSnapshot } from '@/services/feedPersistence';
 import { applyFeedFilters, applyTrendingNotificationFilters } from '@/services/feedFilters';
 import { getEnabledSourceIds, isAllSourcesEnabled } from '@/services/sourcePreferences';
@@ -32,6 +32,8 @@ import {
   pendingNotAlreadyInFeed,
   reconcilePendingWithFeeds,
 } from '@/utils/pendingFeedArticles';
+import { MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION } from '@/utils/feedLoadMoreGate';
+import { fetchFeedUntilStocked } from '@/utils/feedInitialStock';
 import { shouldBumpPaginationRevision } from '@/utils/paginationRevision';
 
 interface UseArticlesResult {
@@ -193,7 +195,9 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       return fetchArticles({
         forceRefresh: mode === 'refresh' ? forceRefresh : false,
         sourceIds: restrictSources && sourceIds.length > 0 ? sourceIds : undefined,
-        cursor: mode === 'append' ? cursor : undefined,
+        cursor,
+        limit:
+          mode === 'append' ? ARTICLE_PAGE_SIZE : MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION,
       });
     },
     [sourceIds, preferences],
@@ -316,6 +320,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         setIsRefreshing(true);
       } else if (mode === 'initial') {
         setIsLoading(true);
+        setPendingArticles([]);
       } else if (mode === 'append') {
         setIsLoadingMore(true);
       } else if (mode === 'silent') {
@@ -334,7 +339,12 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
           if (mode === 'initial' && generation !== fetchGenerationRef.current) return;
 
           try {
-            const { articles: data, meta } = await requestArticles(mode, forceRefresh, cursor);
+            const shouldStockFeed = (mode === 'initial' || mode === 'refresh') && !cursor;
+            const { articles: data, meta } = shouldStockFeed
+              ? await fetchFeedUntilStocked((pageCursor) =>
+                  requestArticles(mode, forceRefresh, pageCursor),
+                )
+              : await requestArticles(mode, forceRefresh, cursor);
 
             if (data.length === 0 && isIngestPending(meta) && mode !== 'append') {
               if (generation === fetchGenerationRef.current) {
@@ -434,7 +444,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       const snapshot = await loadFeedSnapshot(user.id, sourceIdsKey);
       if (cancelled) return;
 
-      if (snapshot && snapshot.length > 0) {
+      if (snapshot && snapshot.length >= MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION) {
         setArticles(snapshot.map(resolveArticleDisplayFields));
         setPendingArticles([]);
         setIsLoading(false);

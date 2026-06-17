@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -15,17 +15,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useTheme } from '@/hooks/useTheme';
-import { buildNotForMeOptions, NotForMeAction, NotForMeOption } from '@/services/notForMeOptions';
+import { NotForMeAction, NotForMeOption, getCachedNotForMeOptions } from '@/services/notForMeOptions';
+import { scheduleLoadNotForMeOptions } from '@/services/notForMeOptionsSchedule';
 import { Article } from '@/types';
 
 export type { NotForMeAction } from '@/services/notForMeOptions';
 
 interface NotForMeModalProps {
   article: Article;
+  visible: boolean;
   onClose: () => void;
 }
 
-export function NotForMeModal({ article, onClose }: NotForMeModalProps) {
+export function NotForMeModal({ article, visible, onClose }: NotForMeModalProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const {
@@ -36,57 +38,85 @@ export function NotForMeModal({ article, onClose }: NotForMeModalProps) {
     hideKeywordFromArticle,
     hideSimilarToArticle,
   } = usePreferences();
-
   const [options, setOptions] = useState<NotForMeOption[] | null>(null);
+  const [isLoadingOptions, setIsLoadingOptions] = useState(false);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   useEffect(() => {
+    if (!visible) return;
+
     let cancelled = false;
-    const frame = requestAnimationFrame(() => {
-      if (!cancelled) {
-        setOptions(buildNotForMeOptions(article, sources));
-      }
+    const hasReadyOptions =
+      optionsRef.current !== null || getCachedNotForMeOptions(article, sources) !== null;
+    if (!hasReadyOptions) {
+      setIsLoadingOptions(true);
+    }
+
+    const cancel = scheduleLoadNotForMeOptions(article, sources, (loaded) => {
+      if (cancelled) return;
+      setOptions(loaded);
+      setIsLoadingOptions(false);
     });
+
     return () => {
       cancelled = true;
-      cancelAnimationFrame(frame);
+      cancel();
     };
-  }, [article, sources]);
+  }, [visible, article, sources]);
 
-  async function runAction(action: NotForMeAction) {
+  function runAction(action: NotForMeAction) {
     onClose();
 
     if (Platform.OS !== 'web') {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
 
-    switch (action.type) {
-      case 'source':
-        await hideSourceFromArticle(article);
-        break;
-      case 'topic':
-        await hideTopicFromArticle(article, action.topic);
-        break;
-      case 'sportTag':
-        await hideSportTagFromArticle(article, action.tag);
-        break;
-      case 'keyword':
-        await hideKeywordFromArticle(article, action.keyword);
-        break;
-      case 'similar':
-        await hideSimilarToArticle(article);
-        break;
-    }
+    queueMicrotask(() => {
+      void (async () => {
+        switch (action.type) {
+          case 'source':
+            await hideSourceFromArticle(article);
+            break;
+          case 'topic':
+            await hideTopicFromArticle(article, action.topic);
+            break;
+          case 'sportTag':
+            await hideSportTagFromArticle(article, action.tag);
+            break;
+          case 'keyword':
+            await hideKeywordFromArticle(article, action.keyword);
+            break;
+          case 'similar':
+            await hideSimilarToArticle(article);
+            break;
+        }
+      })();
+    });
   }
 
   function handleCancel() {
     onClose();
   }
 
+  const showOptionsLoader = isLoadingOptions;
+
   return (
-    <Modal visible animationType="slide" transparent onRequestClose={handleCancel}>
-      <View style={styles.root}>
-        <Pressable style={styles.backdrop} onPress={handleCancel} accessibilityRole="button" />
-        <View
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={handleCancel}
+      statusBarTranslucent>
+      <View style={styles.root} pointerEvents="box-none">
+        <Pressable
+          style={styles.backdrop}
+          onPress={handleCancel}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss source options"
+        />
+        <Pressable
+          onPress={() => {}}
           style={[
             styles.sheet,
             {
@@ -107,11 +137,15 @@ export function NotForMeModal({ article, onClose }: NotForMeModalProps) {
             showsVerticalScrollIndicator={false}
             bounces={false}
             nestedScrollEnabled>
-            {options ? (
+            {showOptionsLoader ? (
+              <View style={styles.loader}>
+                <ActivityIndicator color={colors.textSecondary} />
+              </View>
+            ) : options ? (
               options.map((option) => (
                 <Pressable
                   key={option.key}
-                  onPress={() => void runAction(option.action)}
+                  onPress={() => runAction(option.action)}
                   style={({ pressed }) => [
                     styles.row,
                     { borderColor: colors.border },
@@ -128,11 +162,7 @@ export function NotForMeModal({ article, onClose }: NotForMeModalProps) {
                   </View>
                 </Pressable>
               ))
-            ) : (
-              <View style={styles.loading}>
-                <ActivityIndicator color={colors.textSecondary} />
-              </View>
-            )}
+            ) : null}
           </ScrollView>
 
           <Pressable
@@ -144,7 +174,7 @@ export function NotForMeModal({ article, onClose }: NotForMeModalProps) {
             ]}>
             <Text style={[styles.cancelButtonText, { color: colors.text }]}>Cancel</Text>
           </Pressable>
-        </View>
+        </Pressable>
       </View>
     </Modal>
   );
@@ -158,6 +188,8 @@ const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    zIndex: 1,
+    elevation: 1,
   },
   sheet: {
     width: '100%',
@@ -168,6 +200,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 12,
     maxHeight: Platform.OS === 'web' ? '80%' : '85%',
+    zIndex: 2,
+    elevation: 2,
   },
   handle: {
     alignSelf: 'center',
@@ -194,7 +228,7 @@ const styles = StyleSheet.create({
   bodyContent: {
     gap: 0,
   },
-  loading: {
+  loader: {
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 28,

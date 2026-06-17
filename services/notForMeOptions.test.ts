@@ -8,7 +8,7 @@ import {
   addBlockedSportTag,
   filterArticlesByBlocks,
 } from '@/services/blockPreferences';
-import { buildNotForMeOptions } from '@/services/notForMeOptions';
+import { buildNotForMeOptions, getCachedNotForMeOptions, warmNotForMeOptions } from '@/services/notForMeOptions';
 import { Article, UserPreferences } from '@/types';
 
 function basePrefs(overrides: Partial<UserPreferences> = {}): UserPreferences {
@@ -205,6 +205,120 @@ const yahooAllegriArticle: Article = {
   publishedAt: '2026-06-01T12:00:00Z',
   url: 'https://example.com/yahoo-allegri',
 };
+
+test('warmNotForMeOptions primes cache when sources match buildNotForMeOptions', () => {
+  const article = {
+    ...nflArticle,
+    id: 'warm-cache-prime-test',
+  };
+  const apiOnlySource = {
+    id: 'api-only-outlet',
+    name: 'Only In API',
+    description: 'API-only publisher',
+    topics: ['news' as const],
+    primaryTopic: 'news' as const,
+    logoUrl: 'https://example.com/logo.png',
+  };
+  const apiSources = [...FALLBACK_SOURCES, apiOnlySource];
+  const apiArticle = { ...article, id: 'warm-cache-api-outlet', source: 'Only In API' };
+
+  warmNotForMeOptions(apiArticle, apiSources);
+  const options = buildNotForMeOptions(apiArticle, apiSources);
+
+  assert.ok(options.some((option) => option.label === 'Show less Only In API'));
+});
+
+test('warmNotForMeOptions primes article cache even when sources list grows before reopen', () => {
+  const apiOnlySource = {
+    id: 'api-only-outlet-2',
+    name: 'Only In API Two',
+    description: 'API-only publisher',
+    topics: ['news' as const],
+    primaryTopic: 'news' as const,
+    logoUrl: 'https://example.com/logo.png',
+  };
+  const apiSources = [...FALLBACK_SOURCES, apiOnlySource];
+  const apiArticle = {
+    ...nflArticle,
+    id: 'warm-cache-mismatch-test',
+    source: 'Only In API Two',
+  };
+
+  // First open before API sources load — article options cached, no outlet row yet.
+  const firstOpen = buildNotForMeOptions(apiArticle, FALLBACK_SOURCES);
+  assert.ok(!firstOpen.some((option) => option.key === 'source'));
+
+  // Second open after sources refresh — article cache hit, outlet row added cheaply.
+  warmNotForMeOptions(apiArticle, FALLBACK_SOURCES);
+  const secondOpen = buildNotForMeOptions(apiArticle, apiSources);
+  assert.ok(secondOpen.some((option) => option.label === 'Show less Only In API Two'));
+  assert.deepEqual(
+    secondOpen.filter((option) => option.key !== 'source'),
+    firstOpen,
+  );
+});
+
+test('subsequent open stays fast when sources list grows after first warm', () => {
+  const apiOnlySource = {
+    id: 'api-only-outlet-3',
+    name: 'Late Loaded Outlet',
+    description: 'API-only publisher',
+    topics: ['news' as const],
+    primaryTopic: 'news' as const,
+    logoUrl: 'https://example.com/logo.png',
+  };
+  const apiSources = [...FALLBACK_SOURCES, apiOnlySource];
+  const apiArticle = {
+    ...nflArticle,
+    id: 'subsequent-open-fast-test',
+    source: 'Late Loaded Outlet',
+  };
+
+  warmNotForMeOptions(apiArticle, FALLBACK_SOURCES);
+  const firstOpen = buildNotForMeOptions(apiArticle, FALLBACK_SOURCES);
+  const secondOpen = buildNotForMeOptions(apiArticle, apiSources);
+
+  assert.ok(secondOpen.some((option) => option.label === 'Show less Late Loaded Outlet'));
+  assert.deepEqual(
+    secondOpen.filter((option) => option.key !== 'source'),
+    firstOpen,
+  );
+});
+
+test('getCachedNotForMeOptions returns stable full options after build', () => {
+  const article = { ...nflArticle, id: 'full-cache-test' };
+
+  assert.equal(getCachedNotForMeOptions(article, FALLBACK_SOURCES), null);
+  const built = buildNotForMeOptions(article, FALLBACK_SOURCES);
+  const cached = getCachedNotForMeOptions(article, FALLBACK_SOURCES);
+
+  assert.ok(cached);
+  assert.equal(cached, built);
+});
+
+test('getCachedNotForMeOptions reuses article cache when sources list grows', () => {
+  const apiOnlySource = {
+    id: 'api-only-outlet-cache',
+    name: 'Cache Growth Outlet',
+    description: 'API-only publisher',
+    topics: ['news' as const],
+    primaryTopic: 'news' as const,
+    logoUrl: 'https://example.com/logo.png',
+  };
+  const apiSources = [...FALLBACK_SOURCES, apiOnlySource];
+  const apiArticle = {
+    ...nflArticle,
+    id: 'full-cache-growth-test',
+    source: 'Cache Growth Outlet',
+  };
+
+  buildNotForMeOptions(apiArticle, FALLBACK_SOURCES);
+  assert.equal(getCachedNotForMeOptions(apiArticle, FALLBACK_SOURCES)?.some((o) => o.key === 'source'), false);
+
+  const withOutlet = buildNotForMeOptions(apiArticle, apiSources);
+  assert.ok(withOutlet.some((option) => option.label === 'Show less Cache Growth Outlet'));
+  assert.equal(getCachedNotForMeOptions(apiArticle, apiSources), withOutlet);
+});
 
 test('buildNotForMeOptions for Yahoo Sports avoids headline person names and fragments', () => {
   const options = buildNotForMeOptions(yahooAllegriArticle, FALLBACK_SOURCES);

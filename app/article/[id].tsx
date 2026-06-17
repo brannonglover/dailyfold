@@ -9,6 +9,7 @@ import { patchFeedArticle } from '@/services/articleFeedPatch';
 import { fetchArticleById } from '@/services/articles';
 import { Article } from '@/types';
 import { isValidArticleRouteId } from '@/utils/notificationArticleLink';
+import { resolveDisplayArticle } from '@/utils/resolveDisplayArticle';
 
 function resolveArticleId(id: string | string[] | undefined): string | undefined {
   const raw = typeof id === 'string' ? id : Array.isArray(id) ? id[0] : undefined;
@@ -24,6 +25,9 @@ export default function ArticleScreen() {
     return getRememberedArticle(articleId);
   });
   const [isLoading, setIsLoading] = useState(() => !article);
+
+  const displayArticle = resolveDisplayArticle(articleId, article, getRememberedArticle);
+  const routeArticlePending = Boolean(articleId && !displayArticle);
 
   useEffect(() => {
     if (!articleId) {
@@ -41,16 +45,18 @@ export default function ArticleScreen() {
 
     let cancelled = false;
     const task = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
       fetchArticleById(articleId)
         .then((fetched) => {
           if (cancelled) return;
-          if (fetched) {
-            rememberOpenArticle(fetched);
-            patchFeedArticle(fetched);
-            setArticle(fetched);
+          if (!fetched) {
+            if (!remembered) setArticle(undefined);
             return;
           }
-          if (!remembered) setArticle(undefined);
+          if (fetched.id !== articleId) return;
+          rememberOpenArticle(fetched);
+          patchFeedArticle(fetched);
+          setArticle(fetched);
         })
         .catch(() => {
           if (!cancelled && !remembered) setArticle(undefined);
@@ -66,7 +72,7 @@ export default function ArticleScreen() {
     };
   }, [articleId]);
 
-  if (isLoading) {
+  if (isLoading || routeArticlePending) {
     return (
       <>
         <Stack.Screen
@@ -86,7 +92,7 @@ export default function ArticleScreen() {
     );
   }
 
-  if (!article) {
+  if (!displayArticle) {
     return (
       <>
         <Stack.Screen options={{ title: 'Not found' }} />
@@ -103,7 +109,7 @@ export default function ArticleScreen() {
     <>
       <Stack.Screen
         options={{
-          title: article.source,
+          title: displayArticle.source,
           headerStyle: { backgroundColor: colors.background },
           headerShadowVisible: false,
           headerTintColor: colors.text,
@@ -115,7 +121,7 @@ export default function ArticleScreen() {
           animation: 'slide_from_right',
         }}
       />
-      <ArticleReader article={article} />
+      <ArticleReader key={articleId} article={displayArticle} />
     </>
   );
 }

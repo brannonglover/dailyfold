@@ -23,7 +23,7 @@ export interface NotForMeOption {
 }
 
 const MAX_INTEREST_KEYWORD_OPTIONS = 3;
-const OPTIONS_CACHE_LIMIT = 64;
+const ARTICLE_OPTIONS_CACHE_LIMIT = 64;
 
 function articleText(article: Article): string {
   return `${article.title} ${article.excerpt}`;
@@ -33,8 +33,8 @@ function normalizeLabel(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function optionsCacheKey(article: Article, sources: FeedSource[]): string {
-  const hasSource = sources.some((source) => source.name === article.source);
+/** Cache key for article-derived options only (sources list is applied afterward). */
+function articleOptionsCacheKey(article: Article): string {
   return [
     article.id,
     article.title,
@@ -42,46 +42,48 @@ function optionsCacheKey(article: Article, sources: FeedSource[]): string {
     article.source,
     article.topics.join(','),
     (article.sportTags ?? []).join(','),
-    hasSource ? '1' : '0',
   ].join('\0');
 }
 
-const optionsCache = new Map<string, NotForMeOption[]>();
+const articleOptionsCache = new Map<string, NotForMeOption[]>();
+const fullOptionsCache = new Map<string, NotForMeOption[]>();
+const FULL_OPTIONS_CACHE_LIMIT = 64;
 
-function rememberOptions(key: string, options: NotForMeOption[]): NotForMeOption[] {
-  if (optionsCache.size >= OPTIONS_CACHE_LIMIT) {
-    const oldest = optionsCache.keys().next().value;
-    if (oldest) optionsCache.delete(oldest);
+function rememberArticleOptions(key: string, options: NotForMeOption[]): NotForMeOption[] {
+  if (articleOptionsCache.size >= ARTICLE_OPTIONS_CACHE_LIMIT) {
+    const oldest = articleOptionsCache.keys().next().value;
+    if (oldest) articleOptionsCache.delete(oldest);
   }
-  optionsCache.set(key, options);
+  articleOptionsCache.set(key, options);
   return options;
 }
 
-/** Warm the options cache during press-in so the sheet opens with options ready. */
-export function warmNotForMeOptions(article: Article, sources: FeedSource[]): void {
-  buildNotForMeOptions(article, sources);
+function fullOptionsCacheKey(article: Article, sourceId: string | null): string {
+  return `${articleOptionsCacheKey(article)}\0${sourceId ?? ''}`;
 }
 
-/** Build "Not for me" menu options from an article's source, topics, sports, and interest signals. */
-export function buildNotForMeOptions(article: Article, sources: FeedSource[]): NotForMeOption[] {
-  const cacheKey = optionsCacheKey(article, sources);
-  const cached = optionsCache.get(cacheKey);
-  if (cached) return cached;
+function rememberFullOptions(key: string, options: NotForMeOption[]): NotForMeOption[] {
+  if (fullOptionsCache.size >= FULL_OPTIONS_CACHE_LIMIT) {
+    const oldest = fullOptionsCache.keys().next().value;
+    if (oldest) fullOptionsCache.delete(oldest);
+  }
+  fullOptionsCache.set(key, options);
+  return options;
+}
 
+function sourceOption(article: Article): NotForMeOption {
+  return {
+    key: 'source',
+    label: `Show less ${article.source}`,
+    detail: 'You can re-enable this outlet in Profile → Sources',
+    action: { type: 'source' },
+  };
+}
+
+function buildArticleOptions(article: Article): NotForMeOption[] {
   const text = articleText(article);
   const options: NotForMeOption[] = [];
   const coveredLabels = new Set<string>();
-
-  const sourceId = findSourceIdForArticle(article, sources);
-  if (sourceId) {
-    options.push({
-      key: 'source',
-      label: `Show less ${article.source}`,
-      detail: 'You can re-enable this outlet in Profile → Sources',
-      action: { type: 'source' },
-    });
-    coveredLabels.add(normalizeLabel(article.source));
-  }
 
   const sportTags = inferSportTags(text, article.sportTags ?? []);
   const coveredSportTags = new Set<SportTag>();
@@ -161,5 +163,42 @@ export function buildNotForMeOptions(article: Article, sources: FeedSource[]): N
     action: { type: 'similar' },
   });
 
-  return rememberOptions(cacheKey, options);
+  return options;
+}
+
+/** Returns fully assembled options when already cached (cheap map lookup). */
+export function getCachedNotForMeOptions(
+  article: Article,
+  sources: FeedSource[],
+): NotForMeOption[] | null {
+  const sourceId = findSourceIdForArticle(article, sources);
+  return fullOptionsCache.get(fullOptionsCacheKey(article, sourceId)) ?? null;
+}
+
+/** Warm the options cache during press-in so the sheet opens with options ready. */
+export function warmNotForMeOptions(article: Article, sources: FeedSource[]): void {
+  buildNotForMeOptions(article, sources);
+}
+
+/** Build "Not for me" menu options from an article's source, topics, sports, and interest signals. */
+export function buildNotForMeOptions(article: Article, sources: FeedSource[]): NotForMeOption[] {
+  const sourceId = findSourceIdForArticle(article, sources);
+  const fullKey = fullOptionsCacheKey(article, sourceId);
+  const fullCached = fullOptionsCache.get(fullKey);
+  if (fullCached) return fullCached;
+
+  const cacheKey = articleOptionsCacheKey(article);
+  let articleOptions = articleOptionsCache.get(cacheKey);
+  if (!articleOptions) {
+    articleOptions = rememberArticleOptions(cacheKey, buildArticleOptions(article));
+  }
+
+  if (!sourceId) return rememberFullOptions(fullKey, articleOptions);
+
+  const sourceLabel = normalizeLabel(sourceOption(article).label);
+  if (articleOptions.some((option) => normalizeLabel(option.label) === sourceLabel)) {
+    return rememberFullOptions(fullKey, articleOptions);
+  }
+
+  return rememberFullOptions(fullKey, [sourceOption(article), ...articleOptions]);
 }

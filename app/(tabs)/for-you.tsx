@@ -16,6 +16,7 @@ import {
 import { isAllSourcesEnabled } from '@/services/sourcePreferences';
 import { buildForYouCacheKeys } from '@/utils/forYouPrewarm';
 import { getForYouEmptyMessage } from '@/utils/feedEmptyMessage';
+import { isFeedInteractionLocked, subscribeFeedInteractionLock } from '@/utils/feedInteractionLock';
 import { orderPersonalizedFeed } from '@/utils/feedOrdering';
 import {
   insertDisplayNewcomersAtSourceOrder,
@@ -50,6 +51,7 @@ function ForYouScreenContent() {
     likedArticlesReady && hasPersonalizationSignals(preferences);
   const syncDisplayHandledRef = useRef(false);
   const isFocused = useIsFocused();
+  const [feedInteractionEpoch, setFeedInteractionEpoch] = useState(0);
   const [matchReasonsByArticleId, setMatchReasonsByArticleId] = useState(
     () => new Map<string, string[]>(),
   );
@@ -92,6 +94,8 @@ function ForYouScreenContent() {
   const { markInitialDisplay, shouldAllowFullRebuild, shouldAllowSilentMerge } =
     useDisplayOrderLock(isRefreshing, 'for-you');
 
+  useEffect(() => subscribeFeedInteractionLock(() => setFeedInteractionEpoch((n) => n + 1)), []);
+
   const showableArticles = useMemo(() => {
     if (!userHasPersonalizationSignals || !preferences) return [];
     if (displayArticles.length > 0) return displayArticles;
@@ -128,6 +132,7 @@ function ForYouScreenContent() {
   useDeferAfterFocus(
     isFocused,
     () => {
+      if (isFeedInteractionLocked()) return;
       syncDisplayHandledRef.current = false;
       if (!userHasPersonalizationSignals || !preferences) {
         return;
@@ -202,6 +207,7 @@ function ForYouScreenContent() {
       setDisplayReady,
       prevFeedGenerationRef,
       prevRawLengthRef,
+      feedInteractionEpoch,
     ],
     'paint',
   );
