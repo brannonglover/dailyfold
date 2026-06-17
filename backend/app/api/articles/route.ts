@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { corsHeaders, jsonResponse } from '@/lib/cors';
 import { getIngestStatus, listArticles } from '@/lib/db';
 import { getSourceNameById } from '@/lib/feeds';
+import { scheduleGuardianHeroRepair } from '@/lib/ingest';
 import { ensureFreshArticles } from '@/lib/ingest-scheduler';
 
 export const maxDuration = 60;
@@ -31,6 +32,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const freshness = await ensureFreshArticles({ force });
+    scheduleGuardianHeroRepair();
 
     const page = listArticles({
       limit: Number.isFinite(limit) ? limit : 200,

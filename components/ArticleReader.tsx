@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  InteractionManager,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,6 +18,7 @@ import { ArticleImage } from '@/components/ArticleImage';
 import { ArticleSourceMenu } from '@/components/ArticleSourceMenu';
 import { ArticleVideoBlock } from '@/components/ArticleVideoBlock';
 import { SubscriptionBanner } from '@/components/SubscriptionBanner';
+import { useOpenPublisherArticle } from '@/hooks/useOpenPublisherArticle';
 import { useTheme } from '@/hooks/useTheme';
 import {
   fetchArticleReaderContent,
@@ -26,7 +28,6 @@ import { ARTICLE_NO_IMAGE, isArticlePlaceholderImageUrl, resolveArticleImageUrl 
 import { Article } from '@/types';
 import { ArticleReaderBlock, ArticleReaderContent } from '@/types/articleContent';
 import { resolveReaderBlockLayout } from '@/utils/articleParagraphs';
-import { hasOpenablePublisherUrl, openPublisherArticle } from '@/utils/openPublisherBrowser';
 
 interface ArticleReaderProps {
   article: Article;
@@ -93,11 +94,47 @@ function ReaderBlockView({
   );
 }
 
+function PublisherLink({
+  label,
+  style,
+  textStyle,
+  onPress,
+  isOpening,
+  colors,
+}: {
+  label: string;
+  style: object;
+  textStyle: object;
+  onPress: () => void;
+  isOpening: boolean;
+  colors: ReturnType<typeof useTheme>['colors'];
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={isOpening}
+      style={({ pressed }) => [style, (pressed || isOpening) && { opacity: 0.7 }]}
+      accessibilityRole="link"
+      accessibilityLabel={label}
+      accessibilityState={{ busy: isOpening }}>
+      {isOpening ? (
+        <ActivityIndicator size="small" color={colors.textSecondary} />
+      ) : (
+        <Ionicons name="open-outline" size={14} color={colors.textSecondary} />
+      )}
+      <Text style={[textStyle, { color: colors.textSecondary }]}>
+        {isOpening ? 'Opening…' : label}
+      </Text>
+    </Pressable>
+  );
+}
+
 export function ArticleReader({ article }: ArticleReaderProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const requiresSubscription = article.requiresSubscription === true;
-  const canOpenOnPublisher = hasOpenablePublisherUrl(article.url);
+  const { open: openOnPublisher, isOpening: isOpeningPublisher, canOpen: canOpenOnPublisher } =
+    useOpenPublisherArticle(article.url);
   const [readerContent, setReaderContent] = useState<ArticleReaderContent | null>(
     () => getCachedReaderContent(article.id) ?? null,
   );
@@ -120,19 +157,23 @@ export function ArticleReader({ article }: ArticleReaderProps) {
       setReaderContent(null);
     }
 
-    fetchArticleReaderContent(article.id)
-      .then((content) => {
-        if (!cancelled) setReaderContent(content);
-      })
-      .catch(() => {
-        if (!cancelled) setContentError(true);
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoadingContent(false);
-      });
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
+      fetchArticleReaderContent(article.id)
+        .then((content) => {
+          if (!cancelled) setReaderContent(content);
+        })
+        .catch(() => {
+          if (!cancelled) setContentError(true);
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoadingContent(false);
+        });
+    });
 
     return () => {
       cancelled = true;
+      task.cancel();
     };
   }, [article.id]);
 
@@ -147,6 +188,7 @@ export function ArticleReader({ article }: ArticleReaderProps) {
   const showFeedLede = !!feedLede;
   const hasReadableBody = bodyBlocks.length > 0;
   const showLoadingBody = isLoadingContent && !hasReadableBody;
+  const showExtractionInProgress = isLoadingContent && hasReadableBody;
   const showLoadMoreError = contentError && !isLoadingContent && !hasReadableBody;
 
   return (
@@ -193,16 +235,14 @@ export function ArticleReader({ article }: ArticleReaderProps) {
           </View>
 
           {canOpenOnPublisher ? (
-            <Pressable
-              onPress={() => openPublisherArticle(article.url)}
-              style={({ pressed }) => [styles.publisherLinkTop, pressed && { opacity: 0.7 }]}
-              accessibilityRole="link"
-              accessibilityLabel={`Open article on ${article.source}`}>
-              <Ionicons name="open-outline" size={14} color={colors.textSecondary} />
-              <Text style={[styles.publisherLinkTopText, { color: colors.textSecondary }]}>
-                {`Open on ${article.source}`}
-              </Text>
-            </Pressable>
+            <PublisherLink
+              label={`Open on ${article.source}`}
+              style={styles.publisherLinkTop}
+              textStyle={styles.publisherLinkTopText}
+              onPress={openOnPublisher}
+              isOpening={isOpeningPublisher}
+              colors={colors}
+            />
           ) : null}
 
           {showFeedLede && feedLede ? (
@@ -239,6 +279,15 @@ export function ArticleReader({ article }: ArticleReaderProps) {
             </View>
           ) : null}
 
+          {showExtractionInProgress ? (
+            <View style={styles.loadingBody}>
+              <ActivityIndicator color={colors.textSecondary} />
+              <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+                {`Loading more from ${article.source}…`}
+              </Text>
+            </View>
+          ) : null}
+
           {showLoadMoreError ? (
             <Text style={[styles.errorText, { color: colors.textSecondary }]}>
               We couldn't load more of this article in the app.
@@ -246,16 +295,14 @@ export function ArticleReader({ article }: ArticleReaderProps) {
           ) : null}
 
           {canOpenOnPublisher ? (
-            <Pressable
-              onPress={() => openPublisherArticle(article.url)}
-              style={({ pressed }) => [styles.publisherLink, pressed && { opacity: 0.7 }]}
-              accessibilityRole="link"
-              accessibilityLabel={`View full article on ${article.source}`}>
-              <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
-              <Text style={[styles.publisherLinkText, { color: colors.textSecondary }]}>
-                {`View full article on ${article.source}`}
-              </Text>
-            </Pressable>
+            <PublisherLink
+              label={`View full article on ${article.source}`}
+              style={styles.publisherLink}
+              textStyle={styles.publisherLinkText}
+              onPress={openOnPublisher}
+              isOpening={isOpeningPublisher}
+              colors={colors}
+            />
           ) : null}
         </View>
       </ScrollView>

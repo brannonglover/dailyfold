@@ -3,8 +3,10 @@ import { mkdirSync } from 'fs';
 import path from 'path';
 
 import { inferSportTags, type SportTag } from '../../catalog/sports';
+import { repairBrokenGuardianImageUrl } from '../../catalog/guardianImageUrl';
 
 import type { ReaderBlock } from './extract';
+import { articleNeedsHeroEnrichment } from './ogImage';
 
 import { Article, Topic } from './types';
 
@@ -158,7 +160,7 @@ function rowToArticle(row: ArticleRow): Article {
     excerpt: row.excerpt,
     body: row.body,
     source: row.source,
-    imageUrl: row.image_url,
+    imageUrl: repairBrokenGuardianImageUrl(row.image_url),
     topics,
     sportTags: sportTags.length > 0 ? sportTags : undefined,
     readTimeMinutes: row.read_time_minutes,
@@ -306,6 +308,22 @@ export function getArticleById(id: string): Article | undefined {
     .prepare(`SELECT * FROM articles WHERE id = ?`)
     .get(id) as ArticleRow | undefined;
   return row ? rowToArticle(row) : undefined;
+}
+
+/** Guardian rows missing a usable hero (empty, placeholder, or broken signed CDN URL). */
+export function listGuardianArticlesNeedingHeroRepair(): {
+  id: string;
+  url: string;
+  imageUrl: string;
+}[] {
+  const database = getDb();
+  const rows = database
+    .prepare(`SELECT id, url, image_url FROM articles WHERE source LIKE 'The Guardian%'`)
+    .all() as { id: string; url: string; image_url: string }[];
+
+  return rows
+    .filter((row) => articleNeedsHeroEnrichment(row.image_url))
+    .map((row) => ({ id: row.id, url: row.url, imageUrl: row.image_url }));
 }
 
 /** Backfill hero image when ingest missed RSS/OG enrichment (e.g. legacy Guardian rows). */

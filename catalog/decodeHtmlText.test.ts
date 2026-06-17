@@ -43,3 +43,12 @@ run('stripAndDecodeHtml strips inline emphasis from RSS titles', () => {
   assert.equal(stripAndDecodeHtml('Tom &amp; Jerry'), 'Tom & Jerry');
   assert.equal(stripAndDecodeHtml('Line one<br>Line two'), 'Line one Line two');
 });
+
+run('stripAndDecodeHtml strips entity-encoded markup from RSS descriptions', () => {
+  assert.equal(
+    stripAndDecodeHtml(
+      '&lt;p&gt;Kick-off time&lt;br&gt;&lt;a href="https://example.com"&gt;Player guide&lt;/a&gt;&lt;/p&gt;',
+    ),
+    'Kick-off time Player guide',
+  );
+});

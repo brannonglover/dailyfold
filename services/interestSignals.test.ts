@@ -5,8 +5,11 @@ import { CURIOSITY_ORDER } from '@/constants/curiosities';
 import { Article, UserPreferences } from '@/types';
 
 import {
+  applyArticleClickSignals,
   applyArticleLikeSignals,
+  buildInterestProfile,
   buildLikedInterestProfile,
+  CLICK_BOOST,
   reconcileInterestScores,
 } from './interestSignals';
 
@@ -14,6 +17,8 @@ function basePrefs(): UserPreferences {
   return {
     likedArticleIds: [],
     likedArticles: {},
+    clickedArticleIds: [],
+    clickedArticles: {},
     topicScores: Object.fromEntries(CURIOSITY_ORDER.map((t) => [t, 0])) as UserPreferences['topicScores'],
     sourceScores: {},
     keywordScores: {},
@@ -167,4 +172,61 @@ test('reconcileInterestScores rebuilds persisted scores from liked snapshots', (
 
   assert.equal(reconciled.topicScores.science, 1);
   assert.ok(Object.keys(reconciled.keywordScores).length > 0);
+});
+
+test('applyArticleClickSignals uses a weaker boost than likes', () => {
+  const prefs = basePrefs();
+  const likeSignals = applyArticleLikeSignals(prefs, article(), false);
+  const clickSignals = applyArticleClickSignals(prefs, article());
+
+  assert.equal(clickSignals.topicScores.culture, CLICK_BOOST);
+  assert.equal(likeSignals.topicScores.culture, 1);
+});
+
+test('buildInterestProfile combines likes and non-liked clicks', () => {
+  const liked = article({
+    id: 'liked-nba',
+    title: 'NBA playoffs preview',
+    topics: ['sports'],
+    sportTags: ['basketball'],
+  });
+  const clicked = article({
+    id: 'clicked-tv',
+    title: 'Must-watch series season finale',
+    topics: ['culture'],
+  });
+  const prefs = {
+    ...basePrefs(),
+    likedArticleIds: ['liked-nba'],
+    likedArticles: { 'liked-nba': liked },
+    clickedArticleIds: ['clicked-tv'],
+    clickedArticles: { 'clicked-tv': clicked },
+  };
+
+  const profile = buildInterestProfile(prefs);
+
+  assert.ok(profile);
+  assert.equal(profile!.topicScores.sports, 1);
+  assert.equal(profile!.topicScores.culture, CLICK_BOOST);
+  assert.ok(profile!.keywordScores.series > 0);
+});
+
+test('buildInterestProfile ignores clicked articles that are also liked', () => {
+  const liked = article({
+    id: 'shared',
+    title: 'Must-watch series season finale',
+    topics: ['culture'],
+  });
+  const prefs = {
+    ...basePrefs(),
+    likedArticleIds: ['shared'],
+    likedArticles: { shared: liked },
+    clickedArticleIds: ['shared'],
+    clickedArticles: { shared: liked },
+  };
+
+  const profile = buildInterestProfile(prefs);
+
+  assert.ok(profile);
+  assert.equal(profile!.topicScores.culture, 1);
 });

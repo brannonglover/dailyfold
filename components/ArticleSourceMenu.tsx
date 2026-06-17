@@ -1,31 +1,37 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { NotForMeModal } from '@/components/NotForMeModal';
+import { FALLBACK_SOURCES } from '@/data/sources';
 import { useTheme } from '@/hooks/useTheme';
+import { warmNotForMeOptions } from '@/services/notForMeOptions';
 import { Article } from '@/types';
 
 interface ArticleSourceMenuProps {
   article: Article;
-  bottomOffset?: number;
   /** Light text for title-on-image newspaper overlays */
   tone?: 'default' | 'onImage';
 }
 
 export function ArticleSourceMenu({
   article,
-  bottomOffset,
   tone = 'default',
 }: ArticleSourceMenuProps) {
   const { colors } = useTheme();
   const [visible, setVisible] = useState(false);
   const accentColor = tone === 'onImage' ? '#FFFFFF' : colors.accent;
+  const handleClose = useCallback(() => setVisible(false), []);
+  const handleOpen = useCallback(() => setVisible(true), []);
+  const handlePressIn = useCallback(() => {
+    warmNotForMeOptions(article, FALLBACK_SOURCES);
+  }, [article]);
 
   return (
     <>
       <Pressable
-        onPress={() => setVisible(true)}
+        onPress={handleOpen}
+        onPressIn={handlePressIn}
         style={({ pressed }) => [styles.trigger, pressed && styles.triggerPressed]}
         accessibilityRole="button"
         accessibilityLabel={`Source options for ${article.source}`}
@@ -48,12 +54,9 @@ export function ArticleSourceMenu({
         />
       </Pressable>
 
-      <NotForMeModal
-        visible={visible}
-        article={article}
-        bottomOffset={bottomOffset}
-        onClose={() => setVisible(false)}
-      />
+      {visible ? (
+        <NotForMeModal article={article} onClose={handleClose} />
+      ) : null}
     </>
   );
 }

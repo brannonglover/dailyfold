@@ -1,12 +1,13 @@
-import { decodeFeedText, stripAndDecodeHtml } from '@/catalog/decodeHtmlText';
+import { decodeFeedText, decodeHtmlEntities, stripAndDecodeHtml } from '@/catalog/decodeHtmlText';
+import { resolveArticleImageUrl } from '@/constants/images';
 import {
   WORLD_CUP_BRACKET_DATES,
   WORLD_CUP_FETCH_TIMEOUT_MS,
   WORLD_CUP_NEWS_FEEDS,
-  WORLD_CUP_SCOREBOARD_DAYS,
   WORLD_CUP_SCOREBOARD_URL,
   WORLD_CUP_STANDINGS_URL,
   WORLD_CUP_SUMMARY_URL,
+  WORLD_CUP_TOURNAMENT_DATES,
 } from '@/constants/worldCup';
 
 export interface WorldCupMatchTeam {
@@ -41,6 +42,18 @@ export interface WorldCupHalfScore {
   away: string;
 }
 
+export interface WorldCupPenaltyShootout {
+  home: string;
+  away: string;
+}
+
+export type WorldCupBroadcastType = 'tv' | 'streaming';
+
+export interface WorldCupBroadcast {
+  name: string;
+  type?: WorldCupBroadcastType;
+}
+
 export interface WorldCupMatch {
   id: string;
   startTime: string;
@@ -48,10 +61,13 @@ export interface WorldCupMatch {
   statusDetail: string;
   isLive: boolean;
   isFinal: boolean;
+  wentToPenalties: boolean;
   venue?: string;
   roundSlug?: string;
+  broadcasts?: WorldCupBroadcast[];
   home: WorldCupMatchTeam;
   away: WorldCupMatchTeam;
+  penaltyShootout?: WorldCupPenaltyShootout;
   events?: WorldCupMatchEvent[];
   teamStats?: {
     home: WorldCupTeamStats;
@@ -101,6 +117,14 @@ export interface WorldCupFeedResult {
   error?: string;
 }
 
+export interface WorldCupMatchDayGroup {
+  dateKey: string;
+  label: string;
+  matches: WorldCupMatch[];
+}
+
+export type WorldCupScoresStageFilter = 'all' | 'group' | 'knockout';
+
 interface EspnScoreboardResponse {
   events?: EspnEvent[];
   leagues?: EspnLeague[];
@@ -143,11 +167,23 @@ interface EspnLeague {
   calendar?: { entries?: EspnCalendarEntry[] }[];
 }
 
+interface EspnGeoBroadcast {
+  type?: { shortName?: string };
+  media?: { shortName?: string };
+}
+
+interface EspnBroadcastBucket {
+  market?: string;
+  names?: string[];
+}
+
 interface EspnCompetition {
   venue?: { fullName?: string };
   status?: { type?: EspnStatusType };
   competitors?: EspnCompetitor[];
   details?: EspnMatchDetail[];
+  broadcasts?: EspnBroadcastBucket[];
+  geoBroadcasts?: EspnGeoBroadcast[];
 }
 
 interface EspnMatchDetail {
@@ -176,6 +212,7 @@ interface EspnSummaryResponse {
 }
 
 interface EspnStatusType {
+  name?: string;
   state?: string;
   description?: string;
   shortDetail?: string;
@@ -231,15 +268,20 @@ async function fetchWithTimeout(url: string, timeoutMs = WORLD_CUP_FETCH_TIMEOUT
   }
 }
 
-function formatEspnDateRange(days: number): string {
-  const start = new Date();
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + Math.max(0, days - 1));
+function formatKickoffDateHeader(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+}
 
-  const fmt = (d: Date) =>
-    `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
-
-  return `${fmt(start)}-${fmt(end)}`;
+function localDateKey(iso: string): string {
+  const date = new Date(iso);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function teamFromCompetitor(competitor: EspnCompetitor): WorldCupMatchTeam {
@@ -278,7 +320,104 @@ function hasTeamStats(stats: WorldCupTeamStats): boolean {
   return Object.values(stats).some((value) => value !== undefined);
 }
 
-const HALF_SCORE_LABELS = ['1st Half', '2nd Half', 'Extra Time', 'Penalties'] as const;
+function broadcastTypeFromEspn(shortName: string | undefined): WorldCupBroadcastType | undefined {
+  const normalized = shortName?.trim().toLowerCase();
+  if (normalized === 'streaming') return 'streaming';
+  if (normalized === 'tv') return 'tv';
+  return undefined;
+}
+
+/** Parse ESPN competition broadcast fields into deduplicated network rows. */
+export function parseEspnBroadcasts(competition: {
+  geoBroadcasts?: EspnGeoBroadcast[];
+  broadcasts?: EspnBroadcastBucket[];
+}): WorldCupBroadcast[] | undefined {
+  const parsed: WorldCupBroadcast[] = [];
+  const seen = new Set<string>();
+
+  for (const item of competition.geoBroadcasts ?? []) {
+    const name = item.media?.shortName?.trim();
+    if (!name) continue;
+
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    parsed.push({
+      name,
+      type: broadcastTypeFromEspn(item.type?.shortName),
+    });
+  }
+
+  if (parsed.length > 0) return parsed;
+
+  for (const bucket of competition.broadcasts ?? []) {
+    for (const name of bucket.names ?? []) {
+      const trimmed = name.trim();
+      if (!trimmed) continue;
+
+      const key = trimmed.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      parsed.push({ name: trimmed });
+    }
+  }
+
+  return parsed.length > 0 ? parsed : undefined;
+}
+
+const HALF_SCORE_LABELS = ['1st Half', '2nd Half', 'Extra Time'] as const;
+const PENALTY_SHOOTOUT_LINESCORE_INDEX = 4;
+
+function wentToPenaltiesFromStatus(status: EspnStatusType): boolean {
+  const name = status.name ?? '';
+  const detail = `${status.detail ?? ''} ${status.shortDetail ?? ''} ${status.description ?? ''}`;
+  return name === 'STATUS_FINAL_PEN' || /\bpen(s|alties)?\b/i.test(detail);
+}
+
+/** Count penalty-shootout goals from ESPN match details. */
+export function parsePenaltyShootoutFromDetails(
+  details: EspnMatchDetail[] | undefined,
+  homeTeamId: string | undefined,
+  awayTeamId: string | undefined,
+): WorldCupPenaltyShootout | undefined {
+  const shootoutEvents = (details ?? []).filter((detail) => detail.shootout === true);
+  if (shootoutEvents.length === 0) return undefined;
+
+  let home = 0;
+  let away = 0;
+
+  for (const detail of shootoutEvents) {
+    const text = detail.type?.text ?? '';
+    if (!text.includes('Scored')) continue;
+
+    const teamId = detail.team?.id;
+    if (teamId && homeTeamId && String(teamId) === String(homeTeamId)) {
+      home += 1;
+    } else if (teamId && awayTeamId && String(teamId) === String(awayTeamId)) {
+      away += 1;
+    } else if (teamId && homeTeamId && String(teamId) !== String(homeTeamId)) {
+      away += 1;
+    }
+  }
+
+  if (home === 0 && away === 0) return undefined;
+  return { home: String(home), away: String(away) };
+}
+
+/** Parse penalty-shootout totals from ESPN summary linescores (index 4). */
+export function parseEspnPenaltyShootout(data: EspnSummaryResponse): WorldCupPenaltyShootout | undefined {
+  const competitors = data.header?.competitions?.[0]?.competitors ?? [];
+  const home = competitors.find((competitor) => competitor.homeAway === 'home');
+  const away = competitors.find((competitor) => competitor.homeAway === 'away');
+  const homeScore = home?.linescores?.[PENALTY_SHOOTOUT_LINESCORE_INDEX]?.displayValue?.trim();
+  const awayScore = away?.linescores?.[PENALTY_SHOOTOUT_LINESCORE_INDEX]?.displayValue?.trim();
+
+  if (homeScore === undefined || awayScore === undefined) return undefined;
+  if (homeScore === '0' && awayScore === '0') return undefined;
+
+  return { home: homeScore, away: awayScore };
+}
 
 function parseMatchEvents(
   details: EspnMatchDetail[] | undefined,
@@ -321,7 +460,11 @@ export function parseEspnMatchHalfScores(data: EspnSummaryResponse): WorldCupHal
   const away = competitors.find((competitor) => competitor.homeAway === 'away');
   if (!home?.linescores?.length || !away?.linescores?.length) return [];
 
-  const halfCount = Math.min(home.linescores.length, away.linescores.length);
+  const halfCount = Math.min(
+    home.linescores.length,
+    away.linescores.length,
+    HALF_SCORE_LABELS.length,
+  );
   const halfScores: WorldCupHalfScore[] = [];
 
   for (let index = 0; index < halfCount; index += 1) {
@@ -360,6 +503,14 @@ function matchFromEvent(event: EspnEvent): WorldCupMatch | null {
     homeComp.team?.id,
     awayComp.team?.id,
   );
+  const wentToPenalties = wentToPenaltiesFromStatus(status);
+  const penaltyShootout = wentToPenalties
+    ? parsePenaltyShootoutFromDetails(
+        competition.details,
+        homeComp.team?.id,
+        awayComp.team?.id,
+      )
+    : undefined;
 
   return {
     id: event.id,
@@ -368,10 +519,13 @@ function matchFromEvent(event: EspnEvent): WorldCupMatch | null {
     statusDetail: status.shortDetail ?? status.detail ?? '',
     isLive,
     isFinal,
+    wentToPenalties,
     venue: competition.venue?.fullName,
     roundSlug: event.season?.slug,
+    broadcasts: parseEspnBroadcasts(competition),
     home: teamFromCompetitor(homeComp),
     away: teamFromCompetitor(awayComp),
+    penaltyShootout,
     events: events.length > 0 ? events : undefined,
     teamStats:
       hasTeamStats(homeStats) || hasTeamStats(awayStats)
@@ -509,12 +663,39 @@ function extractRssTag(block: string, tag: string): string {
   return match?.[1]?.trim() ?? '';
 }
 
-function extractRssThumbnail(block: string): string | undefined {
-  const media = block.match(/<media:thumbnail[^>]*\surl="([^"]+)"/i);
-  if (media?.[1]) return media[1];
+function decodeRssImageUrl(url: string): string {
+  return decodeHtmlEntities(url).trim();
+}
 
-  const content = block.match(/<media:content[^>]*\surl="([^"]+)"/i);
-  return content?.[1];
+function extractMediaTagUrl(attrs: string): string | undefined {
+  const match = attrs.match(/\burl="([^"]+)"/i);
+  return match?.[1] ? decodeRssImageUrl(match[1]) : undefined;
+}
+
+/** Pick the widest RSS media asset, with thumbnail and inline description fallbacks. */
+export function extractRssImageUrl(block: string): string | undefined {
+  let bestContent: { url: string; width: number } | undefined;
+
+  for (const match of block.matchAll(/<media:content\b([^>]*)\/?>/gi)) {
+    const attrs = match[1] ?? '';
+    const url = extractMediaTagUrl(attrs);
+    if (!url) continue;
+
+    const width = Number(attrs.match(/\bwidth="(\d+)"/i)?.[1] ?? 0);
+    if (!bestContent || width > bestContent.width) {
+      bestContent = { url, width };
+    }
+  }
+
+  if (bestContent?.url) return bestContent.url;
+
+  const thumbnailAttrs = block.match(/<media:thumbnail\b([^>]*)\/?>/i)?.[1];
+  const thumbnailUrl = thumbnailAttrs ? extractMediaTagUrl(thumbnailAttrs) : undefined;
+  if (thumbnailUrl) return thumbnailUrl;
+
+  const description = extractRssTag(block, 'description');
+  const inlineImage = description.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1];
+  return inlineImage ? decodeRssImageUrl(inlineImage) : undefined;
 }
 
 function parseRssDate(value: string): string {
@@ -533,7 +714,8 @@ export function parseWorldCupRss(xml: string, source: string): WorldCupUpdate[] 
     const guid = decodeFeedText(extractRssTag(block, 'guid'));
     const pubDate = extractRssTag(block, 'pubDate');
     const description = stripAndDecodeHtml(extractRssTag(block, 'description'));
-    const imageUrl = extractRssThumbnail(block);
+    const rawImageUrl = extractRssImageUrl(block);
+    const resolvedImageUrl = rawImageUrl ? resolveArticleImageUrl(rawImageUrl) : undefined;
 
     if (!title || !link) continue;
 
@@ -544,7 +726,7 @@ export function parseWorldCupRss(xml: string, source: string): WorldCupUpdate[] 
       url: link,
       source,
       publishedAt: parseRssDate(pubDate),
-      imageUrl,
+      imageUrl: resolvedImageUrl || undefined,
     });
   }
 
@@ -568,7 +750,7 @@ function mergeUpdates(feedUpdates: WorldCupUpdate[][]): WorldCupUpdate[] {
 }
 
 async function fetchScoreboard(dates?: string): Promise<WorldCupMatch[]> {
-  const range = dates ?? formatEspnDateRange(WORLD_CUP_SCOREBOARD_DAYS);
+  const range = dates ?? WORLD_CUP_TOURNAMENT_DATES;
   const url = `${WORLD_CUP_SCOREBOARD_URL}?dates=${range}`;
   const response = await fetchWithTimeout(url);
   if (!response.ok) {
@@ -627,15 +809,102 @@ export function sortMatchesForScores(matches: WorldCupMatch[]): WorldCupMatch[] 
   });
 }
 
-/** Load half-by-half scores for a fixture (ESPN summary API). */
-export async function fetchWorldCupMatchHalfScores(matchId: string): Promise<WorldCupHalfScore[]> {
+/** True when a fixture has finished or kickoff is in the past (and not live). */
+export function isPastMatch(match: WorldCupMatch, nowMs = Date.now()): boolean {
+  if (match.isLive) return false;
+  if (match.isFinal) return true;
+  return new Date(match.startTime).getTime() < nowMs;
+}
+
+/** Split scoreboard fixtures into live/upcoming vs archive rows. */
+export function partitionMatchesForScores(
+  matches: WorldCupMatch[],
+  nowMs = Date.now(),
+): { liveAndUpcoming: WorldCupMatch[]; past: WorldCupMatch[] } {
+  const liveAndUpcoming: WorldCupMatch[] = [];
+  const past: WorldCupMatch[] = [];
+
+  for (const match of matches) {
+    if (isPastMatch(match, nowMs)) {
+      past.push(match);
+    } else {
+      liveAndUpcoming.push(match);
+    }
+  }
+
+  return {
+    liveAndUpcoming: sortMatchesForScores(liveAndUpcoming),
+    past: sortPastMatchesForArchive(past),
+  };
+}
+
+/** Newest kickoffs first for the past-results archive. */
+export function sortPastMatchesForArchive(matches: WorldCupMatch[]): WorldCupMatch[] {
+  return [...matches].sort(
+    (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime(),
+  );
+}
+
+/** Group archive fixtures by local calendar day (newest days first). */
+export function groupMatchesByKickoffDate(matches: WorldCupMatch[]): WorldCupMatchDayGroup[] {
+  const byDate = new Map<string, WorldCupMatch[]>();
+
+  for (const match of matches) {
+    const dateKey = localDateKey(match.startTime);
+    const bucket = byDate.get(dateKey) ?? [];
+    bucket.push(match);
+    byDate.set(dateKey, bucket);
+  }
+
+  return [...byDate.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([dateKey, dayMatches]) => {
+      const sortedDayMatches = sortPastMatchesForArchive(dayMatches);
+      return {
+        dateKey,
+        label: formatKickoffDateHeader(sortedDayMatches[0]!.startTime),
+        matches: sortedDayMatches,
+      };
+    });
+}
+
+function isKnockoutMatch(match: WorldCupMatch): boolean {
+  return !!match.roundSlug && KNOCKOUT_ROUND_SLUGS.has(match.roundSlug);
+}
+
+/** Optional stage filter for the past-results archive. */
+export function filterMatchesByStage(
+  matches: WorldCupMatch[],
+  filter: WorldCupScoresStageFilter,
+): WorldCupMatch[] {
+  if (filter === 'all') return matches;
+  if (filter === 'knockout') return matches.filter(isKnockoutMatch);
+  return matches.filter((match) => !isKnockoutMatch(match));
+}
+
+export interface WorldCupMatchSummary {
+  halfScores: WorldCupHalfScore[];
+  penaltyShootout?: WorldCupPenaltyShootout;
+}
+
+/** Load half-by-half scores and penalty totals for a fixture (ESPN summary API). */
+export async function fetchWorldCupMatchSummary(matchId: string): Promise<WorldCupMatchSummary> {
   const url = `${WORLD_CUP_SUMMARY_URL}?event=${encodeURIComponent(matchId)}`;
   const response = await fetchWithTimeout(url);
   if (!response.ok) {
     throw new Error(`Match summary unavailable (HTTP ${response.status})`);
   }
   const data = (await response.json()) as EspnSummaryResponse;
-  return parseEspnMatchHalfScores(data);
+  return {
+    halfScores: parseEspnMatchHalfScores(data),
+    penaltyShootout: parseEspnPenaltyShootout(data),
+  };
+}
+
+/** Load half-by-half scores for a fixture (ESPN summary API). */
+export async function fetchWorldCupMatchHalfScores(matchId: string): Promise<WorldCupHalfScore[]> {
+  const summary = await fetchWorldCupMatchSummary(matchId);
+  return summary.halfScores;
 }
 
 /** Load scores, bracket, and news for the temporary World Cup tab. */

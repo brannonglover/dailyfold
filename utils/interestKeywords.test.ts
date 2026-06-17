@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   extractInterestKeywords,
   getKeywordTier,
+  isNotForMeKeywordOption,
   isSpecificInterestKeyword,
 } from './interestKeywords';
 
@@ -63,6 +64,25 @@ test('isSpecificInterestKeyword treats curated short media terms as specific', (
   assert.ok(isSpecificInterestKeyword('tv'));
   assert.ok(isSpecificInterestKeyword('horror'));
   assert.equal(isSpecificInterestKeyword('preview'), false);
+});
+
+test('isNotForMeKeywordOption only allows curated vocabulary, not headline unigrams', () => {
+  assert.ok(isNotForMeKeywordOption('horror'));
+  assert.ok(isNotForMeKeywordOption('soccer'));
+  assert.equal(isNotForMeKeywordOption('allegri'), false);
+  assert.equal(isNotForMeKeywordOption('set'), false);
+  assert.equal(isNotForMeKeywordOption('chiefs'), false);
+});
+
+test('extractInterestKeywords skips common headline fragments like set', () => {
+  const keywords = extractInterestKeywords({
+    text: 'Allegri set to leave club amid transfer rumors',
+    title: 'Allegri set to leave club amid transfer rumors',
+    source: 'Yahoo Sports',
+    topics: ['sports'],
+  });
+
+  assert.ok(!keywords.includes('set'));
 });
 
 test('getKeywordTier classifies media and genre terms', () => {

@@ -1,16 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, memo } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { CreateFolderModal } from '@/components/CreateFolderModal';
 import { FolderPickerModal } from '@/components/FolderPickerModal';
 import { LikedArticleList } from '@/components/LikedArticleList';
 import { LikedFoldersBar } from '@/components/LikedFoldersBar';
+import { TabFocusGate } from '@/components/TabFocusGate';
 import { TAB_BAR_HEIGHT } from '@/constants/Layout';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useLikedArticles } from '@/hooks/useLikedArticles';
 import { useTheme } from '@/hooks/useTheme';
 
-export default function SavedScreen() {
+function SavedScreenContent() {
   const { colors } = useTheme();
   const { preferences, folders, createFolder } = usePreferences();
   const { articles: allLiked, isLoading, isRefreshing, error, notice, refresh } =
@@ -101,6 +102,14 @@ export default function SavedScreen() {
     </>
   );
 }
+
+export default memo(function SavedScreen() {
+  return (
+    <TabFocusGate>
+      <SavedScreenContent />
+    </TabFocusGate>
+  );
+});
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },

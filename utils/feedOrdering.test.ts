@@ -8,6 +8,7 @@ import {
   interleaveByPrimaryTopic,
   interleaveBySource,
   orderLatestFeed,
+  orderLatestFeedPage,
   orderPersonalizedFeed,
   spreadAgainstFeedHead,
   spreadArticlesBySource,
@@ -197,6 +198,59 @@ test('orderLatestFeed diversifyTopics surfaces non-sports in the first cards', (
   assert.ok(
     firstFiveTopics.some((topic) => topic !== 'sports'),
     `expected a non-sports card near the top, got ${firstFiveTopics.join(', ')}`,
+  );
+});
+
+test('orderLatestFeed surfaces the newest story first even when another outlet has a burst', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+
+  const espnBurst = Array.from({ length: 5 }, (_, i) =>
+    article(`espn-${i}`, 'sports', recent(10 * 60_000 + i * 1000), { source: 'ESPN NFL', sportTags: ['nfl'] }),
+  );
+  const newest = article('bbc-new', 'world', recent(60_000), { source: 'BBC News' });
+
+  const ordered = orderLatestFeed([...espnBurst, newest]);
+
+  assert.equal(ordered[0]?.id, 'bbc-new');
+});
+
+test('orderLatestFeed spreads dominant outlets without breaking recency at the head', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+
+  const espnNfl = Array.from({ length: 6 }, (_, i) =>
+    article(`nfl-${i}`, 'sports', recent(i * 1000), {
+      source: 'ESPN NFL',
+      sportTags: ['nfl'],
+    }),
+  );
+  const bbc = [article('bbc-0', 'world', recent(7_000), { source: 'BBC News' })];
+  const cnn = [article('cnn-0', 'world', recent(8_000), { source: 'CNN' })];
+
+  const ordered = orderLatestFeed([...espnNfl, ...bbc, ...cnn]);
+  const unspread = [...espnNfl, ...bbc, ...cnn];
+
+  assert.equal(ordered[0]?.id, 'nfl-0');
+  assert.ok(
+    maxConsecutiveSameBucket(ordered) < maxConsecutiveSameBucket(unspread),
+    `expected spread to shorten runs, got ${maxConsecutiveSameBucket(ordered)}`,
+  );
+  assert.ok(ordered.slice(0, 6).some((item) => item.source !== 'ESPN NFL'));
+});
+
+test('orderLatestFeedPage matches full-feed source spreading for a batch', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+  const batch = [
+    article('a', 'sports', recent(0), { source: 'ESPN NFL', sportTags: ['nfl'] }),
+    article('b', 'sports', recent(1000), { source: 'ESPN NFL', sportTags: ['nfl'] }),
+    article('c', 'world', recent(2000), { source: 'BBC News' }),
+  ];
+
+  assert.deepEqual(
+    orderLatestFeedPage(batch).map((item) => item.id),
+    orderLatestFeed(batch).map((item) => item.id),
   );
 });
 

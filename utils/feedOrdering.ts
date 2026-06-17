@@ -15,16 +15,6 @@ function isWithinTrendingWindow(article: Article, nowMs: number): boolean {
   return nowMs - publishedAtMs(article) <= TRENDING_WINDOW_MS;
 }
 
-/** Count recent articles per outlet in the trending window (burst signal). */
-function sourceBurstCounts(articles: Article[], nowMs: number): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const article of articles) {
-    if (!isWithinTrendingWindow(article, nowMs)) continue;
-    counts.set(article.source, (counts.get(article.source) ?? 0) + 1);
-  }
-  return counts;
-}
-
 /**
  * Spread bucket for feed diversification. Uses outlet name, with a sport facet when
  * present so mixed ESPN NFL + soccer batches interleave instead of clustering.
@@ -169,34 +159,24 @@ function partitionTrending(articles: Article[], nowMs: number): [Article[], Arti
 
 export type OrderLatestFeedOptions = {
   /**
-   * When true (All topics), interleave by primary topic instead of outlet burst
-   * so sports-heavy ingest does not fill the first cards.
+   * When true (All topics), interleave by primary topic so sports-heavy ingest
+   * does not fill the first cards.
    */
   diversifyTopics?: boolean;
 };
 
 /**
- * Latest feed: recent "trending" window first (interleaved), then older stories
- * (interleaved). Preserves every article; only order changes.
+ * Latest feed: newest stories first with light outlet spreading so one publisher
+ * does not dominate consecutive cards. Trending badges/hero styling are separate.
  */
 export function orderLatestFeed(articles: Article[], options?: OrderLatestFeedOptions): Article[] {
   if (articles.length <= 1) return articles;
 
-  const nowMs = Date.now();
-  const [trending, rest] = partitionTrending(articles, nowMs);
-
   if (options?.diversifyTopics) {
-    const orderedTrending = interleaveByPrimaryTopic(trending);
-    const orderedRest = interleaveByPrimaryTopic(rest);
-    return [...orderedTrending, ...orderedRest];
+    return interleaveByPrimaryTopic(articles);
   }
 
-  const burstCounts = sourceBurstCounts(articles, nowMs);
-  const queueOrder = { burstCounts };
-
-  const orderedTrending = interleaveBySource(trending, { queueOrder });
-  const orderedRest = interleaveBySource(rest, { queueOrder });
-  return [...orderedTrending, ...orderedRest];
+  return interleaveBySource(articles);
 }
 
 /** Spread a batch so outlets (and sport facets when present) rarely appear back-to-back. */
@@ -233,9 +213,7 @@ export function orderLatestFeedPage(
 ): Article[] {
   if (articles.length <= 1) return articles;
   if (options?.diversifyTopics) return interleaveByPrimaryTopic(articles);
-  const nowMs = Date.now();
-  const burstCounts = sourceBurstCounts(articles, nowMs);
-  return interleaveBySource(articles, { queueOrder: { burstCounts } });
+  return interleaveBySource(articles);
 }
 
 /**

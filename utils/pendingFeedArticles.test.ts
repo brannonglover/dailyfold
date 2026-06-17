@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { Article } from '@/types';
 
-import { hasActionablePending, pendingNotAlreadyInFeed } from './pendingFeedArticles';
+import { hasActionablePending, pendingNotAlreadyInFeed, reconcilePendingWithFeeds } from './pendingFeedArticles';
 
 function article(id: string): Article {
   return {
@@ -46,4 +46,23 @@ test('hasActionablePending is true when at least one pending story is new', () =
   const live = [article('old')];
 
   assert.equal(hasActionablePending(pending, live), true);
+});
+
+test('reconcilePendingWithFeeds drops rows already in any feed snapshot', () => {
+  const pending = [article('a'), article('b'), article('c')];
+  const contextFeed = [article('b')];
+  const displayFeed = [article('c'), article('d')];
+
+  assert.deepEqual(
+    reconcilePendingWithFeeds(pending, contextFeed, displayFeed).map((item) => item.id),
+    ['a'],
+  );
+});
+
+test('reconcilePendingWithFeeds returns empty when every pending story is already visible', () => {
+  const pending = [article('a'), article('b')];
+  const contextFeed = [article('a')];
+  const displayFeed = [article('b'), article('c')];
+
+  assert.deepEqual(reconcilePendingWithFeeds(pending, contextFeed, displayFeed), []);
 });

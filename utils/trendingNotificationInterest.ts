@@ -1,5 +1,5 @@
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
-import { buildLikedInterestProfile, hasInterestSignals } from '@/services/interestSignals';
+import { buildInterestProfile, hasInterestSignals } from '@/services/interestSignals';
 import { isMeaningfulInterestMatch } from '@/services/recommendations';
 import { isSportsTopicActive } from '@/services/sportPreferences';
 import { isAllTopicsEnabled } from '@/services/topicPreferences';
@@ -29,7 +29,7 @@ export function isTrendingNotificationRelevant(
   const breaking = isBreakingTrendingArticle(article, nowMs);
   const pressing = burstCount >= HOT_BURST_MIN_COUNT;
 
-  const profile = buildLikedInterestProfile(prefs);
+  const profile = buildInterestProfile(prefs);
   if (profile && hasInterestSignals(profile)) {
     if (!isMeaningfulInterestMatch(article, profile)) return false;
     if (isAllTopicsEnabled(prefs.enabledTopics)) return breaking;

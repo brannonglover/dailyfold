@@ -476,7 +476,7 @@ export const SOURCE_CATALOG: SourceCatalogEntry[] = [
     description: 'NCAA football news and analysis',
     primaryTopic: 'sports',
     topics: ['sports'],
-    sportTags: ['football'],
+    sportTags: ['college-football'],
     logoDomain: 'espn.com',
   },
   {

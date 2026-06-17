@@ -1,13 +1,19 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useTheme } from '@/hooks/useTheme';
 
 export type WorldCupTab = 'bracket' | 'scores' | 'news';
 
-const TABS: { id: WorldCupTab; label: string }[] = [
-  { id: 'bracket', label: 'Bracket' },
-  { id: 'scores', label: 'Scores' },
-  { id: 'news', label: 'Latest News' },
+const TABS: {
+  id: WorldCupTab;
+  label: string;
+  accessibilityLabel: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+  { id: 'bracket', label: 'Bracket', accessibilityLabel: 'Bracket', icon: 'git-network-outline' },
+  { id: 'scores', label: 'Scores', accessibilityLabel: 'Scores', icon: 'football-outline' },
+  { id: 'news', label: 'News', accessibilityLabel: 'Latest News', icon: 'newspaper-outline' },
 ];
 
 interface WorldCupTabBarProps {
@@ -29,15 +35,21 @@ export function WorldCupTabBar({ activeTab, onSelectTab }: WorldCupTabBarProps) 
               onPress={() => onSelectTab(tab.id)}
               accessibilityRole="tab"
               accessibilityState={{ selected }}
-              accessibilityLabel={tab.label}
+              accessibilityLabel={tab.accessibilityLabel}
               style={({ pressed }) => [
                 styles.chip,
                 {
                   backgroundColor: selected ? colors.accentMuted : colors.surface,
                   borderColor: selected ? colors.accent : colors.border,
                 },
+                selected && styles.chipSelected,
                 pressed && { opacity: 0.7 },
               ]}>
+              <Ionicons
+                name={tab.icon}
+                size={14}
+                color={selected ? colors.accent : colors.textSecondary}
+              />
               <Text
                 style={[styles.chipText, { color: selected ? colors.accent : colors.text }]}
                 numberOfLines={1}>
@@ -64,14 +76,27 @@ const styles = StyleSheet.create({
   },
   chip: {
     flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
     paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
+    minWidth: 0,
+  },
+  chipSelected: {
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   chipText: {
+    flexShrink: 1,
     fontFamily: 'InterMedium',
     fontSize: 13,
+    lineHeight: 16,
   },
 });

@@ -16,6 +16,7 @@ import {
   ListRenderItemInfo,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  InteractionManager,
   PixelRatio,
   RefreshControlProps,
   ScrollView,
@@ -61,6 +62,7 @@ import {
   buildFeedTrendingBadgeByArticleId,
   TrendingBadge,
 } from '@/utils/trendingArticles';
+import { buildLoadMoreTriggerKey } from '@/utils/paginationRevision';
 
 const AnimatedFlatList = Animated.createAnimatedComponent(FlatList<Article>);
 
@@ -98,6 +100,7 @@ interface ArticleFeedProps {
   emptyMessage?: string;
   error?: string | null;
   notice?: string | null;
+  isRefreshing?: boolean;
   refreshControl?: React.ReactElement<RefreshControlProps>;
   headerExtra?: React.ReactNode;
   pendingCount?: number;
@@ -105,16 +108,25 @@ interface ArticleFeedProps {
   onApplyPending?: () => void | Promise<void>;
   onDismissPending?: () => void;
   onLoadMore?: () => void;
+  /** When false, scroll handlers skip pagination requests (loadMore still no-ops internally). */
+  canLoadMore?: boolean;
   isLoadingMore?: boolean;
   /**
    * Upstream feed size (e.g. raw articles before display filters). Used to re-trigger
    * loadMore after pagination even when the visible list length is unchanged.
    */
   loadMoreCursor?: number;
+  /**
+   * Bumps when upstream pagination metadata changes (hasMore / nextCursor / append).
+   * Ensures load-more retriggers after silent refresh or duplicate append pages.
+   */
+  loadMoreEpoch?: number;
   /** Visual trial: hero story above the fold, compact cards below */
   layout?: ArticleFeedLayout;
   /** For You only — per-article liked-interest match chips. */
   matchReasonsByArticleId?: Map<string, string[]>;
+  /** Records feed curiosity when opening an article from Latest/For You. */
+  onFeedClick?: (article: Article) => void;
 }
 
 function FeedLoadMoreFooter() {
@@ -125,6 +137,19 @@ function FeedLoadMoreFooter() {
       <ActivityIndicator size="small" color={colors.textSecondary} />
       <Text style={[styles.loadMoreText, { color: colors.textSecondary }]}>
         Loading more stories...
+      </Text>
+    </View>
+  );
+}
+
+function FeedRefreshIndicator() {
+  const { colors } = useTheme();
+
+  return (
+    <View style={styles.refreshIndicator}>
+      <ActivityIndicator size="small" color={colors.textSecondary} />
+      <Text style={[styles.refreshText, { color: colors.textSecondary }]}>
+        Grabbing the latest…
       </Text>
     </View>
   );
@@ -179,7 +204,8 @@ function areFeedCardItemPropsEqual(
     prev.endPullDistance === next.endPullDistance &&
     prev.allowPress === next.allowPress &&
     prev.trendingBadge === next.trendingBadge &&
-    prev.matchReasons === next.matchReasons
+    prev.matchReasons === next.matchReasons &&
+    prev.onFeedClick === next.onFeedClick
   );
 }
 
@@ -192,6 +218,7 @@ type FeedCardItemProps = {
   allowPress: () => boolean;
   trendingBadge?: TrendingBadge;
   matchReasons?: string[];
+  onFeedClick?: (article: Article) => void;
 };
 
 const FeedCardItem = memo(function FeedCardItem({
@@ -203,6 +230,7 @@ const FeedCardItem = memo(function FeedCardItem({
   allowPress,
   trendingBadge,
   matchReasons,
+  onFeedClick,
 }: FeedCardItemProps) {
   const { colors } = useTheme();
   const stretchStyle = useAnimatedStyle(() => {
@@ -223,6 +251,7 @@ const FeedCardItem = memo(function FeedCardItem({
           allowPress={allowPress}
           trendingBadge={trendingBadge}
           matchReasons={matchReasons}
+          onFeedClick={onFeedClick}
         />
       </Animated.View>
     </>
@@ -238,6 +267,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     emptyMessage,
     error,
     notice,
+    isRefreshing,
     refreshControl,
     headerExtra,
     pendingCount = 0,
@@ -245,10 +275,13 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     onApplyPending,
     onDismissPending,
     onLoadMore,
+    canLoadMore = false,
     isLoadingMore,
     loadMoreCursor,
+    loadMoreEpoch,
     layout = 'snap',
     matchReasonsByArticleId,
+    onFeedClick,
   },
   ref,
 ) {
@@ -269,11 +302,12 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   const maxScrollOffset = useSharedValue(0);
   const endPullDistance = useSharedValue(0);
   const feedScrollRef = useRef({ dragging: false, endedAt: 0 });
-  const loadMoreTriggeredAtCursorRef = useRef(0);
+  const loadMoreTriggeredAtKeyRef = useRef('');
   const newspaperRowsCountRef = useRef(0);
   const newspaperLastVisibleRowRef = useRef(-1);
   const requestLoadMoreRef = useRef<() => void>(() => {});
   const loadMoreCursorValue = loadMoreCursor ?? articles.length;
+  const loadMoreTriggerKey = buildLoadMoreTriggerKey(loadMoreCursorValue, loadMoreEpoch ?? 0);
   const prevPendingCountRef = useRef(0);
   const pendingScrollBaselineRef = useRef(0);
   const userInitiatedScrollRef = useRef(false);
@@ -297,6 +331,11 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       }),
     [articles, newspaperFeaturedIds],
   );
+  const newspaperHeroArticle = layout === 'newspaper' && articles.length > 0 ? articles[0] : null;
+  const newspaperFeedRows = useMemo(() => {
+    if (layout !== 'newspaper' || articles.length <= 1) return [];
+    return groupNewspaperFeedRows(articles.slice(1), newspaperFeaturedIds);
+  }, [layout, articles, newspaperFeaturedIds]);
   const articlesRef = useRef(articles);
   articlesRef.current = articles;
 
@@ -483,25 +522,25 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   }, [activeIndex, pendingCount, onDismissPending]);
 
   const requestLoadMore = useCallback(() => {
-    if (!onLoadMore || isLoadingMore) return;
-    if (loadMoreTriggeredAtCursorRef.current >= loadMoreCursorValue) return;
-    loadMoreTriggeredAtCursorRef.current = loadMoreCursorValue;
+    if (!onLoadMore || !canLoadMore || isLoadingMore) return;
+    if (loadMoreTriggeredAtKeyRef.current === loadMoreTriggerKey) return;
+    loadMoreTriggeredAtKeyRef.current = loadMoreTriggerKey;
     onLoadMore();
-  }, [onLoadMore, isLoadingMore, loadMoreCursorValue]);
+  }, [onLoadMore, canLoadMore, isLoadingMore, loadMoreTriggerKey]);
 
   requestLoadMoreRef.current = requestLoadMore;
 
   useEffect(() => {
-    if (!onLoadMore || isLoadingMore) return;
+    if (!onLoadMore || !canLoadMore || isLoadingMore || layout === 'newspaper') return;
     if (activeIndex < articles.length - SNAP_LOAD_MORE_PREFETCH_ITEMS) {
-      loadMoreTriggeredAtCursorRef.current = 0;
+      loadMoreTriggeredAtKeyRef.current = '';
       return;
     }
     requestLoadMore();
-  }, [activeIndex, articles.length, onLoadMore, isLoadingMore, requestLoadMore]);
+  }, [activeIndex, articles.length, canLoadMore, isLoadingMore, layout, onLoadMore, requestLoadMore]);
 
   useEffect(() => {
-    if (!onLoadMore || isLoadingMore) return;
+    if (!onLoadMore || !canLoadMore || isLoadingMore) return;
     if (layout === 'newspaper') {
       const totalRows = newspaperRowsCountRef.current;
       const lastVisible = newspaperLastVisibleRowRef.current;
@@ -513,15 +552,24 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     if (activeIndex >= articles.length - SNAP_LOAD_MORE_PREFETCH_ITEMS) {
       requestLoadMore();
     }
-  }, [loadMoreCursorValue, isLoadingMore, layout, activeIndex, articles.length, onLoadMore, requestLoadMore]);
+  }, [
+    loadMoreTriggerKey,
+    canLoadMore,
+    isLoadingMore,
+    layout,
+    activeIndex,
+    articles.length,
+    onLoadMore,
+    requestLoadMore,
+  ]);
 
   const maybeLoadMoreForShortContent = useCallback(
     (contentHeight: number) => {
-      if (!onLoadMore || isLoadingMore || pageHeight <= 0) return;
+      if (!onLoadMore || !canLoadMore || isLoadingMore || pageHeight <= 0) return;
       if (contentHeight > pageHeight * SHORT_CONTENT_HEIGHT_RATIO) return;
       requestLoadMore();
     },
-    [onLoadMore, isLoadingMore, pageHeight, requestLoadMore],
+    [onLoadMore, canLoadMore, isLoadingMore, pageHeight, requestLoadMore],
   );
 
   const onNewspaperViewableItemsChanged = useRef(
@@ -564,7 +612,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
       const offsetY = contentOffset.y;
 
-      if (!onLoadMore || isLoadingMore || pageHeight <= 0) return;
+      if (!onLoadMore || !canLoadMore || isLoadingMore || pageHeight <= 0) return;
       const distanceFromEnd =
         contentSize.height - (offsetY + layoutMeasurement.height);
       const prefetchLeadPx =
@@ -574,7 +622,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         requestLoadMore();
       }
     },
-    [onLoadMore, isLoadingMore, pageHeight, requestLoadMore],
+    [onLoadMore, canLoadMore, isLoadingMore, pageHeight, requestLoadMore],
   );
 
   const onNewspaperScrollEnd = useCallback(
@@ -591,10 +639,10 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
   const handleApplyPending = useCallback(() => {
     if (pendingCount <= 0 || !onApplyPending) return;
-    void (async () => {
-      await scrollToTop();
-      await onApplyPending();
-    })();
+    void scrollToTop();
+    InteractionManager.runAfterInteractions(() => {
+      void onApplyPending();
+    });
   }, [pendingCount, onApplyPending, scrollToTop]);
 
   const articleKeyExtractor = useCallback((item: Article) => item.id, []);
@@ -623,6 +671,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         allowPress={allowCardPress}
         trendingBadge={feedTrendingBadges.get(item.id)}
         matchReasons={matchReasonsByArticleId?.get(item.id)}
+        onFeedClick={onFeedClick}
       />
     ),
     [
@@ -632,6 +681,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       allowCardPress,
       feedTrendingBadges,
       matchReasonsByArticleId,
+      onFeedClick,
     ],
   );
 
@@ -648,6 +698,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
               allowPress={allowCardPress}
               trendingBadge={feedTrendingBadges.get(row.article.id)}
               matchReasons={matchReasonsByArticleId?.get(row.article.id)}
+              onFeedClick={onFeedClick}
             />
           </View>
         );
@@ -669,6 +720,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
                     variant="compact"
                     allowPress={allowCardPress}
                     matchReasons={matchReasonsByArticleId?.get(article.id)}
+                    onFeedClick={onFeedClick}
                   />
                 </View>
               </View>
@@ -677,7 +729,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         </View>
       );
     },
-    [colors.feedDivider, allowCardPress, feedTrendingBadges, matchReasonsByArticleId],
+    [colors.feedDivider, allowCardPress, feedTrendingBadges, matchReasonsByArticleId, onFeedClick],
   );
 
   const pendingBannerOverlay = (
@@ -690,8 +742,16 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     </View>
   );
 
-  const showLoadMoreFooter = !!onLoadMore && !!isLoadingMore;
+  const showLoadMoreFooter = !!onLoadMore && canLoadMore && !!isLoadingMore;
   const loadMoreListFooter = showLoadMoreFooter ? <FeedLoadMoreFooter /> : null;
+  const refreshOverlay =
+    isRefreshing && articles.length > 0 ? (
+      <View
+        style={[styles.refreshOverlay, { backgroundColor: colors.background }]}
+        pointerEvents="none">
+        <FeedRefreshIndicator />
+      </View>
+    ) : null;
 
   if (articles.length === 0) {
     return (
@@ -704,7 +764,11 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             ref={emptyScrollRef}
             style={styles.emptyBody}
             contentContainerStyle={
-              headerExtra ? styles.emptyScrollContentAnchored : styles.emptyScrollContentCentered
+              isRefreshing
+                ? styles.emptyScrollContentCentered
+                : headerExtra
+                  ? styles.emptyScrollContentAnchored
+                  : styles.emptyScrollContentCentered
             }
             refreshControl={refreshControl}
             alwaysBounceVertical={!!refreshControl}
@@ -716,7 +780,9 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             onMomentumScrollEnd={(event) =>
               maybeDismissPendingAfterScroll(event.nativeEvent.contentOffset.y)
             }>
-            {headerExtra ? (
+            {isRefreshing ? (
+              <FeedRefreshIndicator />
+            ) : headerExtra ? (
               <View style={styles.emptyStateAnchored}>
                 <View style={[styles.emptyIconWrap, { backgroundColor: colors.surface }]}>
                   <Ionicons name="heart-outline" size={28} color={colors.textSecondary} />
@@ -738,10 +804,8 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   }
 
   if (layout === 'newspaper') {
-    const heroArticle = articles[0];
-    const belowFoldArticles = articles.slice(1);
-    const featuredIds = newspaperFeaturedIds;
-    const newspaperRows = groupNewspaperFeedRows(belowFoldArticles, featuredIds);
+    const heroArticle = newspaperHeroArticle;
+    const newspaperRows = newspaperFeedRows;
     newspaperRowsCountRef.current = newspaperRows.length;
     const heroHeight =
       pageHeight > 0 ? normalizeHeight(Math.round(pageHeight * NEWSPAPER_HERO_HEIGHT_RATIO)) : 0;
@@ -757,6 +821,10 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
               ref={newspaperListRef}
               data={newspaperRows}
               keyExtractor={newspaperRowKeyExtractor}
+              initialNumToRender={3}
+              maxToRenderPerBatch={2}
+              windowSize={5}
+              updateCellsBatchingPeriod={50}
               ListHeaderComponent={
                 heroArticle ? (
                   <ArticleCard
@@ -766,6 +834,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
                     allowPress={allowCardPress}
                     trendingBadge={feedTrendingBadges.get(heroArticle.id)}
                     matchReasons={matchReasonsByArticleId?.get(heroArticle.id)}
+                    onFeedClick={onFeedClick}
                   />
                 ) : null
               }
@@ -790,6 +859,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
               ListFooterComponent={loadMoreListFooter}
             />
           ) : null}
+          {refreshOverlay}
           {pendingBannerOverlay}
         </View>
       </View>
@@ -807,6 +877,10 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             ref={listRef}
             data={articles}
             keyExtractor={articleKeyExtractor}
+            initialNumToRender={2}
+            maxToRenderPerBatch={1}
+            windowSize={3}
+            updateCellsBatchingPeriod={50}
             renderItem={renderSnapItem}
             style={[styles.list, { height: pageHeight, zIndex: 0 }]}
             showsVerticalScrollIndicator={false}
@@ -833,6 +907,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             onContentSizeChange={(_, height) => maybeLoadMoreForShortContent(height)}
           />
         )}
+        {refreshOverlay}
         {pageHeight > 0 && hasMoreBelow && <FeedBottomVignette />}
         {pageHeight > 0 && showLoadMoreFooter && (
           <View style={styles.loadMoreOverlay} pointerEvents="none">
@@ -962,6 +1037,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     letterSpacing: 0.2,
+  },
+  refreshIndicator: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+  },
+  refreshText: {
+    fontFamily: 'Inter',
+    fontSize: 13,
+    lineHeight: 18,
+    letterSpacing: 0.2,
+  },
+  refreshOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   loadMoreOverlay: {
     position: 'absolute',

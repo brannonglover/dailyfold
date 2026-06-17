@@ -46,11 +46,9 @@ export async function GET(
     }
 
     if (articleNeedsHeroEnrichment(article.imageUrl)) {
-      const heroUrl = await fetchPageOgImageUrl(article.url);
-      if (heroUrl) {
-        updateArticleImageUrl(id, heroUrl);
-        article = { ...article, imageUrl: heroUrl };
-      }
+      void fetchPageOgImageUrl(article.url).then((heroUrl) => {
+        if (heroUrl) updateArticleImageUrl(id, heroUrl);
+      });
     }
 
     const extracted = await extractReaderContent(article);

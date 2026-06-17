@@ -48,8 +48,9 @@ export function decodeFeedText(text: string | null | undefined): string {
 
 /** Strip HTML tags and decode entities for article body/excerpt fields. */
 export function stripAndDecodeHtml(html: string): string {
+  const decoded = decodeHtmlEntities(html);
   return decodeFeedText(
-    html
+    decoded
       .replace(/<script[\s\S]*?<\/script>/gi, '')
       .replace(/<style[\s\S]*?<\/style>/gi, '')
       .replace(/<[^>]+>/g, ' '),

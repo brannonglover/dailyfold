@@ -11,7 +11,6 @@ import {
   ARTICLE_CARD_HERO_VIGNETTE_GRADIENT_LOCATIONS,
   ARTICLE_CARD_HERO_VIGNETTE_HEIGHT_RATIO,
   FEED_SCROLL_PERSISTENT_GRADIENT_HEIGHT,
-  TAB_BAR_HEIGHT,
 } from '@/constants/Layout';
 import { useTheme } from '@/hooks/useTheme';
 import { rememberOpenArticle } from '@/services/articleSession';
@@ -35,6 +34,8 @@ interface ArticleCardProps {
   trendingBadge?: TrendingBadgeInfo;
   /** For You only — which liked-interest signals matched this article (max 3). */
   matchReasons?: string[];
+  /** Latest/For You feed opens — records curiosity signal, not a like. */
+  onFeedClick?: (article: Article) => void;
 }
 
 function formatDate(iso: string) {
@@ -48,6 +49,8 @@ const IMAGE_HEIGHT_MAX = 220;
 const IMAGE_HEIGHT_RATIO = 0.32;
 /** Never collapse the hero to 0 on short cards (common on physical devices with more chrome). */
 const HERO_IMAGE_MIN_HEIGHT = 120;
+/** Space reserved above the hero when match-reason text is shown. */
+const MATCH_REASON_STRIP_HEIGHT = 28;
 
 function withAlpha(hex: string, alpha: number) {
   const clamped = Math.min(1, Math.max(0, alpha));
@@ -160,38 +163,17 @@ function TrendingBadge({
   );
 }
 
-function MatchReasonChips({
-  reasons,
-  onImage,
-}: {
-  reasons: string[];
-  onImage?: boolean;
-}) {
+function MatchReasonText({ reasons }: { reasons: string[] }) {
   const { colors } = useTheme();
   if (reasons.length === 0) return null;
 
   return (
-    <View style={styles.matchReasons} accessibilityRole="text">
-      {reasons.map((reason) => (
-        <View
-          key={reason}
-          style={[
-            styles.matchReasonChip,
-            onImage
-              ? styles.matchReasonChipOnImage
-              : { backgroundColor: colors.accentMuted, borderColor: colors.accentMuted },
-          ]}>
-          <Text
-            style={[
-              styles.matchReasonText,
-              onImage ? styles.matchReasonTextOnImage : { color: colors.accent },
-            ]}
-            numberOfLines={1}>
-            {reason}
-          </Text>
-        </View>
-      ))}
-    </View>
+    <Text
+      style={[styles.matchReasonText, { color: colors.accent }]}
+      numberOfLines={1}
+      accessibilityRole="text">
+      {reasons.join(' · ')}
+    </Text>
   );
 }
 
@@ -257,6 +239,7 @@ function NewspaperOverlayCard({
   allowPress,
   trendingBadge,
   matchReasons,
+  onFeedClick,
 }: {
   article: Article;
   height: number;
@@ -264,10 +247,13 @@ function NewspaperOverlayCard({
   allowPress?: () => boolean;
   trendingBadge?: TrendingBadgeInfo;
   matchReasons?: string[];
+  onFeedClick?: (article: Article) => void;
 }) {
   const { colors } = useTheme();
   const router = useRouter();
-  const imageHeight = height;
+  const hasMatchReasons = (matchReasons?.length ?? 0) > 0;
+  const matchReasonStripHeight = hasMatchReasons ? MATCH_REASON_STRIP_HEIGHT : 0;
+  const imageHeight = height - matchReasonStripHeight;
   const isHero = variant === 'hero';
   const isFeatured = variant === 'featured';
   const isCompact = variant === 'compact';
@@ -277,6 +263,7 @@ function NewspaperOverlayCard({
 
   function openArticle() {
     if (allowPress && !allowPress()) return;
+    onFeedClick?.(article);
     prefetchArticleReaderContent(article.id);
     rememberOpenArticle(article);
     router.push(`/article/${article.id}`);
@@ -284,6 +271,17 @@ function NewspaperOverlayCard({
 
   return (
     <View style={[styles.card, { height, backgroundColor: colors.background }]}>
+      {hasMatchReasons ? (
+        <View
+          style={[
+            styles.matchReasonsAboveImage,
+            isCompact
+              ? styles.matchReasonsAboveImageCompact
+              : styles.matchReasonsAboveImageNewspaper,
+          ]}>
+          <MatchReasonText reasons={matchReasons!} />
+        </View>
+      ) : null}
       <View style={[styles.newspaperImageWrap, { height: imageHeight }]}>
         <Pressable
           onPress={openArticle}
@@ -333,7 +331,7 @@ function NewspaperOverlayCard({
               ]}>
               <View style={styles.newspaperMetaRow}>
                 <View style={styles.newspaperMetaSource}>
-                  <ArticleSourceMenu article={article} bottomOffset={TAB_BAR_HEIGHT} tone="onImage" />
+                  <ArticleSourceMenu article={article} tone="onImage" />
                 </View>
                 <View style={styles.metaEnd}>
                   {requiresSubscription ? (
@@ -342,9 +340,6 @@ function NewspaperOverlayCard({
                   <Text style={styles.newspaperMeta}>{formatDate(article.publishedAt)}</Text>
                 </View>
               </View>
-              {matchReasons && matchReasons.length > 0 ? (
-                <MatchReasonChips reasons={matchReasons} onImage />
-              ) : null}
               <Text
                 style={[
                   styles.newspaperTitle,
@@ -390,7 +385,8 @@ function areArticleCardPropsEqual(prev: ArticleCardProps, next: ArticleCardProps
     prev.variant === next.variant &&
     prev.allowPress === next.allowPress &&
     trendingBadgeKey(prev.trendingBadge) === trendingBadgeKey(next.trendingBadge) &&
-    matchReasonsKey(prev.matchReasons) === matchReasonsKey(next.matchReasons)
+    matchReasonsKey(prev.matchReasons) === matchReasonsKey(next.matchReasons) &&
+    prev.onFeedClick === next.onFeedClick
   );
 }
 
@@ -401,6 +397,7 @@ export const ArticleCard = memo(function ArticleCard({
   allowPress,
   trendingBadge,
   matchReasons,
+  onFeedClick,
 }: ArticleCardProps) {
   if (variant === 'hero' || variant === 'compact' || variant === 'featured') {
     return (
@@ -411,6 +408,7 @@ export const ArticleCard = memo(function ArticleCard({
         allowPress={allowPress}
         trendingBadge={trendingBadge}
         matchReasons={matchReasons}
+        onFeedClick={onFeedClick}
       />
     );
   }
@@ -424,14 +422,22 @@ export const ArticleCard = memo(function ArticleCard({
 
   function openArticle() {
     if (allowPress && !allowPress()) return;
+    onFeedClick?.(article);
     prefetchArticleReaderContent(article.id);
     rememberOpenArticle(article);
     router.push(`/article/${article.id}`);
   }
 
+  const hasMatchReasons = (matchReasons?.length ?? 0) > 0;
+
   return (
     <View style={[styles.card, { height, backgroundColor: colors.background }]}>
       <View style={styles.content}>
+        {hasMatchReasons ? (
+          <View style={styles.matchReasonsAboveImage}>
+            <MatchReasonText reasons={matchReasons!} />
+          </View>
+        ) : null}
         <Pressable
           onPress={openArticle}
           accessibilityRole="button"
@@ -466,7 +472,7 @@ export const ArticleCard = memo(function ArticleCard({
         <View style={[styles.textBlock, { paddingBottom: VIGNETTE_TEXT_CLEARANCE }]}>
           <View style={styles.metaRow}>
             <View style={styles.metaSource}>
-              <ArticleSourceMenu article={article} bottomOffset={TAB_BAR_HEIGHT} />
+              <ArticleSourceMenu article={article} />
             </View>
             <View style={styles.metaEnd}>
               {requiresSubscription ? <SubscriptionBadge /> : null}
@@ -475,10 +481,6 @@ export const ArticleCard = memo(function ArticleCard({
               </Text>
             </View>
           </View>
-
-          {matchReasons && matchReasons.length > 0 ? (
-            <MatchReasonChips reasons={matchReasons} />
-          ) : null}
 
           <Pressable
             onPress={openArticle}
@@ -697,33 +699,22 @@ const styles = StyleSheet.create({
     fontFamily: 'InterMedium',
     fontSize: 11,
   },
-  matchReasons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 8,
-    maxHeight: 28,
-    overflow: 'hidden',
+  matchReasonsAboveImage: {
+    paddingHorizontal: 24,
+    paddingTop: 4,
+    paddingBottom: 4,
     flexShrink: 0,
   },
-  matchReasonChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    borderWidth: 1,
+  matchReasonsAboveImageNewspaper: {
+    paddingHorizontal: 14,
   },
-  matchReasonChipOnImage: {
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    borderColor: 'rgba(255,255,255,0.22)',
+  matchReasonsAboveImageCompact: {
+    paddingHorizontal: 12,
   },
   matchReasonText: {
-    fontFamily: 'InterSemiBold',
-    fontSize: 10,
-    letterSpacing: 0.2,
-  },
-  matchReasonTextOnImage: {
-    color: OVERLAY_TITLE_COLOR,
-    ...OVERLAY_TEXT_SHADOW,
+    fontFamily: 'InterMedium',
+    fontSize: 12,
+    letterSpacing: 0.15,
   },
   readMore: {
     flexShrink: 0,

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,7 +17,7 @@ import { SportTag } from '@/types';
 /** Bar fills at this many likes per signal so growth is visible over time. */
 const SCORE_BAR_CAP = 10;
 
-export default function ProfileScreen() {
+export default memo(function ProfileScreen() {
   const [feedbackVisible, setFeedbackVisible] = useState(false);
   const [deleteAccountVisible, setDeleteAccountVisible] = useState(false);
   const { user, logout, deleteAccount } = useAuth();
@@ -294,7 +294,7 @@ export default function ProfileScreen() {
       />
     </>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

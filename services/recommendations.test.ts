@@ -18,6 +18,8 @@ function basePrefs(overrides: Partial<UserPreferences> = {}): UserPreferences {
   return {
     likedArticleIds: ['liked-1'],
     likedArticles: {},
+    clickedArticleIds: [],
+    clickedArticles: {},
     topicScores: Object.fromEntries(CURIOSITY_ORDER.map((t) => [t, 0])) as UserPreferences['topicScores'],
     sourceScores: { 'Mens Health': 5 },
     keywordScores: { series: 3, season: 2 },
@@ -380,7 +382,7 @@ test('getPersonalizedFeed surfaces matches for a culture TV like with genre keyw
   assert.ok(feed.some((item) => item.id === 'match-tv'));
 });
 
-test('getArticleMatchReasons returns up to three matched profile keywords per article', () => {
+test('getArticleMatchReasons returns up to two personal keyword reasons per article', () => {
   const liked = article('liked-tv', "Patricia's Widow Bay horror comedy TV series review", {
     topics: ['culture'],
   });
@@ -389,7 +391,66 @@ test('getArticleMatchReasons returns up to three matched profile keywords per ar
 
   const reasons = getArticleMatchReasons(candidate, profile);
 
-  assert.deepEqual(reasons, ['Tv', 'Horror', 'Comedy']);
+  assert.deepEqual(reasons, ['Because you read about Tv', 'Because you read about Horror']);
+});
+
+test('getArticleMatchReasons omits generic topic-only overlap', () => {
+  const liked = article('liked-culture', 'Essay on modern art movements', { topics: ['culture'] });
+  const profile = buildLikedInterestProfile(prefsWithLikedArticles([liked]))!;
+  const candidate = article('match', 'Gallery opens new exhibition', { topics: ['culture'] });
+
+  const reasons = getArticleMatchReasons(candidate, profile);
+
+  assert.deepEqual(reasons, []);
+});
+
+test('getArticleMatchReasons prefers source affinity from liked articles', () => {
+  const liked = article('liked-nyt', 'Senate passes climate bill', {
+    topics: ['politics'],
+    source: 'The New York Times',
+  });
+  const prefs = prefsWithLikedArticles([liked]);
+  const profile = buildLikedInterestProfile(prefs)!;
+  const candidate = article('match', 'SpaceX expands Bastrop facility', {
+    topics: ['politics', 'technology'],
+    source: 'The New York Times',
+  });
+
+  const reasons = getArticleMatchReasons(candidate, {
+    profile,
+    sourceScores: { 'The New York Times': 1 },
+  });
+
+  assert.deepEqual(reasons, ['Because you like The New York Times']);
+});
+
+test('getArticleMatchReasons surfaces sport tag affinity with personal copy', () => {
+  const liked = article('liked-1', 'NFL playoff preview: Chiefs advance', {
+    topics: ['sports'],
+    sportTags: ['football'],
+  });
+  const profile = buildLikedInterestProfile(prefsWithLikedArticles([liked]))!;
+  const candidate = article('match', 'Chiefs clinch playoff spot', {
+    topics: ['sports'],
+    sportTags: ['football'],
+  });
+
+  const reasons = getArticleMatchReasons(candidate, profile);
+
+  assert.deepEqual(reasons, ['Because you follow NFL stories']);
+});
+
+test('getArticleMatchReasons uses narrow-topic fallback after multiple likes', () => {
+  const likedPolitics = [
+    article('liked-1', 'Senate passes climate bill', { topics: ['politics'] }),
+    article('liked-2', 'House votes on budget deal', { topics: ['politics'] }),
+  ];
+  const profile = buildLikedInterestProfile(prefsWithLikedArticles(likedPolitics))!;
+  const candidate = article('match', 'Committee schedules hearing', { topics: ['politics'] });
+
+  const reasons = getArticleMatchReasons(candidate, profile);
+
+  assert.deepEqual(reasons, ['Similar to articles you liked']);
 });
 
 test('isMeaningfulInterestMatch matches television headlines for a tv keyword profile', () => {
@@ -419,4 +480,24 @@ test('getLikedInterestBadgeItems lists topics, specific keywords, and sport tags
   assert.ok(badges.some((item) => item.kind === 'keyword' && item.key === 'chiefs'));
   assert.ok(badges.some((item) => item.kind === 'sport' && item.key === 'football'));
   assert.ok(!badges.some((item) => item.kind === 'keyword' && item.key === 'preview'));
+});
+
+test('getPersonalizedFeed works from feed clicks without likes', () => {
+  const clicked = article('clicked-1', 'Must-watch series season finale', { topics: ['culture'] });
+  const prefs = basePrefs({
+    likedArticleIds: [],
+    clickedArticleIds: ['clicked-1'],
+    clickedArticles: { 'clicked-1': clicked },
+  });
+  const feed = [
+    clicked,
+    article('match', 'Best new series season preview', { topics: ['culture'] }),
+    article('miss', 'Senate passes budget bill', { topics: ['politics'] }),
+  ];
+
+  const personalized = getPersonalizedFeed(feed, prefs);
+
+  assert.ok(personalized.some((item) => item.id === 'match'));
+  assert.ok(!personalized.some((item) => item.id === 'miss'));
+  assert.ok(!personalized.some((item) => item.id === 'clicked-1'));
 });

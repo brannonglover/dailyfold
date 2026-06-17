@@ -3,17 +3,17 @@ import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { memo, useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
-import { ArticlesProvider } from '@/contexts/ArticlesContext';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { PreferencesProvider } from '@/contexts/PreferencesContext';
 import { AppThemeProvider } from '@/contexts/ThemeContext';
 import { useAppFonts } from '@/constants/Fonts';
 import { useNotificationNavigation } from '@/hooks/useNotificationNavigation';
 import { useTrendingNotificationBackground } from '@/hooks/useTrendingNotificationBackground';
+import { warmUpPublisherBrowser } from '@/utils/openPublisherBrowser';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -69,9 +69,7 @@ export default function RootLayout() {
       <AppThemeProvider>
         <AuthProvider>
           <PreferencesProvider>
-            <ArticlesProvider>
-              <RootLayoutNav />
-            </ArticlesProvider>
+            <RootLayoutNav />
           </PreferencesProvider>
         </AuthProvider>
       </AppThemeProvider>
@@ -79,9 +77,13 @@ export default function RootLayout() {
   );
 }
 
-function RootLayoutNav() {
+const RootLayoutNav = memo(function RootLayoutNav() {
   useNotificationNavigation();
   useTrendingNotificationBackground();
+
+  useEffect(() => {
+    warmUpPublisherBrowser();
+  }, []);
 
   return (
     <ThemeProvider value={DarkNavTheme}>
@@ -115,4 +117,4 @@ function RootLayoutNav() {
       </AuthGate>
     </ThemeProvider>
   );
-}
+});

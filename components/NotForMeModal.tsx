@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Platform,
   Pressable,
@@ -12,33 +13,19 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { SPORT_TAG_LABELS } from '@/catalog/sports';
-import { CURIOSITY_LABELS } from '@/constants/curiosities';
-import { tabBarModalBottomOffset } from '@/constants/Layout';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useTheme } from '@/hooks/useTheme';
-import { articleSportTags } from '@/services/sportPreferences';
-import { Article, SportTag, Topic } from '@/types';
+import { buildNotForMeOptions, NotForMeAction, NotForMeOption } from '@/services/notForMeOptions';
+import { Article } from '@/types';
 
-export type NotForMeAction =
-  | { type: 'source' }
-  | { type: 'topic'; topic: Topic }
-  | { type: 'sportTag'; tag: SportTag }
-  | { type: 'similar' };
+export type { NotForMeAction } from '@/services/notForMeOptions';
 
 interface NotForMeModalProps {
-  visible: boolean;
   article: Article;
   onClose: () => void;
-  bottomOffset?: number;
 }
 
-export function NotForMeModal({
-  visible,
-  article,
-  onClose,
-  bottomOffset = 0,
-}: NotForMeModalProps) {
+export function NotForMeModal({ article, onClose }: NotForMeModalProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const {
@@ -46,22 +33,30 @@ export function NotForMeModal({
     hideSourceFromArticle,
     hideTopicFromArticle,
     hideSportTagFromArticle,
+    hideKeywordFromArticle,
     hideSimilarToArticle,
   } = usePreferences();
 
-  const sourceId = useMemo(
-    () => sources.find((source) => source.name === article.source)?.id ?? null,
-    [sources, article.source],
-  );
+  const [options, setOptions] = useState<NotForMeOption[] | null>(null);
 
-  const sportTags = useMemo(() => articleSportTags(article), [article]);
-
-  const sheetAnchorBottom =
-    bottomOffset > 0 ? tabBarModalBottomOffset(bottomOffset, insets.bottom) : 0;
+  useEffect(() => {
+    let cancelled = false;
+    const frame = requestAnimationFrame(() => {
+      if (!cancelled) {
+        setOptions(buildNotForMeOptions(article, sources));
+      }
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [article, sources]);
 
   async function runAction(action: NotForMeAction) {
+    onClose();
+
     if (Platform.OS !== 'web') {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
 
     switch (action.type) {
@@ -74,71 +69,46 @@ export function NotForMeModal({
       case 'sportTag':
         await hideSportTagFromArticle(article, action.tag);
         break;
+      case 'keyword':
+        await hideKeywordFromArticle(article, action.keyword);
+        break;
       case 'similar':
         await hideSimilarToArticle(article);
         break;
     }
+  }
 
+  function handleCancel() {
     onClose();
   }
 
-  const options: { key: string; label: string; detail?: string; action: NotForMeAction }[] = [];
-
-  if (sourceId) {
-    options.push({
-      key: 'source',
-      label: `Hide stories from ${article.source}`,
-      detail: 'You can re-enable this outlet in Profile → Sources',
-      action: { type: 'source' },
-    });
-  }
-
-  for (const topic of article.topics) {
-    options.push({
-      key: `topic-${topic}`,
-      label: `Show less ${CURIOSITY_LABELS[topic]}`,
-      action: { type: 'topic', topic },
-    });
-  }
-
-  for (const tag of sportTags) {
-    options.push({
-      key: `sport-${tag}`,
-      label: `Show less ${SPORT_TAG_LABELS[tag]}`,
-      action: { type: 'sportTag', tag },
-    });
-  }
-
-  options.push({
-    key: 'similar',
-    label: 'Show less like this story',
-    detail: 'Hides articles with similar headline keywords',
-    action: { type: 'similar' },
-  });
-
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible animationType="slide" transparent onRequestClose={handleCancel}>
       <View style={styles.root}>
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityRole="button" />
-        <View style={[styles.sheetAnchor, { bottom: sheetAnchorBottom }]}>
-          <Pressable
-            style={[
-              styles.sheet,
-              {
-                backgroundColor: colors.background,
-                borderColor: colors.border,
-                paddingBottom: bottomOffset > 0 ? 16 : insets.bottom + 16,
-              },
-            ]}
-            onPress={(e) => e.stopPropagation()}>
-            <View style={[styles.handle, { backgroundColor: colors.border }]} />
-            <Text style={[styles.title, { color: colors.text }]}>{article.source}</Text>
-            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              Hide this outlet or show fewer stories like this one.
-            </Text>
+        <Pressable style={styles.backdrop} onPress={handleCancel} accessibilityRole="button" />
+        <View
+          style={[
+            styles.sheet,
+            {
+              backgroundColor: colors.background,
+              borderColor: colors.border,
+              paddingBottom: insets.bottom + 16,
+            },
+          ]}>
+          <View style={[styles.handle, { backgroundColor: colors.border }]} />
+          <Text style={[styles.title, { color: colors.text }]}>{article.source}</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+            Hide this outlet or show fewer stories like this one.
+          </Text>
 
-            <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
-              {options.map((option) => (
+          <ScrollView
+            style={styles.body}
+            contentContainerStyle={styles.bodyContent}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            nestedScrollEnabled>
+            {options ? (
+              options.map((option) => (
                 <Pressable
                   key={option.key}
                   onPress={() => void runAction(option.action)}
@@ -157,18 +127,22 @@ export function NotForMeModal({
                     ) : null}
                   </View>
                 </Pressable>
-              ))}
-            </ScrollView>
+              ))
+            ) : (
+              <View style={styles.loading}>
+                <ActivityIndicator color={colors.textSecondary} />
+              </View>
+            )}
+          </ScrollView>
 
-            <Pressable
-              onPress={onClose}
-              style={({ pressed }) => [
-                styles.cancelButton,
-                { borderColor: colors.border },
-                pressed && { opacity: 0.7 },
-              ]}>
-              <Text style={[styles.cancelButtonText, { color: colors.text }]}>Cancel</Text>
-            </Pressable>
+          <Pressable
+            onPress={handleCancel}
+            style={({ pressed }) => [
+              styles.cancelButton,
+              { borderColor: colors.border },
+              pressed && { opacity: 0.7 },
+            ]}>
+            <Text style={[styles.cancelButtonText, { color: colors.text }]}>Cancel</Text>
           </Pressable>
         </View>
       </View>
@@ -179,30 +153,28 @@ export function NotForMeModal({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+    justifyContent: 'flex-end',
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
   },
-  sheetAnchor: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-  },
   sheet: {
+    width: '100%',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 0,
     paddingHorizontal: 24,
     paddingTop: 12,
-    maxHeight: '80%',
+    maxHeight: Platform.OS === 'web' ? '80%' : '85%',
   },
   handle: {
     alignSelf: 'center',
     width: 36,
     height: 4,
     borderRadius: 2,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   title: {
     fontFamily: 'LoraBold',
@@ -216,7 +188,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   body: {
+    flexGrow: 0,
     maxHeight: 360,
+  },
+  bodyContent: {
+    gap: 0,
+  },
+  loading: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 28,
   },
   row: {
     flexDirection: 'row',

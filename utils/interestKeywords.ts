@@ -176,6 +176,7 @@ export const GENERIC_INTEREST_KEYWORDS = new Set([
   'preview',
   'review',
   'season',
+  'set',
   'team',
   'time',
   'top',
@@ -202,6 +203,8 @@ const HEADLINE_FRAGMENT_KEYWORDS = new Set([
   'fall',
   'hits',
   'other',
+  'piece',
+  'set',
   'unlike',
 ]);
 
@@ -224,6 +227,12 @@ export function getInterestKeywordWeight(keyword: string): number {
   if (tier === 'primary') return 3;
   if (tier === 'secondary') return 2;
   return 1;
+}
+
+/** Whether a keyword is curated enough to show as an explicit "Show less …" option. */
+export function isNotForMeKeywordOption(keyword: string): boolean {
+  if (!isSpecificInterestKeyword(keyword)) return false;
+  return INTEREST_VOCABULARY.has(keyword) || KNOWN_INTEREST_PHRASES.has(keyword);
 }
 
 /** Whether a profile keyword is specific enough to drive For You matching. */

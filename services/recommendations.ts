@@ -1,11 +1,17 @@
 import { SPORT_TAG_LABELS } from '@/catalog/sports';
 import { CURIOSITY_LABELS } from '@/constants/curiosities';
+import { resolveClickedArticles } from '@/services/clickedArticles';
 import {
   articleInterestKeywords,
+  buildInterestProfile,
   buildLikedInterestProfile,
+  CLICK_BOOST,
   hasInterestSignals,
+  hasPersonalizationSignals,
+  LIKE_BOOST,
   LikedInterestProfile,
 } from '@/services/interestSignals';
+import { resolveLikedArticles } from '@/services/likedArticles';
 import { articleSportTags } from '@/services/sportPreferences';
 import {
   formatInterestLabel,
@@ -16,6 +22,8 @@ import {
   SECONDARY_INTEREST_KEYWORDS,
 } from '@/utils/interestKeywords';
 import { Article, SportTag, Topic, UserPreferences } from '@/types';
+
+const MIN_SOURCE_AFFINITY = CLICK_BOOST;
 
 /** Broad topic likes — baseline signal. */
 const TOPIC_WEIGHT = 1;
@@ -145,21 +153,24 @@ export function hasLikedArticles(prefs: UserPreferences | null | undefined): boo
 }
 
 export function getPersonalizedFeed(articles: Article[], prefs: UserPreferences | null): Article[] {
-  if (!hasLikedArticles(prefs)) {
+  if (!hasPersonalizationSignals(prefs)) {
     return [];
   }
 
   const profileArticles = [
     ...articles,
     ...Object.values(prefs!.likedArticles ?? {}),
+    ...Object.values(prefs!.clickedArticles ?? {}),
   ];
-  const profile = buildLikedInterestProfile(prefs!, profileArticles);
+  const profile = buildInterestProfile(prefs!, profileArticles);
   if (!profile || !hasInterestSignals(profile)) {
     return [];
   }
 
   const likedIds = new Set(prefs!.likedArticleIds);
-  const discoverable = articles.filter((article) => !likedIds.has(article.id));
+  const clickedIds = new Set(prefs!.clickedArticleIds ?? []);
+  const excludedIds = new Set([...likedIds, ...clickedIds]);
+  const discoverable = articles.filter((article) => !excludedIds.has(article.id));
   const matches = discoverable.filter((article) => isMeaningfulInterestMatch(article, profile));
   return rankArticles(matches, profile, likedIds);
 }
@@ -228,50 +239,132 @@ function formatSportTagLabel(tag: string): string {
   return SPORT_TAG_LABELS[tag as SportTag] ?? formatInterestLabel(tag);
 }
 
-/** Per-article match chips for For You — which liked-interest signals matched this story. */
+function articleTopicBadgeLabels(article: Article): Set<string> {
+  return new Set(
+    article.topics.map((topic) => CURIOSITY_LABELS[topic] ?? formatInterestLabel(topic)),
+  );
+}
+
+function formatKeywordMatchReason(keyword: string): string {
+  return `Because you read about ${formatInterestLabel(keyword)}`;
+}
+
+function formatSportMatchReason(tag: string): string {
+  const label = formatSportTagLabel(tag);
+  if (tag === 'football') return 'Because you follow NFL stories';
+  return `Because you follow ${label} stories`;
+}
+
+function formatSourceMatchReason(source: string): string {
+  const trimmed = source.trim();
+  if (!trimmed) return 'From a source you like';
+  return `Because you like ${trimmed}`;
+}
+
+function buildLikedSourceScores(
+  prefs: UserPreferences,
+  feedArticles: Article[] = [],
+): Record<string, number> {
+  const scores: Record<string, number> = {};
+  const liked = resolveLikedArticles(
+    prefs.likedArticleIds,
+    prefs.likedArticles ?? {},
+    feedArticles,
+  );
+  const clicked = resolveClickedArticles(
+    prefs.clickedArticleIds ?? [],
+    prefs.clickedArticles ?? {},
+    feedArticles,
+  ).filter((item) => !prefs.likedArticleIds.includes(item.id));
+
+  for (const item of liked) {
+    scores[item.source] = (scores[item.source] ?? 0) + LIKE_BOOST;
+  }
+  for (const item of clicked) {
+    scores[item.source] = (scores[item.source] ?? 0) + CLICK_BOOST;
+  }
+  return scores;
+}
+
+export interface ArticleMatchReasonContext {
+  profile: InterestScores;
+  sourceScores?: Record<string, number>;
+}
+
+/** Per-article match chips for For You — personal explanations, not topic badge duplicates. */
 export function getArticleMatchReasons(
   article: Article,
-  profile: InterestScores,
-  limit = 3,
+  profileOrContext: InterestScores | ArticleMatchReasonContext,
+  limit = 2,
 ): string[] {
+  const profile = 'profile' in profileOrContext ? profileOrContext.profile : profileOrContext;
+  const sourceScores =
+    'sourceScores' in profileOrContext ? profileOrContext.sourceScores ?? {} : {};
   const text = `${article.title} ${article.excerpt}`.toLowerCase();
   const articleKeywords = new Set(articleInterestKeywords(article));
-  const reasons: { label: string; weight: number }[] = [];
+  const topicBadges = articleTopicBadgeLabels(article);
+  const reasons: { phrase: string; weight: number }[] = [];
+  const seenPhrases = new Set<string>();
+
+  const addReason = (phrase: string, weight: number) => {
+    if (seenPhrases.has(phrase)) return;
+    seenPhrases.add(phrase);
+    reasons.push({ phrase, weight });
+  };
 
   for (const [keyword, score] of Object.entries(profile.keywordScores)) {
     if (score <= 0) continue;
     if (getKeywordTier(keyword) === 'other') continue;
     if (!keywordMatchesArticle(keyword, articleKeywords, text)) continue;
-    reasons.push({
-      label: formatInterestLabel(keyword),
-      weight: score * getInterestKeywordWeight(keyword),
-    });
+    const phrase = formatKeywordMatchReason(keyword);
+    if ([...topicBadges].some((badge) => badge.toLowerCase() === phrase.toLowerCase())) continue;
+    addReason(phrase, score * getInterestKeywordWeight(keyword));
   }
 
   for (const tag of articleSportTags(article)) {
     const score = profile.sportTagScores?.[tag] ?? 0;
     if (score <= 0) continue;
-    reasons.push({
-      label: formatSportTagLabel(tag),
-      weight: score * SPORT_TAG_WEIGHT,
-    });
+    addReason(formatSportMatchReason(tag), score * SPORT_TAG_WEIGHT);
+  }
+
+  const sourceScore = sourceScores[article.source] ?? 0;
+  if (sourceScore >= MIN_SOURCE_AFFINITY) {
+    addReason(formatSourceMatchReason(article.source), sourceScore);
+  }
+
+  const hasPersonalSignal = reasons.length > 0;
+  if (!hasPersonalSignal) {
+    for (const topic of article.topics) {
+      if (BROAD_TOPICS.has(topic)) continue;
+      const score = profile.topicScores[topic as Topic] ?? 0;
+      if (score < MIN_TOPIC_ONLY_AFFINITY) continue;
+      addReason('Similar to articles you liked', score * TOPIC_WEIGHT);
+      break;
+    }
   }
 
   return [...reasons]
     .sort((a, b) => b.weight - a.weight)
     .slice(0, limit)
-    .map((reason) => reason.label);
+    .map((reason) => reason.phrase);
 }
 
 export function buildArticleMatchReasonsById(
   articles: Article[],
   profile: InterestScores | null,
+  prefs?: UserPreferences | null,
+  feedArticles: Article[] = [],
 ): Map<string, string[]> {
   const map = new Map<string, string[]>();
   if (!profile || !hasInterestSignals(profile)) return map;
 
+  const context: ArticleMatchReasonContext = {
+    profile,
+    sourceScores: prefs ? buildLikedSourceScores(prefs, feedArticles) : {},
+  };
+
   for (const article of articles) {
-    const reasons = getArticleMatchReasons(article, profile);
+    const reasons = getArticleMatchReasons(article, context);
     if (reasons.length > 0) {
       map.set(article.id, reasons);
     }
@@ -282,9 +375,9 @@ export function buildArticleMatchReasonsById(
 
 /** Subtitle copy for For You — prefers narrow keywords and sport tags over broad topics. */
 export function getPersonalizationSummary(prefs: UserPreferences | null, limit = 3): string {
-  const profile = prefs ? buildLikedInterestProfile(prefs) : null;
+  const profile = prefs ? buildInterestProfile(prefs) : null;
   if (!profile || !hasInterestSignals(profile)) {
-    return 'Like articles to personalize your feed';
+    return 'Like articles or tap stories on Latest to personalize your feed';
   }
 
   const labels = [
@@ -294,7 +387,7 @@ export function getPersonalizationSummary(prefs: UserPreferences | null, limit =
   ];
 
   const unique = [...new Set(labels)].slice(0, limit);
-  if (unique.length === 0) return 'Like articles to personalize your feed';
+  if (unique.length === 0) return 'Like articles or tap stories on Latest to personalize your feed';
   return `Based on your interest in ${unique.join(', ')}`;
 }
 

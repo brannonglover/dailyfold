@@ -3,6 +3,8 @@ export type SportTag =
   | 'baseball'
   | 'basketball'
   | 'football'
+  | 'college-football'
+  | 'college-basketball'
   | 'hockey'
   | 'soccer'
   | 'mtb'
@@ -19,7 +21,9 @@ export type SportTag =
 export const SPORT_TAG_ORDER: SportTag[] = [
   'baseball',
   'basketball',
+  'college-basketball',
   'football',
+  'college-football',
   'hockey',
   'soccer',
   'mtb',
@@ -37,7 +41,9 @@ export const SPORT_TAG_ORDER: SportTag[] = [
 export const SPORT_TAG_LABELS: Record<SportTag, string> = {
   baseball: 'Baseball',
   basketball: 'Basketball',
+  'college-basketball': 'College Basketball',
   football: 'American Football',
+  'college-football': 'College Football',
   hockey: 'Hockey',
   soccer: 'Football',
   mtb: 'MTB',
@@ -97,12 +103,20 @@ function matchesSportTag(tag: SportTag, text: string): boolean {
 }
 
 const NFL_INFERENCE_PATTERN =
-  /\b(nfl|super bowl|quarterback|touchdown|linebacker|wide receiver|american football|college football|ncaa football)\b/i;
+  /\b(nfl|super bowl|quarterback|touchdown|linebacker|wide receiver|american football)\b/i;
+
+const COLLEGE_FOOTBALL_PATTERN =
+  /\b(college football|ncaa football|ncaa fbs|ncaa fcs|\bfbs\b|\bfcs\b|heisman|college football playoff|cf playoff|\bcfp\b|big ten football|pac-?12 football|big 12 football)\b/i;
+
+const COLLEGE_BASKETBALL_PATTERN =
+  /\b(college basketball|ncaa basketball|ncaa tournament|march madness|final four|sweet sixteen|sweet 16|elite eight|elite 8|college hoops)\b/i;
 
 const SPORT_INFERENCE_RULES: [SportTag, RegExp][] = [
   ['baseball', /\b(baseball|mlb|world series|home run|pitcher|slugger)\b/i],
-  ['basketball', /\b(basketball|nba|ncaa basketball|dunk|three-pointer|free throw)\b/i],
+  ['basketball', /\b(basketball|nba|dunk|three-pointer|free throw)\b/i],
+  ['college-basketball', COLLEGE_BASKETBALL_PATTERN],
   ['football', NFL_INFERENCE_PATTERN],
+  ['college-football', COLLEGE_FOOTBALL_PATTERN],
   ['hockey', /\b(hockey|nhl|stanley cup|puck|power play|goaltender|faceoff)\b/i],
   ['soccer', /\b(soccer|mls|fifa|world cup|goalkeeper|matchday|footballer|striker|midfielder|penalty|offside|transfer window|premier league|la liga|bundesliga|serie a|champions league|uefa)\b/i],
   [
@@ -145,7 +159,9 @@ export function inferSportTags(text: string, baseTags: SportTag[] = []): SportTa
 
   // "Football" alone usually means association football; NFL-specific terms route to American football.
   if (/\bfootball\b/i.test(text)) {
-    if (NFL_INFERENCE_PATTERN.test(text)) {
+    if (COLLEGE_FOOTBALL_PATTERN.test(text)) {
+      inferred.add('college-football');
+    } else if (NFL_INFERENCE_PATTERN.test(text)) {
       inferred.add('football');
     } else {
       inferred.add('soccer');
@@ -168,5 +184,35 @@ export function inferSportTags(text: string, baseTags: SportTag[] = []): SportTa
     if (inferred.has(league)) inferred.add('soccer');
   }
 
+  // College sports are distinct from pro leagues unless both are explicitly mentioned.
+  if (inferred.has('college-football') && !/\b(nfl|super bowl)\b/i.test(text)) {
+    inferred.delete('football');
+  }
+  if (inferred.has('college-basketball') && !/\b(nba|wnba)\b/i.test(text)) {
+    inferred.delete('basketball');
+  }
+
   return SPORT_TAG_ORDER.filter((tag) => inferred.has(tag));
+}
+
+/** User-facing label for "Show less …" sport options — prefers league names when content matches. */
+export function showLessSportTagLabel(tag: SportTag, text: string): string {
+  if (tag === 'football' && /\b(nfl|super bowl)\b/i.test(text)) return 'NFL';
+  if (tag === 'basketball' && /\b(nba|wnba)\b/i.test(text)) return 'NBA';
+  if (tag === 'baseball' && /\bmlb\b/i.test(text)) return 'MLB';
+  if (tag === 'hockey' && /\bnhl\b/i.test(text)) return 'NHL';
+  if (tag === 'soccer' && /\bmls\b/i.test(text)) return 'MLS';
+  if (tag === 'soccer') return 'Soccer';
+  return SPORT_TAG_LABELS[tag];
+}
+
+/** User-facing label for "Not interested in …" sport options — USA-friendly naming. */
+export function notInterestedSportLabel(tag: SportTag, text: string): string {
+  if (tag === 'football' && /\b(nfl|super bowl)\b/i.test(text)) return 'NFL';
+  if (tag === 'basketball' && /\b(nba|wnba)\b/i.test(text)) return 'NBA';
+  if (tag === 'baseball' && /\bmlb\b/i.test(text)) return 'MLB';
+  if (tag === 'hockey' && /\bnhl\b/i.test(text)) return 'NHL';
+  if (tag === 'soccer' && /\bmls\b/i.test(text)) return 'MLS';
+  if (tag === 'soccer') return 'Soccer';
+  return SPORT_TAG_LABELS[tag];
 }

@@ -18,6 +18,7 @@ function sampleMatch(overrides: Partial<WorldCupMatch> = {}): WorldCupMatch {
     statusDetail: '',
     isLive: false,
     isFinal: false,
+    wentToPenalties: false,
     home: { name: 'Mexico', abbrev: 'MEX', score: '0', winner: false },
     away: { name: 'South Africa', abbrev: 'RSA', score: '0', winner: false },
     ...overrides,

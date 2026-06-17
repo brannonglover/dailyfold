@@ -36,6 +36,8 @@ function basePrefs(overrides: Partial<UserPreferences> = {}): UserPreferences {
   return {
     likedArticleIds: [],
     likedArticles: {},
+    clickedArticleIds: [],
+    clickedArticles: {},
     topicScores: Object.fromEntries(CURIOSITY_ORDER.map((t) => [t, 0])) as UserPreferences['topicScores'],
     sourceScores: {},
     keywordScores: {},

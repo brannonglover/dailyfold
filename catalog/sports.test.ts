@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { inferSportTags } from '@/catalog/sports';
+import { inferSportTags, notInterestedSportLabel, showLessSportTagLabel } from '@/catalog/sports';
 import { filterArticlesBySportTags } from '@/services/sportPreferences';
 import { Article } from '@/types';
 
@@ -178,4 +178,61 @@ test('filterArticlesBySportTags excludes non-sports articles when a sport chip i
 
   const result = filterArticlesBySportTags(articles, ['mtb'], ['sports']);
   assert.deepEqual(result.map((a) => a.id), ['mtb']);
+});
+
+test('showLessSportTagLabel prefers NFL for football when NFL terms appear', () => {
+  const text = 'NFL draft picks reshape the AFC';
+  assert.equal(showLessSportTagLabel('football', text), 'NFL');
+  assert.equal(
+    showLessSportTagLabel('college-football', 'College football rankings updated'),
+    'College Football',
+  );
+});
+
+test('showLessSportTagLabel uses Soccer for association football', () => {
+  assert.equal(showLessSportTagLabel('soccer', 'Premier League transfer news'), 'Soccer');
+  assert.equal(showLessSportTagLabel('soccer', 'MLS expansion teams announced'), 'MLS');
+  assert.equal(showLessSportTagLabel('soccer', 'European football roundup'), 'Soccer');
+});
+
+test('inferSportTags tags college football distinctly from NFL', () => {
+  const college = inferSportTags('College football rankings updated after rivalry weekend', []);
+  assert.deepEqual(college, ['college-football']);
+  assert.ok(!college.includes('football'));
+
+  const nfl = inferSportTags('NFL draft picks reshape the AFC quarterback room', []);
+  assert.deepEqual(nfl, ['football']);
+  assert.ok(!nfl.includes('college-football'));
+});
+
+test('inferSportTags tags college basketball distinctly from NBA', () => {
+  const college = inferSportTags('March Madness bracket reveals Final Four matchups', []);
+  assert.deepEqual(college, ['college-basketball']);
+  assert.ok(!college.includes('basketball'));
+
+  const nba = inferSportTags('NBA playoffs feature clutch three-pointer', []);
+  assert.deepEqual(nba, ['basketball']);
+  assert.ok(!nba.includes('college-basketball'));
+});
+
+test('inferSportTags inherits college-football from dedicated feed defaults', () => {
+  const tags = inferSportTags('Rivalry week preview', ['college-football']);
+  assert.deepEqual(tags, ['college-football']);
+});
+
+test('notInterestedSportLabel uses USA-friendly soccer naming', () => {
+  assert.equal(notInterestedSportLabel('soccer', 'Premier League transfer news'), 'Soccer');
+  assert.equal(notInterestedSportLabel('soccer', 'MLS expansion teams announced'), 'MLS');
+  assert.equal(
+    notInterestedSportLabel('football', 'NFL draft picks reshape the AFC'),
+    'NFL',
+  );
+  assert.equal(
+    notInterestedSportLabel('college-football', 'College football rankings updated'),
+    'College Football',
+  );
+  assert.equal(
+    notInterestedSportLabel('college-basketball', 'March Madness bracket update'),
+    'College Basketball',
+  );
 });

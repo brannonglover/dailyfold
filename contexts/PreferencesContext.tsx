@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { InteractionManager } from 'react-native';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { FALLBACK_SOURCES } from '@/data/sources';
@@ -28,6 +29,7 @@ import {
   isAllTopicsEnabled,
 } from '@/services/topicPreferences';
 import {
+  addBlockedKeyword,
   addBlockedKeywordsFromArticle,
   addBlockedSportTag,
   addBlockedTopic,
@@ -38,6 +40,11 @@ import { applyFeedFilters } from '@/services/feedFilters';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import { fetchArticleById } from '@/services/articles';
 import {
+  capClickedArticleIds,
+  mergeClickedArticleSnapshot,
+  pruneClickedArticlesCache,
+} from '@/services/clickedArticles';
+import {
   mergeLikedArticleSnapshot,
   missingLikedArticleIds,
   removeLikedArticleSnapshot,
@@ -46,6 +53,7 @@ import { requestTrendingNotificationPermission } from '@/services/notificationSe
 import { warmArticleCache } from '@/services/articleCache';
 import { getPreferences, savePreferences } from '@/services/storage';
 import {
+  applyArticleClickSignals,
   applyArticleLikeSignals,
   buildLikedInterestProfile,
   reconcileInterestScores,
@@ -67,6 +75,7 @@ interface PreferencesContextValue {
   isLoading: boolean;
   isLiked: (articleId: string) => boolean;
   toggleLike: (article: Article) => void;
+  recordFeedClick: (article: Article) => void;
   rememberLikedArticles: (articles: Article[]) => Promise<void>;
   topTopics: string[];
   topSportTags: string[];
@@ -95,6 +104,7 @@ interface PreferencesContextValue {
   hideSourceFromArticle: (article: Article) => Promise<void>;
   hideTopicFromArticle: (article: Article, topic: Topic) => Promise<void>;
   hideSportTagFromArticle: (article: Article, tag: SportTag) => Promise<void>;
+  hideKeywordFromArticle: (article: Article, keyword: string) => Promise<void>;
   hideSimilarToArticle: (article: Article) => Promise<void>;
 }
 
@@ -112,7 +122,10 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     warmArticleCache();
-    fetchSources().then(setSources);
+    const task = InteractionManager.runAfterInteractions(() => {
+      fetchSources().then(setSources);
+    });
+    return () => task.cancel();
   }, []);
 
   useEffect(() => {
@@ -166,26 +179,39 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     if (missing.length === 0 || likedBackfillInFlightRef.current) return;
 
     likedBackfillInFlightRef.current = true;
-    void (async () => {
-      try {
-        const fetched = (
-          await Promise.all(missing.map((id) => fetchArticleById(id)))
-        ).filter((article): article is Article => article != null);
-        if (fetched.length === 0) return;
-
-        const current = preferencesRef.current;
-        if (!current) return;
-
-        let likedArticles = current.likedArticles ?? {};
-        for (const article of fetched) {
-          likedArticles = mergeLikedArticleSnapshot(likedArticles, article);
-        }
-
-        await persist(reconcileInterestScores({ ...current, likedArticles }));
-      } finally {
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) {
         likedBackfillInFlightRef.current = false;
+        return;
       }
-    })();
+      void (async () => {
+        try {
+          const fetched = (
+            await Promise.all(missing.map((id) => fetchArticleById(id)))
+          ).filter((article): article is Article => article != null);
+          if (fetched.length === 0) return;
+
+          const current = preferencesRef.current;
+          if (!current) return;
+
+          let likedArticles = current.likedArticles ?? {};
+          for (const article of fetched) {
+            likedArticles = mergeLikedArticleSnapshot(likedArticles, article);
+          }
+
+          await persist(reconcileInterestScores({ ...current, likedArticles }));
+        } finally {
+          likedBackfillInFlightRef.current = false;
+        }
+      })();
+    });
+
+    return () => {
+      cancelled = true;
+      task.cancel();
+      likedBackfillInFlightRef.current = false;
+    };
   }, [user, preferences?.likedArticleIds, persist]);
 
   /** All topics + sports-only outlets leaves a sports-only feed and API fetch. */
@@ -230,6 +256,43 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
         : mergeLikedArticleSnapshot(current.likedArticles ?? {}, article);
 
       void persist({ ...current, likedArticleIds, likedArticles, ...signals, folders });
+    },
+    [user, persist],
+  );
+
+  const recordFeedClick = useCallback(
+    (article: Article) => {
+      if (!user) return;
+
+      const current = preferencesRef.current;
+      if (!current) return;
+      if (current.likedArticleIds.includes(article.id)) return;
+
+      const alreadyClicked = current.clickedArticleIds?.includes(article.id) ?? false;
+      let clickedArticleIds = alreadyClicked
+        ? [...(current.clickedArticleIds ?? []).filter((id) => id !== article.id), article.id]
+        : [...(current.clickedArticleIds ?? []), article.id];
+      clickedArticleIds = capClickedArticleIds(clickedArticleIds);
+
+      let clickedArticles = mergeClickedArticleSnapshot(
+        current.clickedArticles ?? {},
+        article,
+      );
+      clickedArticles = pruneClickedArticlesCache(clickedArticles, clickedArticleIds);
+
+      const signals = alreadyClicked ? {} : applyArticleClickSignals(current, article);
+
+      const next = {
+        ...current,
+        clickedArticleIds,
+        clickedArticles,
+        ...signals,
+      };
+
+      // Defer so feed ranking on inactive tabs does not block article navigation.
+      InteractionManager.runAfterInteractions(() => {
+        void persist(next);
+      });
     },
     [user, persist],
   );
@@ -483,6 +546,14 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     [user, preferences, persist],
   );
 
+  const hideKeywordFromArticle = useCallback(
+    async (_article: Article, keyword: string) => {
+      if (!user || !preferences) return;
+      await persist(addBlockedKeyword(preferences, keyword));
+    },
+    [user, preferences, persist],
+  );
+
   const hideSimilarToArticle = useCallback(
     async (article: Article) => {
       if (!user || !preferences) return;
@@ -559,6 +630,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       isLoading,
       isLiked,
       toggleLike,
+      recordFeedClick,
       rememberLikedArticles,
       topTopics,
       topSportTags,
@@ -587,6 +659,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       hideSourceFromArticle,
       hideTopicFromArticle,
       hideSportTagFromArticle,
+      hideKeywordFromArticle,
       hideSimilarToArticle,
     }),
     [
@@ -595,6 +668,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       isLoading,
       isLiked,
       toggleLike,
+      recordFeedClick,
       rememberLikedArticles,
       topTopics,
       topSportTags,
@@ -622,6 +696,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       hideSourceFromArticle,
       hideTopicFromArticle,
       hideSportTagFromArticle,
+      hideKeywordFromArticle,
       hideSimilarToArticle,
     ],
   );

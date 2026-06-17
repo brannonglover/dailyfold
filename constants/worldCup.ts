@@ -29,8 +29,8 @@ export const WORLD_CUP_NEWS_FEEDS = [
   },
 ] as const;
 
-/** Days of fixtures to load from the ESPN scoreboard. */
-export const WORLD_CUP_SCOREBOARD_DAYS = 7;
+/** ESPN date range for all tournament fixtures on the Scores tab (YYYYMMDD-YYYYMMDD). */
+export const WORLD_CUP_TOURNAMENT_DATES = '20260611-20260719';
 
 /** ESPN date range for knockout bracket fixtures (YYYYMMDD-YYYYMMDD). */
 export const WORLD_CUP_BRACKET_DATES = '20260628-20260719';

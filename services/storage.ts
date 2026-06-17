@@ -27,6 +27,8 @@ export async function getPreferences(userId: string): Promise<UserPreferences> {
     return {
       likedArticleIds: [],
       likedArticles: {},
+      clickedArticleIds: [],
+      clickedArticles: {},
       topicScores: { ...DEFAULT_TOPIC_SCORES },
       sourceScores: {},
       keywordScores: {},
@@ -46,6 +48,8 @@ export async function getPreferences(userId: string): Promise<UserPreferences> {
     normalizeFeedPreferences({
       likedArticleIds: parsed.likedArticleIds ?? [],
       likedArticles: parsed.likedArticles ?? {},
+      clickedArticleIds: parsed.clickedArticleIds ?? [],
+      clickedArticles: parsed.clickedArticles ?? {},
       topicScores: { ...DEFAULT_TOPIC_SCORES, ...parsed.topicScores },
       sourceScores: {},
       keywordScores: parsed.keywordScores ?? {},

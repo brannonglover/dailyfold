@@ -1,3 +1,4 @@
+import { resolveClickedArticles } from '@/services/clickedArticles';
 import { resolveLikedArticles } from '@/services/likedArticles';
 import { articleSportTags } from '@/services/sportPreferences';
 import {
@@ -8,6 +9,8 @@ import {
 import { Article, Topic, UserPreferences } from '@/types';
 
 export const LIKE_BOOST = 1;
+/** Weaker curiosity signal from opening a feed article without liking it. */
+export const CLICK_BOOST = 0.5;
 
 /** Interest profile derived from saved likes — source of truth for For You matching. */
 export type LikedInterestProfile = Pick<
@@ -91,6 +94,35 @@ export function applyArticleLikeSignals(
   return { topicScores, keywordScores, sportTagScores };
 }
 
+export function applyArticleClickSignals(
+  preferences: UserPreferences,
+  article: Article,
+): Pick<UserPreferences, 'topicScores' | 'keywordScores' | 'sportTagScores'> {
+  const delta = CLICK_BOOST;
+
+  const topicScores = { ...preferences.topicScores };
+  for (const topic of article.topics) {
+    if (isSourceBleed(topic, article.source)) continue;
+    const current = topicScores[topic as Topic] ?? 0;
+    const updated = current + delta;
+    topicScores[topic as Topic] = Math.max(0, updated);
+  }
+
+  const keywordScores = applyWeightedKeywordScores(
+    preferences.keywordScores,
+    articleInterestKeywords(article),
+    delta,
+  );
+
+  const sportTagScores = adjustScoreMap(
+    preferences.sportTagScores ?? {},
+    articleSportTags(article),
+    delta,
+  );
+
+  return { topicScores, keywordScores, sportTagScores };
+}
+
 export function hasInterestSignals(profile: {
   topicScores: Record<string, number>;
   keywordScores: Record<string, number>;
@@ -102,8 +134,11 @@ export function hasInterestSignals(profile: {
   return false;
 }
 
-export function hasPersonalizationSignals(prefs: UserPreferences): boolean {
-  return hasInterestSignals(prefs);
+export function hasPersonalizationSignals(
+  prefs: UserPreferences | null | undefined,
+): boolean {
+  if (!prefs) return false;
+  return prefs.likedArticleIds.length > 0 || (prefs.clickedArticleIds?.length ?? 0) > 0;
 }
 
 function mergeScoreMaps(
@@ -183,6 +218,43 @@ function profileFromLikedArticles(liked: Article[]): LikedInterestProfile {
   return { topicScores, keywordScores, sportTagScores };
 }
 
+function scaleProfile(profile: LikedInterestProfile, factor: number): LikedInterestProfile {
+  const scaleMap = (scores: Record<string, number>) => {
+    const next: Record<string, number> = {};
+    for (const [key, score] of Object.entries(scores)) {
+      if (score <= 0) continue;
+      next[key] = score * factor;
+    }
+    return next;
+  };
+
+  return {
+    topicScores: scaleMap(profile.topicScores) as UserPreferences['topicScores'],
+    keywordScores: scaleMap(profile.keywordScores),
+    sportTagScores: scaleMap(profile.sportTagScores ?? {}),
+  };
+}
+
+function addProfiles(
+  left: LikedInterestProfile,
+  right: LikedInterestProfile,
+): LikedInterestProfile {
+  const addMaps = (a: Record<string, number>, b: Record<string, number>) => {
+    const next = { ...a };
+    for (const [key, score] of Object.entries(b)) {
+      if (score <= 0) continue;
+      next[key] = (next[key] ?? 0) + score;
+    }
+    return next;
+  };
+
+  return {
+    topicScores: addMaps(left.topicScores, right.topicScores) as UserPreferences['topicScores'],
+    keywordScores: addMaps(left.keywordScores, right.keywordScores),
+    sportTagScores: addMaps(left.sportTagScores ?? {}, right.sportTagScores ?? {}),
+  };
+}
+
 /** Build a fresh interest profile from liked article content on each feed load. */
 export function buildLikedInterestProfile(
   prefs: UserPreferences,
@@ -203,14 +275,55 @@ export function buildLikedInterestProfile(
   return profileFromLikedArticles(liked);
 }
 
-/** Sync persisted interest scores from saved liked-article snapshots on load. */
-export function reconcileInterestScores(prefs: UserPreferences): UserPreferences {
-  if (prefs.likedArticleIds.length === 0) return prefs;
-
-  const profile = buildLikedInterestProfile(
-    prefs,
-    Object.values(prefs.likedArticles ?? {}),
+/** Build For You interest profile from explicit likes and feed click curiosity. */
+export function buildInterestProfile(
+  prefs: UserPreferences,
+  feedArticles: Article[] = [],
+): LikedInterestProfile | null {
+  const liked = resolveLikedArticles(
+    prefs.likedArticleIds,
+    prefs.likedArticles ?? {},
+    feedArticles,
   );
+  const clicked = resolveClickedArticles(
+    prefs.clickedArticleIds ?? [],
+    prefs.clickedArticles ?? {},
+    feedArticles,
+  ).filter((article) => !prefs.likedArticleIds.includes(article.id));
+
+  const parts: LikedInterestProfile[] = [];
+
+  if (liked.length > 0) {
+    parts.push(profileFromLikedArticles(liked));
+  }
+
+  if (clicked.length > 0) {
+    parts.push(scaleProfile(profileFromLikedArticles(clicked), CLICK_BOOST));
+  }
+
+  if (parts.length > 0) {
+    const merged = parts.reduce(addProfiles);
+    return hasInterestSignals(merged) ? merged : null;
+  }
+
+  if (prefs.likedArticleIds.length > 0 || (prefs.clickedArticleIds?.length ?? 0) > 0) {
+    const persisted = persistedInterestProfile(prefs);
+    return hasInterestSignals(persisted) ? persisted : null;
+  }
+
+  return null;
+}
+
+/** Sync persisted interest scores from saved like/click snapshots on load. */
+export function reconcileInterestScores(prefs: UserPreferences): UserPreferences {
+  if (prefs.likedArticleIds.length === 0 && (prefs.clickedArticleIds?.length ?? 0) === 0) {
+    return prefs;
+  }
+
+  const profile = buildInterestProfile(prefs, [
+    ...Object.values(prefs.likedArticles ?? {}),
+    ...Object.values(prefs.clickedArticles ?? {}),
+  ]);
   if (!profile || !hasInterestSignals(profile)) return prefs;
   if (interestProfilesEqual(profile, persistedInterestProfile(prefs))) return prefs;
 

@@ -3,10 +3,15 @@ import test from 'node:test';
 
 import {
   articleNeedsHeroEnrichment,
+  fetchPageOgImageUrl,
   isEspnFeedUrl,
+  isTimeoutError,
   parseOgImageUrl,
   parsePageHeroImageUrl,
 } from './ogImage';
+
+const BROKEN_GUARDIAN =
+  'https://i.guim.co.uk/img/media/abc/0_0_1200_800/master/1200.jpg?width=960&quality=85&auto=format&fit=max&s=small';
 
 const IWOBi_VIDEO_FIXTURE = `
 <head>
@@ -68,10 +73,69 @@ test('articleNeedsHeroEnrichment is true for empty and placeholder URLs', () => 
   assert.equal(articleNeedsHeroEnrichment('https://cdn.example.com/hero.jpg'), false);
 });
 
+test('articleNeedsHeroEnrichment is true for broken Guardian signed URLs', () => {
+  assert.equal(articleNeedsHeroEnrichment(BROKEN_GUARDIAN), true);
+  assert.equal(
+    articleNeedsHeroEnrichment(
+      'https://i.guim.co.uk/img/media/abc/0_0_1200_800/master/1200.jpg?width=700&quality=85&auto=format&fit=max&s=large',
+    ),
+    false,
+  );
+});
+
 test('isEspnFeedUrl matches ESPN feed hosts', () => {
   assert.equal(isEspnFeedUrl('https://www.espn.co.uk/espn/rss/football/news'), true);
   assert.equal(isEspnFeedUrl('https://www.espn.com/espn/rss/soccer/news'), true);
   assert.equal(isEspnFeedUrl('https://feeds.bbci.co.uk/sport/football/rss.xml'), false);
+});
+
+test('isTimeoutError recognizes abort and timeout failures', () => {
+  assert.equal(isTimeoutError(Object.assign(new Error('Aborted'), { name: 'AbortError' })), true);
+  assert.equal(isTimeoutError(new Error('Request timed out after 12000ms')), true);
+  assert.equal(isTimeoutError(new Error('HTTP 404')), false);
+});
+
+test('fetchPageOgImageUrl returns null when the hard deadline aborts', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((_url, init) =>
+    new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+      });
+    })) as typeof fetch;
+
+  try {
+    let timedOut = false;
+    const result = await fetchPageOgImageUrl('https://example.com/slow', 50, {
+      onTimeout: () => {
+        timedOut = true;
+      },
+    });
+    assert.equal(result, null);
+    assert.equal(timedOut, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('fetchPageOgImageUrl returns null after too many redirects', async () => {
+  const originalFetch = globalThis.fetch;
+  let hops = 0;
+  globalThis.fetch = (async () => {
+    hops += 1;
+    return new Response(null, {
+      status: 302,
+      headers: { location: `https://example.com/loop-${hops}` },
+    });
+  }) as typeof fetch;
+
+  try {
+    const result = await fetchPageOgImageUrl('https://example.com/start', 5_000);
+    assert.equal(result, null);
+    assert.ok(hops > 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('parseOgImageUrl reads Guardian og:image from article HTML', () => {

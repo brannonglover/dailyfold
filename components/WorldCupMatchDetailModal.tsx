@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
@@ -13,13 +14,19 @@ import {
 } from 'react-native';
 
 import { useTheme } from '@/hooks/useTheme';
+import { WorldCupBroadcastSection } from '@/components/WorldCupBroadcastInfo';
 import {
-  fetchWorldCupMatchHalfScores,
+  fetchWorldCupMatchSummary,
   WorldCupHalfScore,
   WorldCupMatch,
   WorldCupMatchEvent,
+  WorldCupPenaltyShootout,
   WorldCupTeamStats,
 } from '@/services/worldCupFeed';
+import {
+  worldCupAccentColors,
+} from '@/utils/worldCupMatchDisplay';
+import { WorldCupMatchScore, WorldCupStatusBadge } from '@/components/WorldCupMatchScore';
 
 interface WorldCupMatchDetailModalProps {
   match: WorldCupMatch | null;
@@ -147,17 +154,20 @@ function TeamLogo({
 }
 
 function ScoreHeader({ match, onClose }: { match: WorldCupMatch; onClose: () => void }) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
+  const accents = worldCupAccentColors(scheme);
 
   return (
-    <View
+    <LinearGradient
+      colors={match.isLive ? [...accents.cardLiveGradient] : [colors.surface, colors.surface]}
       style={[
         styles.headerCard,
-        { backgroundColor: colors.surface, borderColor: colors.border },
+        { borderColor: colors.border },
         match.isLive && { borderColor: colors.accent },
+        match.wentToPenalties && !match.isLive && { borderLeftColor: accents.gold, borderLeftWidth: 3 },
       ]}>
       <View style={styles.headerTopRow}>
-        <Text style={[styles.headerLabel, { color: colors.textSecondary }]}>Match</Text>
+        <WorldCupStatusBadge match={match} />
         <Pressable
           onPress={onClose}
           hitSlop={8}
@@ -184,17 +194,7 @@ function ScoreHeader({ match, onClose }: { match: WorldCupMatch; onClose: () => 
         </View>
 
         <View style={styles.scoreboardCenter}>
-          <Text style={[styles.headerScore, { color: colors.text }]}>
-            {match.home.score} – {match.away.score}
-          </Text>
-          <Text
-            style={[
-              styles.statusLine,
-              { color: match.isLive ? colors.accent : colors.textSecondary },
-            ]}>
-            {match.isLive ? 'Live' : match.status}
-            {match.statusDetail ? ` · ${match.statusDetail}` : ''}
-          </Text>
+          <WorldCupMatchScore match={match} size="hero" />
         </View>
 
         <View style={[styles.scoreboardTeam, styles.scoreboardTeamRight]}>
@@ -221,7 +221,7 @@ function ScoreHeader({ match, onClose }: { match: WorldCupMatch; onClose: () => 
           {match.venue ? ` · ${match.venue}` : ''}
         </Text>
       </View>
-    </View>
+    </LinearGradient>
   );
 }
 
@@ -324,6 +324,55 @@ function HalfScoresSection({
   );
 }
 
+function PenaltyShootoutSection({
+  match,
+  penaltyShootout,
+}: {
+  match: WorldCupMatch;
+  penaltyShootout: WorldCupPenaltyShootout;
+}) {
+  const { colors, scheme } = useTheme();
+  const accents = worldCupAccentColors(scheme);
+  const shootoutEvents = (match.events ?? []).filter((event) => event.isShootout);
+
+  return (
+    <SectionCard title="Penalty shootout" icon="football">
+      <View style={[styles.penaltySummaryRow, { backgroundColor: accents.goldMuted }]}>
+        <Text style={[styles.penaltySummaryTeam, { color: colors.text }]}>{match.home.abbrev}</Text>
+        <Text style={[styles.penaltySummaryScore, { color: accents.gold }]}>
+          {penaltyShootout.home} – {penaltyShootout.away}
+        </Text>
+        <Text style={[styles.penaltySummaryTeam, styles.textRight, { color: colors.text }]}>
+          {match.away.abbrev}
+        </Text>
+      </View>
+      {shootoutEvents.length > 0 ? (
+        <View style={styles.penaltyEventList}>
+          {shootoutEvents.map((event, index) => {
+            const teamName = event.side === 'home' ? match.home.name : match.away.name;
+            const scored = event.type.toLowerCase().includes('scored');
+            return (
+              <View key={`${event.clock}-${event.type}-${index}`} style={styles.penaltyEventRow}>
+                <Ionicons
+                  name={scored ? 'checkmark-circle' : 'close-circle'}
+                  size={14}
+                  color={scored ? accents.pitch : colors.textSecondary}
+                />
+                <Text style={[styles.penaltyEventText, { color: colors.text }]}>
+                  {event.playerName ?? event.type}
+                </Text>
+                <Text style={[styles.penaltyEventTeam, { color: colors.textSecondary }]}>
+                  {teamName}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+    </SectionCard>
+  );
+}
+
 function TimelineSection({
   match,
   events,
@@ -372,12 +421,16 @@ export function WorldCupMatchDetailModal({
 }: WorldCupMatchDetailModalProps) {
   const { colors } = useTheme();
   const [halfScores, setHalfScores] = useState<WorldCupHalfScore[]>([]);
+  const [summaryPenaltyShootout, setSummaryPenaltyShootout] = useState<
+    WorldCupPenaltyShootout | undefined
+  >(undefined);
   const [halfScoresError, setHalfScoresError] = useState<string | null>(null);
   const [isLoadingHalfScores, setIsLoadingHalfScores] = useState(false);
 
   useEffect(() => {
     if (!visible || !match) {
       setHalfScores([]);
+      setSummaryPenaltyShootout(undefined);
       setHalfScoresError(null);
       setIsLoadingHalfScores(false);
       return;
@@ -385,6 +438,7 @@ export function WorldCupMatchDetailModal({
 
     if (!match.isFinal && !match.isLive) {
       setHalfScores([]);
+      setSummaryPenaltyShootout(undefined);
       setHalfScoresError(null);
       setIsLoadingHalfScores(false);
       return;
@@ -394,14 +448,16 @@ export function WorldCupMatchDetailModal({
     setIsLoadingHalfScores(true);
     setHalfScoresError(null);
 
-    void fetchWorldCupMatchHalfScores(match.id)
-      .then((scores) => {
+    void fetchWorldCupMatchSummary(match.id)
+      .then((summary) => {
         if (cancelled) return;
-        setHalfScores(scores);
+        setHalfScores(summary.halfScores);
+        setSummaryPenaltyShootout(summary.penaltyShootout);
       })
       .catch((error) => {
         if (cancelled) return;
         setHalfScores([]);
+        setSummaryPenaltyShootout(undefined);
         setHalfScoresError(
           error instanceof Error ? error.message : 'Could not load half-time scores',
         );
@@ -418,9 +474,14 @@ export function WorldCupMatchDetailModal({
   if (!match) return null;
 
   const events = match.events ?? [];
-  const hasTimeline = events.length > 0;
+  const regulationEvents = events.filter((event) => !event.isShootout);
+  const hasTimeline = regulationEvents.length > 0;
   const hasStats = !!match.teamStats;
   const showHalfScores = match.isFinal || match.isLive;
+  const penaltyShootout = summaryPenaltyShootout ?? match.penaltyShootout;
+  const displayMatch: WorldCupMatch =
+    penaltyShootout && !match.penaltyShootout ? { ...match, penaltyShootout } : match;
+  const showPenaltySection = displayMatch.wentToPenalties && !!penaltyShootout;
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -438,7 +499,19 @@ export function WorldCupMatchDetailModal({
             showsVerticalScrollIndicator={false}
             bounces={false}
             nestedScrollEnabled>
-            <ScoreHeader match={match} onClose={onClose} />
+            <ScoreHeader match={displayMatch} onClose={onClose} />
+
+            <WorldCupBroadcastSection match={displayMatch} />
+
+            {showPenaltySection && penaltyShootout ? (
+              <PenaltyShootoutSection match={displayMatch} penaltyShootout={penaltyShootout} />
+            ) : displayMatch.wentToPenalties ? (
+              <EmptySectionCard
+                title="Penalty shootout"
+                icon="football-outline"
+                message="Penalty shootout scores not available yet."
+              />
+            ) : null}
 
             {showHalfScores &&
               (isLoadingHalfScores ? (
@@ -460,7 +533,7 @@ export function WorldCupMatchDetailModal({
               ) : null)}
 
             {hasTimeline ? (
-              <TimelineSection match={match} events={events} />
+              <TimelineSection match={displayMatch} events={regulationEvents} />
             ) : (
               <EmptySectionCard
                 title="Timeline"
@@ -518,6 +591,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 16,
     gap: 12,
+    overflow: 'hidden',
   },
   headerTopRow: {
     flexDirection: 'row',
@@ -688,6 +762,44 @@ const styles = StyleSheet.create({
   },
   halfScoresLoader: {
     paddingVertical: 8,
+  },
+  penaltySummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+  penaltySummaryTeam: {
+    flex: 1,
+    fontFamily: 'InterSemiBold',
+    fontSize: 13,
+  },
+  penaltySummaryScore: {
+    fontFamily: 'LoraBold',
+    fontSize: 24,
+    lineHeight: 28,
+    textAlign: 'center',
+    minWidth: 88,
+  },
+  penaltyEventList: {
+    gap: 6,
+  },
+  penaltyEventRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 4,
+  },
+  penaltyEventText: {
+    flex: 1,
+    fontFamily: 'InterMedium',
+    fontSize: 13,
+  },
+  penaltyEventTeam: {
+    fontFamily: 'Inter',
+    fontSize: 12,
   },
   teamLogoFallback: {
     alignItems: 'center',

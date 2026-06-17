@@ -1,7 +1,8 @@
-import { forwardRef } from 'react';
-import { ActivityIndicator, RefreshControl, StyleSheet, View } from 'react-native';
+import { forwardRef, memo } from 'react';
+import { ActivityIndicator, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
 import { ArticleFeed, ArticleFeedHandle, ArticleFeedLayout } from '@/components/ArticleFeed';
+import { FeedHeader } from '@/components/FeedHeader';
 import { useTheme } from '@/hooks/useTheme';
 import { Article } from '@/types';
 
@@ -17,8 +18,10 @@ interface ArticleFeedScreenProps {
   notice?: string | null;
   onRefresh?: () => void | Promise<void>;
   onLoadMore?: () => void;
+  canLoadMore?: boolean;
   isLoadingMore?: boolean;
   loadMoreCursor?: number;
+  loadMoreEpoch?: number;
   headerExtra?: React.ReactNode;
   pendingCount?: number;
   pendingRefreshHint?: string;
@@ -26,10 +29,11 @@ interface ArticleFeedScreenProps {
   onDismissPending?: () => void;
   layout?: ArticleFeedLayout;
   matchReasonsByArticleId?: Map<string, string[]>;
+  onFeedClick?: (article: Article) => void;
 }
 
-export const ArticleFeedScreen = forwardRef<ArticleFeedHandle, ArticleFeedScreenProps>(
-  function ArticleFeedScreen(
+export const ArticleFeedScreen = memo(
+  forwardRef<ArticleFeedHandle, ArticleFeedScreenProps>(function ArticleFeedScreen(
     {
       articles,
       title,
@@ -42,8 +46,10 @@ export const ArticleFeedScreen = forwardRef<ArticleFeedHandle, ArticleFeedScreen
       notice,
       onRefresh,
       onLoadMore,
+      canLoadMore,
       isLoadingMore,
       loadMoreCursor,
+      loadMoreEpoch,
       headerExtra,
       pendingCount = 0,
       pendingRefreshHint,
@@ -51,6 +57,7 @@ export const ArticleFeedScreen = forwardRef<ArticleFeedHandle, ArticleFeedScreen
       onDismissPending,
       layout,
       matchReasonsByArticleId,
+      onFeedClick,
     },
     ref,
   ) {
@@ -58,8 +65,15 @@ export const ArticleFeedScreen = forwardRef<ArticleFeedHandle, ArticleFeedScreen
 
   if (isLoading && articles.length === 0) {
     return (
-      <View style={[styles.centered, { backgroundColor: colors.background }]}>
-        <ActivityIndicator color={colors.text} />
+      <View style={[styles.flex, { backgroundColor: colors.background }]}>
+        <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
+        {headerExtra}
+        <View style={styles.centered}>
+          <ActivityIndicator color={colors.text} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+            Grabbing the latest…
+          </Text>
+        </View>
       </View>
     );
   }
@@ -92,14 +106,18 @@ export const ArticleFeedScreen = forwardRef<ArticleFeedHandle, ArticleFeedScreen
         onApplyPending={onApplyPending ?? onRefresh}
         onDismissPending={onDismissPending}
         onLoadMore={onLoadMore}
+        canLoadMore={canLoadMore}
         isLoadingMore={isLoadingMore}
         loadMoreCursor={loadMoreCursor}
+        loadMoreEpoch={loadMoreEpoch}
         layout={layout}
         matchReasonsByArticleId={matchReasonsByArticleId}
+        onFeedClick={onFeedClick}
+        isRefreshing={isRefreshing}
       />
     </View>
   );
-  },
+  }),
 );
 
 const styles = StyleSheet.create({
@@ -108,5 +126,13 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 32,
+  },
+  loadingText: {
+    fontFamily: 'Inter',
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
   },
 });

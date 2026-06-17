@@ -1,8 +1,7 @@
 import { ingestFeeds } from '../lib/ingest';
 
 async function main() {
-  console.log('Starting RSS ingest...');
-  const result = await ingestFeeds();
+  const result = await ingestFeeds({ verbose: true });
   console.log(JSON.stringify(result, null, 2));
 }
 

@@ -7,6 +7,16 @@ export function hasOpenablePublisherUrl(url: string | undefined): boolean {
   return Boolean(trimmed && /^https?:\/\//i.test(trimmed));
 }
 
+let warmUpPromise: Promise<void> | null = null;
+
+/** Preload the in-app browser so the first "View full article" tap feels instant. */
+export function warmUpPublisherBrowser(): void {
+  if (Platform.OS === 'web') return;
+  warmUpPromise ??= WebBrowser.warmUpAsync()
+    .then(() => undefined)
+    .catch(() => undefined);
+}
+
 /** Opens the publisher site in an in-app browser with a close (X) control on iOS. */
 export async function openPublisherArticle(url: string): Promise<void> {
   if (!hasOpenablePublisherUrl(url)) return;
@@ -14,6 +24,8 @@ export async function openPublisherArticle(url: string): Promise<void> {
     window.open(url, '_blank', 'noopener,noreferrer');
     return;
   }
+
+  warmUpPublisherBrowser();
 
   await WebBrowser.openBrowserAsync(url, {
     dismissButtonStyle: 'close',

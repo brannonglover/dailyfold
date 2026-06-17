@@ -2,11 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { ParamListBase } from '@react-navigation/native';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Animated,
   Platform,
   Pressable,
   RefreshControl,
@@ -18,7 +18,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FeedHeader } from '@/components/FeedHeader';
+import { WorldCupBroadcastCompact } from '@/components/WorldCupBroadcastInfo';
 import { WorldCupMatchDetailModal } from '@/components/WorldCupMatchDetailModal';
+import {
+  WorldCupHeroStrip,
+  WorldCupStatusBadge,
+  WorldCupTeamScore,
+} from '@/components/WorldCupMatchScore';
 import { WorldCupTab, WorldCupTabBar } from '@/components/WorldCupTabBar';
 import { WORLD_CUP_GROUP_CARD_MIN_HEIGHT } from '@/constants/Layout';
 import {
@@ -29,15 +35,19 @@ import {
 import { useTheme } from '@/hooks/useTheme';
 import {
   fetchWorldCupFeed,
+  filterMatchesByStage,
+  groupMatchesByKickoffDate,
   hasLiveMatches,
-  sortMatchesForScores,
+  partitionMatchesForScores,
   WorldCupBracketRound,
   WorldCupGroup,
   WorldCupGroupTeam,
   WorldCupMatch,
+  WorldCupScoresStageFilter,
   WorldCupUpdate,
 } from '@/services/worldCupFeed';
 import { openPublisherArticle } from '@/utils/openPublisherBrowser';
+import { worldCupAccentColors } from '@/utils/worldCupMatchDisplay';
 
 function formatKickoff(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -49,59 +59,13 @@ function formatKickoff(iso: string): string {
   });
 }
 
-function formatPublished(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
-
-function LiveBadge() {
-  const { colors } = useTheme();
-  const pulse = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 0.35, duration: 900, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
-      ]),
-    );
-    animation.start();
-    return () => animation.stop();
-  }, [pulse]);
-
-  return (
-    <View style={styles.liveBadge}>
-      <Animated.View style={[styles.liveDot, { backgroundColor: colors.accent, opacity: pulse }]} />
-      <Text style={[styles.matchStatus, { color: colors.accent }]}>Live</Text>
-    </View>
-  );
-}
-
 function MatchCard({ match, onPress }: { match: WorldCupMatch; onPress: () => void }) {
-  const { colors } = useTheme();
-
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`${match.home.name} vs ${match.away.name}, ${match.home.score} to ${match.away.score}`}
-      accessibilityHint="Shows match breakdown"
-      style={({ pressed }) => [
-        styles.matchCard,
-        { backgroundColor: colors.surface, borderColor: colors.border },
-        match.isLive && { borderColor: colors.accent },
-        pressed && { opacity: 0.75 },
-      ]}>
+  const { colors, scheme } = useTheme();
+  const accents = worldCupAccentColors(scheme);
+  const cardContent = (
+    <>
       <View style={styles.matchMetaRow}>
-        {match.isLive ? (
-          <LiveBadge />
-        ) : (
-          <Text style={[styles.matchStatus, { color: colors.textSecondary }]}>{match.status}</Text>
-        )}
+        <WorldCupStatusBadge match={match} />
         {match.statusDetail ? (
           <Text style={[styles.matchDetail, { color: colors.textSecondary }]} numberOfLines={1}>
             {match.statusDetail}
@@ -110,21 +74,57 @@ function MatchCard({ match, onPress }: { match: WorldCupMatch; onPress: () => vo
       </View>
 
       <View style={styles.teamsRow}>
-        <TeamColumn team={match.home} align="left" />
+        <TeamColumn team={match.home} match={match} align="left" />
         <Text style={[styles.scoreDivider, { color: colors.textSecondary }]}>vs</Text>
-        <TeamColumn team={match.away} align="right" />
+        <TeamColumn team={match.away} match={match} align="right" />
       </View>
 
       <Text style={[styles.kickoff, { color: colors.textSecondary }]}>
         {formatKickoff(match.startTime)}
         {match.venue ? ` · ${match.venue}` : ''}
       </Text>
+
+      <WorldCupBroadcastCompact match={match} />
+    </>
+  );
+
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${match.home.name} vs ${match.away.name}, ${match.home.score} to ${match.away.score}`}
+      accessibilityHint="Shows match breakdown"
+      style={({ pressed }) => [pressed && { opacity: 0.75 }]}>
+      {match.isLive ? (
+        <LinearGradient
+          colors={[...accents.cardLiveGradient]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[
+            styles.matchCard,
+            { borderColor: colors.accent },
+            styles.matchCardAccent,
+            { borderLeftColor: colors.accent },
+          ]}>
+          {cardContent}
+        </LinearGradient>
+      ) : (
+        <View
+          style={[
+            styles.matchCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            match.wentToPenalties && { borderLeftColor: accents.gold, borderLeftWidth: 3 },
+          ]}>
+          {cardContent}
+        </View>
+      )}
     </Pressable>
   );
 }
 
 function BracketMatchCard({ match, onPress }: { match: WorldCupMatch; onPress: () => void }) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
+  const accents = worldCupAccentColors(scheme);
 
   return (
     <Pressable
@@ -134,29 +134,43 @@ function BracketMatchCard({ match, onPress }: { match: WorldCupMatch; onPress: (
       accessibilityHint="Shows match breakdown"
       style={({ pressed }) => [
         styles.bracketMatchCard,
-        { backgroundColor: colors.surface, borderColor: colors.border },
-        match.isLive && { borderColor: colors.accent },
+        {
+          backgroundColor: match.isLive ? colors.accentMuted : colors.surface,
+          borderColor: match.isLive ? colors.accent : colors.border,
+        },
+        match.wentToPenalties && !match.isLive && { borderLeftColor: accents.gold, borderLeftWidth: 3 },
         pressed && { opacity: 0.75 },
       ]}>
       <View style={styles.bracketTeamRow}>
-        <BracketTeamLine team={match.home} colors={colors} />
-        <BracketTeamLine team={match.away} colors={colors} />
+        <BracketTeamLine team={match.home} side="home" match={match} colors={colors} />
+        <BracketTeamLine team={match.away} side="away" match={match} colors={colors} />
       </View>
-      <Text style={[styles.bracketKickoff, { color: colors.textSecondary }]} numberOfLines={1}>
-        {match.isLive ? 'Live' : match.status}
-        {match.statusDetail ? ` · ${match.statusDetail}` : ''}
-      </Text>
+      <View style={styles.bracketFooterRow}>
+        <WorldCupStatusBadge match={match} />
+        {match.statusDetail ? (
+          <Text style={[styles.bracketKickoff, { color: colors.textSecondary }]} numberOfLines={1}>
+            {match.statusDetail}
+          </Text>
+        ) : null}
+      </View>
     </Pressable>
   );
 }
 
 function BracketTeamLine({
   team,
+  side,
+  match,
   colors,
 }: {
   team: WorldCupMatch['home'];
+  side: 'home' | 'away';
+  match: WorldCupMatch;
   colors: ReturnType<typeof useTheme>['colors'];
 }) {
+  const penaltyScore =
+    side === 'home' ? match.penaltyShootout?.home : match.penaltyShootout?.away;
+
   return (
     <View style={styles.bracketTeamLine}>
       {team.logoUrl ? (
@@ -174,27 +188,47 @@ function BracketTeamLine({
         numberOfLines={1}>
         {team.name}
       </Text>
-      <Text
-        style={[
-          styles.bracketTeamScore,
-          { color: team.winner ? colors.accent : colors.textSecondary },
-        ]}>
-        {team.score}
-      </Text>
+      <View style={styles.bracketScoreCell}>
+        <Text
+          style={[
+            styles.bracketTeamScore,
+            { color: team.winner ? colors.accent : colors.textSecondary },
+          ]}>
+          {team.score}
+        </Text>
+        {match.wentToPenalties && penaltyScore ? (
+          <Text
+            style={[
+              styles.bracketPenaltyScore,
+              { color: team.winner ? colors.accent : colors.textSecondary },
+            ]}>
+            ({penaltyScore})
+          </Text>
+        ) : null}
+      </View>
     </View>
   );
 }
 
 function GroupStandingsCard({ group }: { group: WorldCupGroup }) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
+  const accents = worldCupAccentColors(scheme);
 
   return (
     <View
       style={[
         styles.groupCard,
-        { backgroundColor: colors.surface, borderColor: colors.border, minHeight: WORLD_CUP_GROUP_CARD_MIN_HEIGHT },
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          minHeight: WORLD_CUP_GROUP_CARD_MIN_HEIGHT,
+        },
       ]}>
-      <Text style={[styles.groupTitle, { color: colors.text }]}>{group.name}</Text>
+      <View style={[styles.groupTitleRow, { borderBottomColor: colors.border }]}>
+        <View style={[styles.groupTitleBadge, { backgroundColor: accents.pitchMuted }]}>
+          <Text style={[styles.groupTitle, { color: accents.pitch }]}>{group.name}</Text>
+        </View>
+      </View>
       <View style={styles.groupHeaderRow}>
         <Text style={[styles.groupHeaderCell, styles.groupTeamCell, { color: colors.textSecondary }]}>
           Team
@@ -211,11 +245,16 @@ function GroupStandingsCard({ group }: { group: WorldCupGroup }) {
 }
 
 function GroupTeamRow({ team, rank }: { team: WorldCupGroupTeam; rank: number }) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
+  const accents = worldCupAccentColors(scheme);
   const advances = rank <= 2;
 
   return (
-    <View style={styles.groupTeamRow}>
+    <View
+      style={[
+        styles.groupTeamRow,
+        advances && { backgroundColor: accents.goldMuted, borderRadius: 8, paddingVertical: 2 },
+      ]}>
       <View style={styles.groupTeamCell}>
         {team.logoUrl ? (
           <Image source={{ uri: team.logoUrl }} style={styles.groupLogo} contentFit="contain" />
@@ -273,7 +312,8 @@ function BracketView({
   rounds: WorldCupBracketRound[];
   onSelectMatch: (match: WorldCupMatch) => void;
 }) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
+  const accents = worldCupAccentColors(scheme);
 
   if (groups.length === 0 && rounds.length === 0) {
     return (
@@ -287,7 +327,7 @@ function BracketView({
     <View style={styles.bracketSections}>
       {groups.length > 0 ? (
         <View style={styles.bracketSection}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Group Stage</Text>
+          <SectionHeading title="Group Stage" accentColor={accents.pitch} />
           <Text style={[styles.tabHint, { color: colors.textSecondary }]}>
             Top two in each group advance. Standings from ESPN.
           </Text>
@@ -297,7 +337,7 @@ function BracketView({
 
       {rounds.length > 0 ? (
         <View style={styles.bracketSection}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Knockout Stage</Text>
+          <SectionHeading title="Knockout Stage" accentColor={accents.gold} />
           <Text style={[styles.tabHint, { color: colors.textSecondary }]}>
             Swipe horizontally through rounds.
           </Text>
@@ -310,12 +350,14 @@ function BracketView({
               <View
                 key={round.slug}
                 style={[styles.bracketRoundColumn, { width: WORLD_CUP_KNOCKOUT_COLUMN_WIDTH }]}>
-                <Text style={[styles.bracketRoundTitle, { color: colors.text }]}>{round.label}</Text>
-                {round.detail ? (
-                  <Text style={[styles.bracketRoundDetail, { color: colors.textSecondary }]}>
-                    {round.detail}
-                  </Text>
-                ) : null}
+                <View style={[styles.bracketRoundHeader, { backgroundColor: accents.goldMuted }]}>
+                  <Text style={[styles.bracketRoundTitle, { color: accents.gold }]}>{round.label}</Text>
+                  {round.detail ? (
+                    <Text style={[styles.bracketRoundDetail, { color: colors.textSecondary }]}>
+                      {round.detail}
+                    </Text>
+                  ) : null}
+                </View>
                 <View style={styles.bracketMatchList}>
                   {round.matches.map((match) => (
                     <BracketMatchCard
@@ -334,11 +376,24 @@ function BracketView({
   );
 }
 
+function SectionHeading({ title, accentColor }: { title: string; accentColor: string }) {
+  const { colors } = useTheme();
+
+  return (
+    <View style={styles.sectionHeadingRow}>
+      <View style={[styles.sectionAccentBar, { backgroundColor: accentColor }]} />
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
+    </View>
+  );
+}
+
 function TeamColumn({
   team,
+  match,
   align,
 }: {
   team: WorldCupMatch['home'];
+  match: WorldCupMatch;
   align: 'left' | 'right';
 }) {
   const { colors } = useTheme();
@@ -362,51 +417,210 @@ function TeamColumn({
         numberOfLines={2}>
         {team.name}
       </Text>
-      <Text
-        style={[
-          styles.teamScore,
-          { color: team.winner ? colors.accent : colors.text },
-          align === 'right' && styles.textRight,
-        ]}>
-        {team.score}
+      <WorldCupTeamScore team={team} match={match} align={align} />
+    </View>
+  );
+}
+
+const PAST_STAGE_FILTERS: { id: WorldCupScoresStageFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'group', label: 'Group' },
+  { id: 'knockout', label: 'Knockout' },
+];
+
+function PastScoresArchive({
+  sectionRef,
+  matches,
+  stageFilter,
+  onStageFilterChange,
+  onSelectMatch,
+}: {
+  sectionRef?: React.RefObject<View | null>;
+  matches: WorldCupMatch[];
+  stageFilter: WorldCupScoresStageFilter;
+  onStageFilterChange: (filter: WorldCupScoresStageFilter) => void;
+  onSelectMatch: (match: WorldCupMatch) => void;
+}) {
+  const { colors, scheme } = useTheme();
+  const accents = worldCupAccentColors(scheme);
+  const filteredMatches = useMemo(
+    () => filterMatchesByStage(matches, stageFilter),
+    [matches, stageFilter],
+  );
+  const dayGroups = useMemo(
+    () => groupMatchesByKickoffDate(filteredMatches),
+    [filteredMatches],
+  );
+
+  if (matches.length === 0) {
+    return (
+      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+        Past results will appear here once matches are played.
       </Text>
+    );
+  }
+
+  return (
+    <View ref={sectionRef} style={styles.archiveSection} collapsable={false}>
+      <View style={styles.archiveHeader}>
+        <SectionHeading title="Past Results" accentColor={accents.gold} />
+        <View style={styles.stageFilterRow}>
+          {PAST_STAGE_FILTERS.map((filter) => {
+            const selected = stageFilter === filter.id;
+            return (
+              <Pressable
+                key={filter.id}
+                onPress={() => onStageFilterChange(filter.id)}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`Filter past results: ${filter.label}`}
+                style={({ pressed }) => [
+                  styles.stageFilterChip,
+                  {
+                    backgroundColor: selected ? colors.accentMuted : colors.surface,
+                    borderColor: selected ? colors.accent : colors.border,
+                  },
+                  pressed && { opacity: 0.7 },
+                ]}>
+                <Text
+                  style={[
+                    styles.stageFilterText,
+                    { color: selected ? colors.accent : colors.textSecondary },
+                  ]}>
+                  {filter.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      {dayGroups.length === 0 ? (
+        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+          No past matches for this stage yet.
+        </Text>
+      ) : (
+        <View style={styles.archiveDayList}>
+          {dayGroups.map((group) => (
+            <View key={group.dateKey} style={styles.archiveDayGroup}>
+              <Text style={[styles.archiveDayLabel, { color: colors.textSecondary }]}>
+                {group.label}
+              </Text>
+              <View style={styles.matchList}>
+                {group.matches.map((match) => (
+                  <MatchCard
+                    key={match.id}
+                    match={match}
+                    onPress={() => onSelectMatch(match)}
+                  />
+                ))}
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function ScoresView({
+  matches,
+  pastStageFilter,
+  onPastStageFilterChange,
+  onSelectMatch,
+  pastSectionRef,
+  onScrollToPastResults,
+}: {
+  matches: WorldCupMatch[];
+  pastStageFilter: WorldCupScoresStageFilter;
+  onPastStageFilterChange: (filter: WorldCupScoresStageFilter) => void;
+  onSelectMatch: (match: WorldCupMatch) => void;
+  pastSectionRef: React.RefObject<View | null>;
+  onScrollToPastResults: () => void;
+}) {
+  const { colors, scheme } = useTheme();
+  const accents = worldCupAccentColors(scheme);
+  const { liveAndUpcoming, past } = useMemo(() => partitionMatchesForScores(matches), [matches]);
+
+  return (
+    <View style={styles.scoresSections}>
+      <View style={styles.scoresSection}>
+        <View style={styles.scoresSectionHeader}>
+          <View style={styles.scoresSectionHeading}>
+            <SectionHeading title="Live & Upcoming" accentColor={colors.accent} />
+          </View>
+          {past.length > 0 ? (
+            <Pressable
+              onPress={onScrollToPastResults}
+              accessibilityRole="button"
+              accessibilityLabel="Jump to past results"
+              accessibilityHint="Scrolls to the past results archive"
+              style={({ pressed }) => [
+                styles.pastJumpChip,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: accents.gold,
+                },
+                pressed && { opacity: 0.7 },
+              ]}>
+              <Text style={[styles.pastJumpChipText, { color: accents.gold }]}>Past Results</Text>
+              <Ionicons name="chevron-down" size={12} color={accents.gold} />
+            </Pressable>
+          ) : null}
+        </View>
+        {liveAndUpcoming.length === 0 ? (
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+            No live or upcoming matches right now.
+          </Text>
+        ) : (
+          <View style={styles.matchList}>
+            {liveAndUpcoming.map((match) => (
+              <MatchCard key={match.id} match={match} onPress={() => onSelectMatch(match)} />
+            ))}
+          </View>
+        )}
+      </View>
+
+      <PastScoresArchive
+        sectionRef={pastSectionRef}
+        matches={past}
+        stageFilter={pastStageFilter}
+        onStageFilterChange={onPastStageFilterChange}
+        onSelectMatch={onSelectMatch}
+      />
     </View>
   );
 }
 
 function UpdateRow({ update }: { update: WorldCupUpdate }) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
+  const accents = worldCupAccentColors(scheme);
 
   return (
     <Pressable
       onPress={() => openPublisherArticle(update.url)}
+      accessibilityRole="button"
+      accessibilityLabel={update.title}
+      accessibilityHint={`Opens article from ${update.source}`}
       style={({ pressed }) => [
-        styles.updateRow,
+        styles.updateCard,
         { backgroundColor: colors.surface, borderColor: colors.border },
         pressed && { opacity: 0.75 },
       ]}>
       {update.imageUrl ? (
-        <Image source={{ uri: update.imageUrl }} style={styles.updateThumb} contentFit="cover" />
+        <Image source={{ uri: update.imageUrl }} style={styles.updateImage} contentFit="cover" />
       ) : (
-        <View style={[styles.updateThumbFallback, { backgroundColor: colors.accentMuted }]}>
-          <Ionicons name="football-outline" size={20} color={colors.accent} />
-        </View>
+        <LinearGradient
+          colors={[accents.goldMuted, accents.pitchMuted]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.updateImageFallback}>
+          <Ionicons name="football-outline" size={28} color={accents.pitch} />
+        </LinearGradient>
       )}
-      <View style={styles.updateBody}>
-        <Text style={[styles.updateSource, { color: colors.textSecondary }]}>{update.source}</Text>
-        <Text style={[styles.updateTitle, { color: colors.text }]} numberOfLines={3}>
-          {update.title}
-        </Text>
-        {update.excerpt ? (
-          <Text style={[styles.updateExcerpt, { color: colors.textSecondary }]} numberOfLines={2}>
-            {update.excerpt}
-          </Text>
-        ) : null}
-        <Text style={[styles.updateTime, { color: colors.textSecondary }]}>
-          {formatPublished(update.publishedAt)}
-        </Text>
-      </View>
-      <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
+      <Text style={[styles.updateTitle, { color: colors.text }]} numberOfLines={3}>
+        {update.title}
+      </Text>
     </Pressable>
   );
 }
@@ -425,6 +639,34 @@ export default function WorldCupScreen() {
   const [error, setError] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
   const [selectedMatch, setSelectedMatch] = useState<WorldCupMatch | null>(null);
+  const [pastStageFilter, setPastStageFilter] = useState<WorldCupScoresStageFilter>('all');
+  const scrollRef = useRef<ScrollView>(null);
+  const pastSectionRef = useRef<View>(null);
+  const scrollOffsetY = useRef(0);
+
+  const scrollToTop = useCallback(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+    scrollOffsetY.current = 0;
+  }, []);
+
+  const scrollToPastResults = useCallback(() => {
+    pastSectionRef.current?.measureInWindow((_x, pageY) => {
+      scrollRef.current?.measureInWindow((_sx, scrollViewPageY) => {
+        const targetY = scrollOffsetY.current + (pageY - scrollViewPageY);
+        scrollRef.current?.scrollTo({ y: Math.max(0, targetY - 8), animated: true });
+      });
+    });
+  }, []);
+
+  const handleSelectTab = useCallback(
+    (tab: WorldCupTab) => {
+      if (tab === 'scores') {
+        scrollToTop();
+      }
+      setActiveTab(tab);
+    },
+    [scrollToTop],
+  );
 
   const load = useCallback(async (mode: 'initial' | 'refresh' | 'silent') => {
     if (mode === 'initial') setIsLoading(true);
@@ -445,7 +687,6 @@ export default function WorldCupScreen() {
     }
   }, []);
 
-  const sortedMatches = useMemo(() => sortMatchesForScores(matches), [matches]);
   const shouldPollLiveScores = isFocused && hasLiveMatches(matches);
 
   useFocusEffect(
@@ -507,8 +748,14 @@ export default function WorldCupScreen() {
         subtitle="2026 · Temporary tab"
         titleTrailing={<Ionicons name="trophy" size={22} color={colors.accent} />}
       />
-      <WorldCupTabBar activeTab={activeTab} onSelectTab={setActiveTab} />
+      <WorldCupHeroStrip />
+      <WorldCupTabBar activeTab={activeTab} onSelectTab={handleSelectTab} />
       <ScrollView
+        ref={scrollRef}
+        onScroll={(event) => {
+          scrollOffsetY.current = event.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
         contentContainerStyle={{
           paddingBottom: insets.bottom + 24,
           paddingHorizontal: 24,
@@ -538,21 +785,14 @@ export default function WorldCupScreen() {
 
         {activeTab === 'scores' ? (
           <View style={styles.tabContent}>
-            {sortedMatches.length === 0 ? (
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                No upcoming matches in the next week.
-              </Text>
-            ) : (
-              <View style={styles.matchList}>
-                {sortedMatches.map((match) => (
-                  <MatchCard
-                    key={match.id}
-                    match={match}
-                    onPress={() => setSelectedMatch(match)}
-                  />
-                ))}
-              </View>
-            )}
+            <ScoresView
+              matches={matches}
+              pastStageFilter={pastStageFilter}
+              onPastStageFilterChange={setPastStageFilter}
+              onSelectMatch={setSelectedMatch}
+              pastSectionRef={pastSectionRef}
+              onScrollToPastResults={scrollToPastResults}
+            />
           </View>
         ) : null}
 
@@ -624,6 +864,67 @@ const styles = StyleSheet.create({
   tabContent: {
     marginTop: 16,
   },
+  scoresSections: {
+    gap: 28,
+  },
+  scoresSection: {
+    gap: 12,
+  },
+  scoresSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  scoresSectionHeading: {
+    flex: 1,
+    minWidth: 0,
+  },
+  pastJumpChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  pastJumpChipText: {
+    fontFamily: 'InterMedium',
+    fontSize: 12,
+  },
+  archiveSection: {
+    gap: 12,
+  },
+  archiveHeader: {
+    gap: 10,
+  },
+  stageFilterRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  stageFilterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  stageFilterText: {
+    fontFamily: 'InterMedium',
+    fontSize: 12,
+  },
+  archiveDayList: {
+    gap: 20,
+  },
+  archiveDayGroup: {
+    gap: 10,
+  },
+  archiveDayLabel: {
+    fontFamily: 'InterSemiBold',
+    fontSize: 13,
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
+  },
   tabHint: {
     fontFamily: 'Inter',
     fontSize: 13,
@@ -634,7 +935,17 @@ const styles = StyleSheet.create({
     fontFamily: 'LoraBold',
     fontSize: 18,
     letterSpacing: -0.2,
+  },
+  sectionHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginBottom: 4,
+  },
+  sectionAccentBar: {
+    width: 4,
+    height: 18,
+    borderRadius: 2,
   },
   bracketSections: {
     gap: 28,
@@ -660,6 +971,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: 0.3,
     textTransform: 'uppercase',
+  },
+  groupTitleRow: {
+    paddingBottom: 6,
+    marginBottom: 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  groupTitleBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
   groupHeaderRow: {
     flexDirection: 'row',
@@ -733,6 +1055,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 16,
     gap: 12,
+  },
+  matchCardAccent: {
+    borderLeftWidth: 3,
   },
   matchMetaRow: {
     flexDirection: 'row',
@@ -822,6 +1147,12 @@ const styles = StyleSheet.create({
   bracketRoundColumn: {
     gap: 8,
   },
+  bracketRoundHeader: {
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
   bracketRoundTitle: {
     fontFamily: 'InterSemiBold',
     fontSize: 13,
@@ -877,6 +1208,21 @@ const styles = StyleSheet.create({
     minWidth: 16,
     textAlign: 'right',
   },
+  bracketScoreCell: {
+    alignItems: 'flex-end',
+    gap: 1,
+  },
+  bracketPenaltyScore: {
+    fontFamily: 'InterMedium',
+    fontSize: 10,
+    textAlign: 'right',
+  },
+  bracketFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
   bracketKickoff: {
     fontFamily: 'Inter',
     fontSize: 11,
@@ -885,49 +1231,26 @@ const styles = StyleSheet.create({
   updateList: {
     gap: 12,
   },
-  updateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+  updateCard: {
     borderWidth: 1,
     borderRadius: 14,
-    padding: 12,
+    overflow: 'hidden',
   },
-  updateThumb: {
-    width: 72,
-    height: 72,
-    borderRadius: 10,
+  updateImage: {
+    width: '100%',
+    aspectRatio: 16 / 9,
   },
-  updateThumbFallback: {
-    width: 72,
-    height: 72,
-    borderRadius: 10,
+  updateImageFallback: {
+    width: '100%',
+    aspectRatio: 16 / 9,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  updateBody: {
-    flex: 1,
-    gap: 4,
-    minWidth: 0,
-  },
-  updateSource: {
-    fontFamily: 'InterMedium',
-    fontSize: 11,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
   },
   updateTitle: {
     fontFamily: 'InterSemiBold',
     fontSize: 15,
     lineHeight: 20,
-  },
-  updateExcerpt: {
-    fontFamily: 'Inter',
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  updateTime: {
-    fontFamily: 'Inter',
-    fontSize: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
 });

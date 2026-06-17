@@ -66,6 +66,10 @@ export interface UserPreferences {
   likedArticleIds: string[];
   /** Cached article metadata so Liked survives feed refreshes and pagination. */
   likedArticles: Record<string, Article>;
+  /** Feed articles opened from Latest/For You — curiosity signal, not a like. */
+  clickedArticleIds: string[];
+  /** Cached metadata for clicked feed articles used in For You personalization. */
+  clickedArticles: Record<string, Article>;
   topicScores: Record<Topic, number>;
   /** @deprecated Legacy outlet scores — no longer updated from likes. */
   sourceScores: Record<string, number>;

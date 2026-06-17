@@ -6,17 +6,23 @@ import Parser from 'rss-parser';
 
 import {
   getLastIngestAt,
+  listGuardianArticlesNeedingHeroRepair,
   pruneOldArticles,
   setLastIngestAt,
+  updateArticleImageUrl,
   upsertArticle,
 } from './db';
 import {
   augmentFeedItemMediaFromXml,
   extractItemMediaFromFeedXml,
 } from './feedMedia';
+import { repairBrokenGuardianImageUrl } from '../../catalog/guardianImageUrl';
 import { FEEDS } from './feeds';
 import { normalizeFeedItem } from './normalize';
-import { enrichArticlesMissingHeroImages } from './ogImage';
+import {
+  articleNeedsHeroEnrichment,
+  enrichArticlesMissingHeroImages,
+} from './ogImage';
 import { Article } from './types';
 
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
@@ -129,6 +135,125 @@ async function fetchFeedXmlWithTlsFallback(feedUrl: string, timeoutMs: number): 
 const ITEMS_PER_FEED = Number(process.env.ITEMS_PER_FEED ?? 50);
 const MAX_ARTICLE_AGE_DAYS = Number(process.env.MAX_ARTICLE_AGE_DAYS ?? 30);
 
+let lastGuardianHeroRepairAt = 0;
+const GUARDIAN_HERO_REPAIR_COOLDOWN_MS = 5 * 60 * 1000;
+
+function shouldRunGuardianHeroRepair(): boolean {
+  return Date.now() - lastGuardianHeroRepairAt >= GUARDIAN_HERO_REPAIR_COOLDOWN_MS;
+}
+
+function markGuardianHeroRepairStarted(): void {
+  lastGuardianHeroRepairAt = Date.now();
+}
+
+export interface IngestOptions {
+  verbose?: boolean;
+}
+
+function resolveVerbose(options: IngestOptions = {}): boolean {
+  if (options.verbose !== undefined) return options.verbose;
+  const env = process.env.INGEST_VERBOSE;
+  return env === '1' || env === 'true';
+}
+
+function createProgressLogger(
+  log: (message: string) => void,
+  label: string,
+  total: number,
+  interval = 10,
+): (completed: number, count: number) => void {
+  let lastLogged = 0;
+  return (completed, count) => {
+    const shouldLog =
+      completed === count || completed - lastLogged >= interval || count <= interval;
+    if (!shouldLog) return;
+    log(`${label}: ${completed}/${count}`);
+    lastLogged = completed;
+  };
+}
+
+function createHeroEnrichmentOptions(
+  log: (message: string) => void,
+  label: string,
+  total: number,
+) {
+  return {
+    onProgress: createProgressLogger(log, label, total),
+    onHeartbeat: (completed: number, count: number, remaining: number) => {
+      log(`${label}: still waiting (${completed}/${count}, ${remaining} remaining)...`);
+    },
+    onFetchTimeout: (url: string, elapsedMs: number) => {
+      log(`${label}: fetch timed out after ${elapsedMs}ms — ${url}`);
+    },
+  };
+}
+
+function applyGuardianHeroFallback(article: Article): void {
+  if (!article.source.startsWith('The Guardian')) return;
+  if (!articleNeedsHeroEnrichment(article.imageUrl)) return;
+
+  const fallback = repairBrokenGuardianImageUrl(article.imageUrl);
+  if (fallback && fallback !== article.imageUrl) {
+    article.imageUrl = fallback;
+  }
+}
+
+/** Backfill Guardian heroes in the background (throttled). Safe to call from feed API reads. */
+export function scheduleGuardianHeroRepair(): void {
+  if (!shouldRunGuardianHeroRepair()) return;
+  markGuardianHeroRepairStarted();
+  void repairStoredGuardianHeroImages();
+}
+
+async function repairStoredGuardianHeroImages(
+  log: (message: string) => void = () => {},
+): Promise<number> {
+  const stored = listGuardianArticlesNeedingHeroRepair();
+  if (stored.length === 0) {
+    log('Guardian hero repair: none needed');
+    return 0;
+  }
+
+  log(`Guardian hero repair: ${stored.length} rows in database`);
+
+  const articles = stored.map((row) => ({
+    id: row.id,
+    url: row.url,
+    imageUrl: row.imageUrl,
+  }));
+
+  const repairTargets = articles.filter((article) => articleNeedsHeroEnrichment(article.imageUrl));
+  const enrichStarted = Date.now();
+  const { enriched } = await enrichArticlesMissingHeroImages(
+    articles,
+    createHeroEnrichmentOptions(log, 'Guardian hero repair (OG fetch)', repairTargets.length),
+  );
+  log(
+    `Guardian hero repair (OG fetch): ${enriched} enriched in ${Date.now() - enrichStarted}ms`,
+  );
+
+  let repaired = 0;
+  for (const article of articles) {
+    const original = stored.find((row) => row.id === article.id);
+    if (!original) continue;
+
+    if (article.imageUrl !== original.imageUrl) {
+      updateArticleImageUrl(article.id, article.imageUrl);
+      repaired += 1;
+      continue;
+    }
+
+    const fallback = repairBrokenGuardianImageUrl(original.imageUrl);
+    if (fallback !== original.imageUrl) {
+      updateArticleImageUrl(article.id, fallback);
+      repaired += 1;
+    }
+  }
+
+  log(`Guardian hero repair: ${repaired} rows updated`);
+  return repaired;
+}
+
 export interface IngestResult {
   feedsTotal: number;
   feedsProcessed: number;
@@ -141,7 +266,15 @@ export interface IngestResult {
   completedAt: string;
 }
 
-export async function ingestFeeds(): Promise<IngestResult> {
+export async function ingestFeeds(options: IngestOptions = {}): Promise<IngestResult> {
+  const verbose = resolveVerbose(options);
+  const log = (message: string) => {
+    if (verbose) console.log(`[ingest] ${message}`);
+  };
+
+  const ingestStarted = Date.now();
+  log(`Starting ingest of ${FEEDS.length} feeds`);
+
   const result: IngestResult = {
     feedsTotal: FEEDS.length,
     feedsProcessed: 0,
@@ -154,14 +287,34 @@ export async function ingestFeeds(): Promise<IngestResult> {
     completedAt: new Date().toISOString(),
   };
 
+  const feedFetchStarted = Date.now();
+  log('Fetching RSS feeds...');
+
   const feedResults = await Promise.allSettled(
-    FEEDS.map(async (feed) => {
-      const timeoutMs = feed.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
-      const xml = await fetchFeedXmlWithTlsFallback(feed.url, timeoutMs);
-      const parsed = await createParser(timeoutMs).parseString(xml);
-      const mediaByKey = extractItemMediaFromFeedXml(xml);
-      return { feed, parsed, mediaByKey };
+    FEEDS.map(async (feed, index) => {
+      const feedStarted = Date.now();
+      try {
+        const timeoutMs = feed.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
+        const xml = await fetchFeedXmlWithTlsFallback(feed.url, timeoutMs);
+        const parsed = await createParser(timeoutMs).parseString(xml);
+        const mediaByKey = extractItemMediaFromFeedXml(xml);
+        const itemCount = Math.min(parsed.items.length, ITEMS_PER_FEED);
+        log(
+          `  [${index + 1}/${FEEDS.length}] ${feed.source}: ${itemCount} items (${Date.now() - feedStarted}ms)`,
+        );
+        return { feed, parsed, mediaByKey };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown feed error';
+        log(
+          `  [${index + 1}/${FEEDS.length}] ${feed.source}: FAILED — ${message} (${Date.now() - feedStarted}ms)`,
+        );
+        throw error;
+      }
     }),
+  );
+
+  log(
+    `Feeds fetched in ${Date.now() - feedFetchStarted}ms (${feedResults.filter((r) => r.status === 'fulfilled').length} ok, ${feedResults.filter((r) => r.status === 'rejected').length} failed)`,
   );
 
   const pending: { article: Article; feedPublishedAt?: string }[] = [];
@@ -194,19 +347,60 @@ export async function ingestFeeds(): Promise<IngestResult> {
     }
   }
 
-  await enrichArticlesMissingHeroImages(pending.map((entry) => entry.article));
+  log(`Normalized ${pending.length} articles from ${result.itemsSeen} feed items`);
 
-  for (const entry of pending) {
+  const enrichTargets = pending.filter((entry) =>
+    articleNeedsHeroEnrichment(entry.article.imageUrl),
+  );
+  if (enrichTargets.length === 0) {
+    log('Hero image enrichment: none needed');
+  } else {
+    log(`Hero image enrichment: ${enrichTargets.length} articles`);
+    const enrichStarted = Date.now();
+    const { enriched } = await enrichArticlesMissingHeroImages(
+      pending.map((entry) => entry.article),
+      createHeroEnrichmentOptions(log, 'Enriching hero images', enrichTargets.length),
+    );
+    log(`Hero image enrichment: ${enriched} found in ${Date.now() - enrichStarted}ms`);
+  }
+
+  const upsertStarted = Date.now();
+  const upsertLogInterval = Math.max(25, Math.floor(pending.length / 10));
+  for (let i = 0; i < pending.length; i += 1) {
+    const entry = pending[i]!;
+    applyGuardianHeroFallback(entry.article);
+
     const action = upsertArticle(entry.article, {
       feedPublishedAt: entry.feedPublishedAt,
     });
     if (action === 'inserted') result.itemsInserted += 1;
     else result.itemsUpdated += 1;
+
+    const done = i + 1;
+    if (verbose && (done % upsertLogInterval === 0 || done === pending.length)) {
+      log(`Upserting articles: ${done}/${pending.length}`);
+    }
+  }
+  log(
+    `Upserted ${pending.length} articles (${result.itemsInserted} new, ${result.itemsUpdated} updated) in ${Date.now() - upsertStarted}ms`,
+  );
+
+  if (shouldRunGuardianHeroRepair()) {
+    markGuardianHeroRepairStarted();
+    await repairStoredGuardianHeroImages(log);
+  } else {
+    log(
+      `Guardian hero repair: skipped (cooldown ${Math.round(GUARDIAN_HERO_REPAIR_COOLDOWN_MS / 60_000)}m)`,
+    );
   }
 
   result.itemsPruned = pruneOldArticles(MAX_ARTICLE_AGE_DAYS);
+  if (result.itemsPruned > 0) {
+    log(`Pruned ${result.itemsPruned} articles older than ${MAX_ARTICLE_AGE_DAYS} days`);
+  }
   setLastIngestAt(result.completedAt);
 
+  log(`Done in ${Date.now() - ingestStarted}ms`);
   return result;
 }
 

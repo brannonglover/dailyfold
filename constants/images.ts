@@ -1,7 +1,8 @@
+import { repairBrokenGuardianImageUrl } from '../catalog/guardianImageUrl';
 import {
   isArticlePlaceholderImageUrl as isPlaceholderUrl,
   LEGACY_PLACEHOLDER_IMAGE_URLS,
-} from '@/catalog/imagePlaceholders';
+} from '../catalog/imagePlaceholders';
 
 export { LEGACY_PLACEHOLDER_IMAGE_URLS };
 
@@ -35,11 +36,12 @@ function normalizeEspnCdnImageUrl(url: string): string {
 }
 
 export function resolveArticleImageUrl(url: string | null | undefined): string {
-  if (isArticlePlaceholderImageUrl(url)) {
+  const repaired = repairBrokenGuardianImageUrl(url);
+  if (isArticlePlaceholderImageUrl(repaired)) {
     return ARTICLE_NO_IMAGE;
   }
 
-  let normalized = url!.trim();
+  let normalized = repaired.trim();
   if (normalized.startsWith('//')) {
     normalized = `https:${normalized}`;
   } else if (normalized.startsWith('http://')) {

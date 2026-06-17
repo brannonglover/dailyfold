@@ -78,10 +78,6 @@ async function loadArticleReaderContent(
     const content = normalizeReaderContent(data.content);
     if (content.source === 'extracted' && content.blocks.length > 0) {
       readerContentCache.set(articleId, content);
-      return content;
-    }
-    if (!options?.refresh) {
-      return loadArticleReaderContent(articleId, { refresh: true });
     }
     return content;
   })();

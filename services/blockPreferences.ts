@@ -1,11 +1,26 @@
-import { SPORT_TAG_ORDER } from '@/catalog/sports';
+import { inferSportTags, SPORT_TAG_ORDER, SportTag } from '@/catalog/sports';
 import { CURIOSITY_ORDER } from '@/constants/curiosities';
 import { articleInterestKeywords } from '@/services/interestSignals';
-import { articleSportTags } from '@/services/sportPreferences';
 import { isAllSourcesEnabled } from '@/services/sourcePreferences';
-import { Article, FeedSource, SportTag, Topic, UserPreferences } from '@/types';
+import { Article, FeedSource, Topic, UserPreferences } from '@/types';
 
 const MAX_BLOCKED_KEYWORDS = 40;
+
+export interface LeagueBlockKeyword {
+  keyword: string;
+  label: string;
+  pattern: RegExp;
+  /** When set, skip this keyword option if the sport tag is already offered. */
+  sportTag?: SportTag;
+}
+
+export const LEAGUE_BLOCK_KEYWORDS: LeagueBlockKeyword[] = [
+  { keyword: 'nfl', label: 'NFL', pattern: /\bnfl\b/i, sportTag: 'football' },
+  { keyword: 'nba', label: 'NBA', pattern: /\bnba\b/i, sportTag: 'basketball' },
+  { keyword: 'mlb', label: 'MLB', pattern: /\bmlb\b/i, sportTag: 'baseball' },
+  { keyword: 'nhl', label: 'NHL', pattern: /\bnhl\b/i, sportTag: 'hockey' },
+  { keyword: 'mls', label: 'MLS', pattern: /\bmls\b/i, sportTag: 'soccer' },
+];
 
 function uniqueTopics(topics: Topic[]): Topic[] {
   const seen = new Set<Topic>();
@@ -86,18 +101,45 @@ export function addBlockedSportTag(prefs: UserPreferences, tag: SportTag): UserP
   };
 }
 
+export function addBlockedKeyword(prefs: UserPreferences, keyword: string): UserPreferences {
+  const normalized = keyword.trim().toLowerCase();
+  if (!normalized || prefs.blockedKeywords.includes(normalized)) return prefs;
+  return {
+    ...prefs,
+    blockedKeywords: uniqueKeywords([...prefs.blockedKeywords, normalized]).slice(
+      0,
+      MAX_BLOCKED_KEYWORDS,
+    ),
+  };
+}
+
 export function addBlockedKeywordsFromArticle(
   prefs: UserPreferences,
   article: Article,
   limit = 5,
 ): UserPreferences {
-  const incoming = articleInterestKeywords(article).slice(0, limit);
+  const incoming = articleBlockKeywords(article).slice(0, limit);
   if (incoming.length === 0) return prefs;
 
   const merged = uniqueKeywords([...prefs.blockedKeywords, ...incoming]).slice(0, MAX_BLOCKED_KEYWORDS);
   if (merged.length === prefs.blockedKeywords.length) return prefs;
 
   return { ...prefs, blockedKeywords: merged };
+}
+
+/** Keywords used to match and block individual "Show less …" interest/league options. */
+export function articleBlockKeywords(article: Article): string[] {
+  const text = `${article.title} ${article.excerpt}`;
+  const keywords = articleInterestKeywords(article);
+  const seen = new Set(keywords);
+
+  for (const { keyword, pattern } of LEAGUE_BLOCK_KEYWORDS) {
+    if (!pattern.test(text) || seen.has(keyword)) continue;
+    seen.add(keyword);
+    keywords.push(keyword);
+  }
+
+  return keywords;
 }
 
 export function filterArticlesByBlocks(
@@ -119,13 +161,13 @@ export function filterArticlesByBlocks(
       return false;
     }
 
-    if (blockedSportTags.size > 0 && article.topics.includes('sports')) {
-      const tags = articleSportTags(article);
+    if (blockedSportTags.size > 0) {
+      const tags = inferSportTags(`${article.title} ${article.excerpt}`, article.sportTags ?? []);
       if (tags.some((tag) => blockedSportTags.has(tag))) return false;
     }
 
     if (blockedKeywords.size > 0) {
-      const keywords = articleInterestKeywords(article);
+      const keywords = articleBlockKeywords(article);
       if (keywords.some((keyword) => blockedKeywords.has(keyword))) return false;
     }
 

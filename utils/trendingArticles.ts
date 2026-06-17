@@ -67,7 +67,7 @@ export function findHotTrendingCandidates(
   return candidates;
 }
 
-/** Article ids in the feed trending window (6h) — the segment kept at the top. */
+/** Article ids in the feed trending window (6h) — used for badges and hero styling, not sort order. */
 export function buildFeedTrendingArticleIds(
   articles: Article[],
   nowMs: number = Date.now(),

@@ -3,11 +3,12 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, InteractionManager } from 'react-native';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
@@ -18,6 +19,7 @@ import { applyFeedFilters, applyTrendingNotificationFilters } from '@/services/f
 import { getEnabledSourceIds, isAllSourcesEnabled } from '@/services/sourcePreferences';
 import { processHotTrendingNotifications } from '@/services/trendingNotifications';
 import { Article } from '@/types';
+import { setArticleFeedPatcher } from '@/services/articleFeedPatch';
 import { ingestNoticeForFetch } from '@/utils/ingestNotice';
 import { shouldShowArticleFeedLoading } from '@/utils/feedLoadingState';
 import {
@@ -25,7 +27,12 @@ import {
   newcomersFromFeedMerge,
   updateExistingFeedArticles,
 } from '@/utils/mergeArticleFeed';
-import { hasActionablePending, pendingNotAlreadyInFeed } from '@/utils/pendingFeedArticles';
+import {
+  hasActionablePending,
+  pendingNotAlreadyInFeed,
+  reconcilePendingWithFeeds,
+} from '@/utils/pendingFeedArticles';
+import { shouldBumpPaginationRevision } from '@/utils/paginationRevision';
 
 interface UseArticlesResult {
   articles: Article[];
@@ -35,14 +42,22 @@ interface UseArticlesResult {
   isRefreshing: boolean;
   isLoadingMore: boolean;
   hasMore: boolean;
+  /** Bumps when pagination metadata changes so feeds can re-trigger load-more near the end. */
+  paginationRevision: number;
   feedGeneration: number;
   error: string | null;
   notice: string | null;
   usingDemoArticles: boolean;
   refresh: () => Promise<void>;
   applyPending: () => Promise<void>;
+  /** Pending count for stories not already in the given visible feed (e.g. tab display cache). */
+  pendingCountForFeed: (feed: Article[]) => number;
+  /** Drop pending rows already shown in the visible feed without dismissing future arrivals. */
+  prunePendingInFeed: (feed: Article[]) => void;
   loadMore: () => Promise<void>;
   dismissPendingArticles: () => void;
+  /** Merge fresher article fields (e.g. hero image after detail enrichment) into the visible feed. */
+  patchArticle: (article: Article) => void;
 }
 
 type LoadMode = 'initial' | 'refresh' | 'silent' | 'append';
@@ -99,6 +114,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [paginationRevision, setPaginationRevision] = useState(0);
   const [feedGeneration, setFeedGeneration] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -117,6 +133,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   const suppressSilentFeedMutationRef = useRef(false);
   const silentInFlightRef = useRef(false);
   const dismissedPendingIdsRef = useRef(new Set<string>());
+  const paginationMetaRef = useRef({ hasMore: false, nextCursor: null as string | null });
   const loadRef = useRef<
     ((mode: LoadMode, forceRefresh?: boolean, cursor?: string) => Promise<void>) | undefined
   >(undefined);
@@ -129,6 +146,21 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     return applyFeedFilters(actionable, preferences, sources).length;
   }, [pendingArticles, articles, preferences, sources]);
   const hasPendingArticles = pendingCount > 0;
+
+  const pendingCountForFeed = useCallback(
+    (feed: Article[]) => {
+      const actionable = pendingNotAlreadyInFeed(pendingArticles, feed);
+      return applyFeedFilters(actionable, preferences, sources).length;
+    },
+    [pendingArticles, preferences, sources],
+  );
+
+  const prunePendingInFeed = useCallback((feed: Article[]) => {
+    setPendingArticles((pending) => {
+      const pruned = reconcilePendingWithFeeds(pending, feed, articlesRef.current);
+      return pruned.length === pending.length ? pending : pruned;
+    });
+  }, []);
 
   const sourceIds = useMemo(() => {
     if (sources.length === 0) return [];
@@ -217,8 +249,19 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      setHasMore(meta?.hasMore ?? false);
-      setNextCursor(meta?.nextCursor ?? null);
+      const nextHasMore = meta?.hasMore ?? false;
+      const nextPageCursor = meta?.nextCursor ?? null;
+      setHasMore(nextHasMore);
+      setNextCursor(nextPageCursor);
+
+      const prevPagination = paginationMetaRef.current;
+      if (shouldBumpPaginationRevision(mode, prevPagination, {
+        hasMore: nextHasMore,
+        nextCursor: nextPageCursor,
+      })) {
+        setPaginationRevision((revision) => revision + 1);
+      }
+      paginationMetaRef.current = { hasMore: nextHasMore, nextCursor: nextPageCursor };
 
       if (mode !== 'append') {
         setNotice(
@@ -327,8 +370,12 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
             if (generation !== fetchGenerationRef.current) return;
             if (mode === 'silent' || mode === 'append') {
               if (articlesRef.current.length > 0) setNotice(null);
-              if (mode === 'silent' && articlesRef.current.length === 0) {
-                setAwaitingBackgroundFeed(false);
+              if (mode === 'silent') {
+                if (articlesRef.current.length === 0) {
+                  setAwaitingBackgroundFeed(false);
+                } else {
+                  scheduleGlobalSilentRefresh(0);
+                }
               }
               return;
             }
@@ -389,6 +436,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
 
       if (snapshot && snapshot.length > 0) {
         setArticles(snapshot.map(resolveArticleDisplayFields));
+        setPendingArticles([]);
         setIsLoading(false);
         setHadPersistedFeed(true);
         setAwaitingBackgroundFeed(false);
@@ -415,9 +463,18 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     dismissedPendingIdsRef.current.clear();
     setPendingArticles([]);
     setNotice(null);
-    setNextCursor(null);
-    setHasMore(false);
-    void loadRef.current?.(hadPersistedFeed ? 'silent' : 'initial');
+    const startingWithPersistedFeed =
+      hadPersistedFeed && articlesRef.current.length > 0;
+    if (!startingWithPersistedFeed) {
+      setNextCursor(null);
+      setHasMore(false);
+      paginationMetaRef.current = { hasMore: false, nextCursor: null };
+      setPaginationRevision((revision) => revision + 1);
+    }
+    const task = InteractionManager.runAfterInteractions(() => {
+      void loadRef.current?.(hadPersistedFeed ? 'silent' : 'initial');
+    });
+    return () => task.cancel();
   }, [sourceIdsKey, feedReady, persistedHydrated, hadPersistedFeed]);
 
   useEffect(() => {
@@ -428,7 +485,9 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
 
     const onAppStateChange = (nextState: AppStateStatus) => {
       if (appState.current.match(/inactive|background/) && nextState === 'active') {
-        void loadRef.current?.('silent', false);
+        InteractionManager.runAfterInteractions(() => {
+          void loadRef.current?.('silent', false);
+        });
       }
       appState.current = nextState;
     };
@@ -465,13 +524,15 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       return merged;
     });
     setPendingArticles([]);
-    setFeedGeneration((g) => g + 1);
     return true;
   }, [user, sourceIdsKey]);
 
   const runWithRefreshIndicator = useCallback(async (action: () => boolean) => {
     refreshInFlightRef.current += 1;
     setIsRefreshing(true);
+    await new Promise<void>((resolve) => {
+      queueMicrotask(resolve);
+    });
     try {
       return action();
     } finally {
@@ -522,12 +583,34 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     setPendingArticles([]);
   }, []);
 
+  const patchArticle = useCallback((article: Article) => {
+    setArticles((prev) => updateExistingFeedArticles(prev, [resolveArticleDisplayFields(article)]));
+  }, []);
+
+  useEffect(() => {
+    setArticleFeedPatcher(patchArticle);
+    return () => setArticleFeedPatcher(null);
+  }, [patchArticle]);
+
+  useLayoutEffect(() => {
+    setPendingArticles((pending) => {
+      const pruned = pendingNotAlreadyInFeed(pending, articlesRef.current);
+      return pruned.length === pending.length ? pending : pruned;
+    });
+  }, []);
+
   useEffect(() => {
     setPendingArticles((pending) => {
-      const pruned = pendingNotAlreadyInFeed(pending, articles);
+      const pruned = reconcilePendingWithFeeds(pending, articles);
       return pruned.length === pending.length ? pending : pruned;
     });
   }, [articles]);
+
+  useEffect(() => {
+    if (hasActionablePending(pendingArticles, articles)) return;
+    if (pendingArticles.length === 0) return;
+    setPendingArticles([]);
+  }, [pendingArticles, articles]);
 
   const showLoading = shouldShowArticleFeedLoading({
     articleCount: articles.length,
@@ -546,14 +629,18 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       isRefreshing,
       isLoadingMore,
       hasMore,
+      paginationRevision,
       feedGeneration,
       error,
       notice,
       usingDemoArticles,
       refresh,
       applyPending,
+      pendingCountForFeed,
+      prunePendingInFeed,
       loadMore,
       dismissPendingArticles,
+      patchArticle,
     }),
     [
       articles,
@@ -563,14 +650,18 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       isRefreshing,
       isLoadingMore,
       hasMore,
+      paginationRevision,
       feedGeneration,
       error,
       notice,
       usingDemoArticles,
       refresh,
       applyPending,
+      pendingCountForFeed,
+      prunePendingInFeed,
       loadMore,
       dismissPendingArticles,
+      patchArticle,
     ],
   );
 

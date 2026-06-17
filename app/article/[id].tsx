@@ -1,10 +1,11 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, InteractionManager, StyleSheet, Text, View } from 'react-native';
 
 import { ArticleReader } from '@/components/ArticleReader';
 import { useTheme } from '@/hooks/useTheme';
 import { getRememberedArticle, rememberOpenArticle } from '@/services/articleSession';
+import { patchFeedArticle } from '@/services/articleFeedPatch';
 import { fetchArticleById } from '@/services/articles';
 import { Article } from '@/types';
 import { isValidArticleRouteId } from '@/utils/notificationArticleLink';
@@ -18,9 +19,10 @@ export default function ArticleScreen() {
   const { id } = useLocalSearchParams<{ id: string | string[] }>();
   const articleId = resolveArticleId(id);
   const { colors } = useTheme();
-  const [article, setArticle] = useState<Article | undefined>(() =>
-    articleId ? getRememberedArticle(articleId) : undefined,
-  );
+  const [article, setArticle] = useState<Article | undefined>(() => {
+    if (!articleId) return undefined;
+    return getRememberedArticle(articleId);
+  });
   const [isLoading, setIsLoading] = useState(() => !article);
 
   useEffect(() => {
@@ -32,22 +34,36 @@ export default function ArticleScreen() {
     const remembered = getRememberedArticle(articleId);
     if (remembered) {
       setArticle(remembered);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
     }
 
-    setIsLoading(!remembered);
-    fetchArticleById(articleId)
-      .then((fetched) => {
-        if (fetched) {
-          rememberOpenArticle(fetched);
-          setArticle(fetched);
-          return;
-        }
-        if (!remembered) setArticle(undefined);
-      })
-      .catch(() => {
-        if (!remembered) setArticle(undefined);
-      })
-      .finally(() => setIsLoading(false));
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      fetchArticleById(articleId)
+        .then((fetched) => {
+          if (cancelled) return;
+          if (fetched) {
+            rememberOpenArticle(fetched);
+            patchFeedArticle(fetched);
+            setArticle(fetched);
+            return;
+          }
+          if (!remembered) setArticle(undefined);
+        })
+        .catch(() => {
+          if (!cancelled && !remembered) setArticle(undefined);
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoading(false);
+        });
+    });
+
+    return () => {
+      cancelled = true;
+      task.cancel();
+    };
   }, [articleId]);
 
   if (isLoading) {

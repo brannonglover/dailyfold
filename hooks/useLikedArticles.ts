@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { InteractionManager } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { fetchArticleById } from '@/services/articles';
@@ -23,6 +25,7 @@ export function useLikedArticles(): UseLikedArticlesResult {
   const { articles: feedArticles, isRefreshing, error, notice, refresh } = useArticles();
   const [isBackfilling, setIsBackfilling] = useState(false);
   const backfillInFlightRef = useRef(false);
+  const isFocused = useIsFocused();
 
   const likedArticleIds = preferences?.likedArticleIds ?? [];
   const likedArticlesCache = preferences?.likedArticles ?? {};
@@ -58,8 +61,19 @@ export function useLikedArticles(): UseLikedArticlesResult {
   }, [preferences, feedArticles, rememberLikedArticles]);
 
   useEffect(() => {
-    void backfillMissing();
-  }, [backfillMissing]);
+    if (!isFocused) return;
+
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
+      void backfillMissing();
+    });
+
+    return () => {
+      cancelled = true;
+      task.cancel();
+    };
+  }, [isFocused, backfillMissing]);
 
   const isLoading =
     (likedArticleIds.length > 0 && articles.length === 0 && isBackfilling) ||
