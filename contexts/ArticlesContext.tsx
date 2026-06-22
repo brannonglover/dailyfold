@@ -14,7 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { takeWarmArticleCache } from '@/services/articleCache';
 import { fetchArticles, ARTICLE_PAGE_SIZE, FetchArticlesResult, resolveArticleDisplayFields } from '@/services/articles';
-import { loadFeedSnapshot, saveFeedSnapshot } from '@/services/feedPersistence';
+import { loadFeedSnapshot, MAX_FEED_SNAPSHOT_ARTICLES, saveFeedSnapshot } from '@/services/feedPersistence';
 import { applyFeedFilters, applyTrendingNotificationFilters } from '@/services/feedFilters';
 import { getEnabledSourceIds, isAllSourcesEnabled } from '@/services/sourcePreferences';
 import { processHotTrendingNotifications } from '@/services/trendingNotifications';
@@ -32,9 +32,16 @@ import {
   pendingNotAlreadyInFeed,
   reconcilePendingWithFeeds,
 } from '@/utils/pendingFeedArticles';
+import {
+  derivePaginationCursorFromArticles,
+  reconcilePaginationAfterFetch,
+  resolveLoadMoreCursor,
+  shouldAssumeMoreArticlesAvailable,
+} from '@/utils/articlePagination';
 import { MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION } from '@/utils/feedLoadMoreGate';
 import { fetchFeedUntilStocked } from '@/utils/feedInitialStock';
 import { shouldBumpPaginationRevision } from '@/utils/paginationRevision';
+import { isFilteredFeedStocked } from '@/utils/feedVisibleStock';
 
 interface UseArticlesResult {
   articles: Article[];
@@ -58,6 +65,8 @@ interface UseArticlesResult {
   prunePendingInFeed: (feed: Article[]) => void;
   loadMore: () => Promise<void>;
   dismissPendingArticles: () => void;
+  /** Fetch and merge stories from interest-specific publishers (e.g. cycling magazines). */
+  boostArticlesForInterests: (sourceIds: string[], boostKey: string) => Promise<void>;
   /** Merge fresher article fields (e.g. hero image after detail enrichment) into the visible feed. */
   patchArticle: (article: Article) => void;
 }
@@ -127,6 +136,8 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   const appState = useRef(AppState.currentState);
   const refreshInFlightRef = useRef(0);
   const loadMoreInFlightRef = useRef(false);
+  const interestBoostInFlightRef = useRef(false);
+  const interestBoostKeyRef = useRef('');
   const warmCacheUsedRef = useRef(false);
   const articlesRef = useRef<Article[]>([]);
   const pendingArticlesRef = useRef<Article[]>([]);
@@ -196,8 +207,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         forceRefresh: mode === 'refresh' ? forceRefresh : false,
         sourceIds: restrictSources && sourceIds.length > 0 ? sourceIds : undefined,
         cursor,
-        limit:
-          mode === 'append' ? ARTICLE_PAGE_SIZE : MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION,
+        limit: ARTICLE_PAGE_SIZE,
       });
     },
     [sourceIds, preferences],
@@ -253,8 +263,23 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      const nextHasMore = meta?.hasMore ?? false;
-      const nextPageCursor = meta?.nextCursor ?? null;
+      const feedArticlesForPagination =
+        mode === 'append'
+          ? appendUniqueArticles(articlesRef.current, data)
+          : mode === 'refresh' || mode === 'initial'
+            ? data
+            : mode === 'silent' && articlesRef.current.length > 0
+              ? articlesRef.current
+              : data;
+
+      const { hasMore: nextHasMore, nextCursor: nextPageCursor } = reconcilePaginationAfterFetch({
+        mode,
+        feedArticles: feedArticlesForPagination,
+        incomingCount: data.length,
+        apiMeta: meta,
+        previousMeta: paginationMetaRef.current,
+        maxSnapshotArticles: MAX_FEED_SNAPSHOT_ARTICLES,
+      });
       setHasMore(nextHasMore);
       setNextCursor(nextPageCursor);
 
@@ -339,12 +364,34 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
           if (mode === 'initial' && generation !== fetchGenerationRef.current) return;
 
           try {
+            const stockOptions = {
+              isStocked: (items: Article[]) =>
+                isFilteredFeedStocked(items, preferences, sources),
+            };
             const shouldStockFeed = (mode === 'initial' || mode === 'refresh') && !cursor;
-            const { articles: data, meta } = shouldStockFeed
-              ? await fetchFeedUntilStocked((pageCursor) =>
-                  requestArticles(mode, forceRefresh, pageCursor),
-                )
-              : await requestArticles(mode, forceRefresh, cursor);
+            let data: Article[];
+            let meta: FetchArticlesResult['meta'];
+            if (shouldStockFeed) {
+              ({ articles: data, meta } = await fetchFeedUntilStocked(
+                (pageCursor) => requestArticles(mode, forceRefresh, pageCursor),
+                stockOptions,
+              ));
+            } else if (mode === 'append') {
+              const first = await requestArticles(mode, forceRefresh, cursor);
+              ({ articles: data, meta } = await fetchFeedUntilStocked(
+                (pageCursor) =>
+                  pageCursor
+                    ? requestArticles(mode, forceRefresh, pageCursor)
+                    : Promise.resolve(first),
+                {
+                  ...stockOptions,
+                  startingArticles: articlesRef.current,
+                  maxPages: 5,
+                },
+              ));
+            } else {
+              ({ articles: data, meta } = await requestArticles(mode, forceRefresh, cursor));
+            }
 
             if (data.length === 0 && isIngestPending(meta) && mode !== 'append') {
               if (generation === fetchGenerationRef.current) {
@@ -410,7 +457,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         if (mode === 'silent') silentInFlightRef.current = false;
       }
     },
-    [requestArticles, applyFetchResult],
+    [requestArticles, applyFetchResult, preferences, sources],
   );
 
   loadRef.current = load;
@@ -445,7 +492,18 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       if (cancelled) return;
 
       if (snapshot && snapshot.length >= MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION) {
-        setArticles(snapshot.map(resolveArticleDisplayFields));
+        const resolved = snapshot.map(resolveArticleDisplayFields);
+        setArticles(resolved);
+        const bootstrapCursor = derivePaginationCursorFromArticles(resolved);
+        if (
+          bootstrapCursor &&
+          shouldAssumeMoreArticlesAvailable(resolved.length, MAX_FEED_SNAPSHOT_ARTICLES)
+        ) {
+          setHasMore(true);
+          setNextCursor(bootstrapCursor);
+          paginationMetaRef.current = { hasMore: true, nextCursor: bootstrapCursor };
+          setPaginationRevision((revision) => revision + 1);
+        }
         setPendingArticles([]);
         setIsLoading(false);
         setHadPersistedFeed(true);
@@ -481,8 +539,13 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       paginationMetaRef.current = { hasMore: false, nextCursor: null };
       setPaginationRevision((revision) => revision + 1);
     }
+    if (startingWithPersistedFeed) {
+      // Restore pagination metadata immediately so load-more works before tab animations finish.
+      void loadRef.current?.('silent');
+      return;
+    }
     const task = InteractionManager.runAfterInteractions(() => {
-      void loadRef.current?.(hadPersistedFeed ? 'silent' : 'initial');
+      void loadRef.current?.('initial');
     });
     return () => task.cancel();
   }, [sourceIdsKey, feedReady, persistedHydrated, hadPersistedFeed]);
@@ -577,14 +640,56 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   }, [applyPendingArticles, load, runWithRefreshIndicator]);
 
   const loadMore = useCallback(async () => {
-    if (!hasMore || !nextCursor || loadMoreInFlightRef.current) return;
+    if (!hasMore || loadMoreInFlightRef.current) return;
+    const cursor = resolveLoadMoreCursor(articlesRef.current);
+    if (!cursor) return;
     loadMoreInFlightRef.current = true;
     try {
-      await load('append', false, nextCursor);
+      await load('append', false, cursor);
     } finally {
       loadMoreInFlightRef.current = false;
     }
-  }, [hasMore, nextCursor, load]);
+  }, [hasMore, load]);
+
+  const boostArticlesForInterests = useCallback(
+    async (sourceIds: string[], boostKey: string) => {
+      if (sourceIds.length === 0 || interestBoostInFlightRef.current) return;
+      if (interestBoostKeyRef.current === boostKey) return;
+
+      interestBoostInFlightRef.current = true;
+      try {
+        const generation = fetchGenerationRef.current;
+        const { articles: data, meta } = await fetchArticles({
+          sourceIds,
+          limit: 50,
+        });
+        if (generation !== fetchGenerationRef.current || data.length === 0) return;
+        interestBoostKeyRef.current = boostKey;
+        applyFetchResult('append', data, meta, generation);
+      } catch {
+        // Non-fatal — For You still shows whatever matches the main pool.
+      } finally {
+        interestBoostInFlightRef.current = false;
+      }
+    },
+    [applyFetchResult],
+  );
+
+  useEffect(() => {
+    if (!feedReady || isLoading || isRefreshing || isLoadingMore || !hasMore) return;
+    if (isFilteredFeedStocked(articlesRef.current, preferences, sources)) return;
+    void loadMore();
+  }, [
+    articles,
+    feedReady,
+    hasMore,
+    isLoading,
+    isRefreshing,
+    isLoadingMore,
+    preferences,
+    sources,
+    loadMore,
+  ]);
 
   const dismissPendingArticles = useCallback(() => {
     for (const article of pendingArticlesRef.current) {
@@ -650,6 +755,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       prunePendingInFeed,
       loadMore,
       dismissPendingArticles,
+      boostArticlesForInterests,
       patchArticle,
     }),
     [
@@ -671,6 +777,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       prunePendingInFeed,
       loadMore,
       dismissPendingArticles,
+      boostArticlesForInterests,
       patchArticle,
     ],
   );

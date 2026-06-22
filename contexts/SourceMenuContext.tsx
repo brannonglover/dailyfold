@@ -18,11 +18,10 @@ import {
   isSourceMenuDismissCooldownActive,
   markSourceMenuDismissed,
 } from '@/utils/sourceMenuDismiss';
+import { markSourceMenuClosed, markSourceMenuOpen } from '@/utils/sourceMenuOpen';
 
 type SourceMenuContextValue = {
   openSourceMenu: (article: Article) => void;
-  isOpen: boolean;
-  openArticleId: string | null;
 };
 
 const SourceMenuContext = createContext<SourceMenuContextValue | null>(null);
@@ -38,11 +37,13 @@ export function SourceMenuHost({ children }: { children: ReactNode }) {
 
   const openSourceMenu = useCallback((next: Article) => {
     if (isSourceMenuDismissCooldownActive()) return;
+    markSourceMenuOpen();
     setArticle(next);
   }, []);
 
   const handleClose = useCallback(() => {
     markSourceMenuDismissed();
+    markSourceMenuClosed();
     setArticle(null);
   }, []);
 
@@ -56,14 +57,7 @@ export function SourceMenuHost({ children }: { children: ReactNode }) {
     return scheduleWarmNotForMeOptions(article, sources);
   }, [article, sources]);
 
-  const value = useMemo(
-    () => ({
-      openSourceMenu,
-      isOpen,
-      openArticleId: article?.id ?? null,
-    }),
-    [openSourceMenu, isOpen, article?.id],
-  );
+  const value = useMemo(() => ({ openSourceMenu }), [openSourceMenu]);
 
   return (
     <SourceMenuContext.Provider value={value}>

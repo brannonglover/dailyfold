@@ -1,5 +1,4 @@
-import { fetchArticles, type FetchArticlesResult } from '@/services/articles';
-import { MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION } from '@/utils/feedLoadMoreGate';
+import { ARTICLE_PAGE_SIZE, fetchArticles, type FetchArticlesResult } from '@/services/articles';
 
 let warmPromise: Promise<FetchArticlesResult | undefined> | null = null;
 let warmResult: FetchArticlesResult | null = null;
@@ -7,7 +6,7 @@ let warmResult: FetchArticlesResult | null = null;
 /** Kick off an article fetch as early as possible (e.g. on app boot). */
 export function warmArticleCache(): void {
   if (warmPromise || warmResult) return;
-  warmPromise = fetchArticles({ limit: MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION })
+  warmPromise = fetchArticles({ limit: ARTICLE_PAGE_SIZE })
     .then((result) => {
       warmResult = result;
       return result;

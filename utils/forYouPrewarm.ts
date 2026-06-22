@@ -1,7 +1,6 @@
-import { hasPersonalizationSignals } from '@/services/interestSignals';
-import { getPersonalizedFeed } from '@/services/recommendations';
+import { hasForYouTopicSelection } from '@/utils/forYouTopics';
+import { getForYouFeed } from '@/services/recommendations';
 import { Article, UserPreferences } from '@/types';
-import { orderPersonalizedFeed } from '@/utils/feedOrdering';
 import {
   isForYouDisplayCacheFresh,
   readTabDisplayCache,
@@ -15,8 +14,9 @@ export function buildForYouCacheKeys(preferences: UserPreferences) {
     sources: preferences.enabledSourceIds ?? [],
   });
   const personalizationKey = JSON.stringify({
-    liked: [...(preferences.likedArticleIds ?? [])].sort(),
-    clicked: [...(preferences.clickedArticleIds ?? [])].sort(),
+    forYouTopics: [...(preferences.forYouTopics ?? [])].sort(),
+    forYouKeywords: [...(preferences.forYouKeywords ?? [])].sort(),
+    forYouSportTags: [...(preferences.forYouSportTags ?? [])].sort(),
   });
   return { feedFilterKey, personalizationKey };
 }
@@ -28,7 +28,7 @@ export function prewarmForYouDisplayCache(
   feedGeneration: number,
   filterFeedArticles: (items: Article[]) => Article[],
 ): boolean {
-  if (!hasPersonalizationSignals(preferences) || articles.length === 0) return false;
+  if (!hasForYouTopicSelection(preferences) || articles.length === 0) return false;
 
   const { feedFilterKey, personalizationKey } = buildForYouCacheKeys(preferences);
   const existing = readTabDisplayCache('for-you');
@@ -46,11 +46,10 @@ export function prewarmForYouDisplayCache(
   }
 
   const filtered = filterFeedArticles(articles);
-  const ranked = getPersonalizedFeed(filtered, preferences);
-  const ordered = orderPersonalizedFeed(ranked);
+  const ranked = getForYouFeed(filtered, preferences);
 
   writeTabDisplayCache('for-you', {
-    displayArticles: ordered,
+    displayArticles: ranked,
     displayReady: true,
     feedGeneration,
     rawLength: articles.length,

@@ -2,22 +2,22 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { ParamListBase } from '@react-navigation/native';
 import { useIsFocused } from '@react-navigation/native';
 import { useFocusEffect, useNavigation } from 'expo-router';
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from 'react';
 import { InteractionManager } from 'react-native';
 import { ArticleFeedHandle } from '@/components/ArticleFeed';
 import { ArticleFeedScreen } from '@/components/ArticleFeedScreen';
 import { BrandLogo } from '@/components/BrandLogo';
 import { FeedTopicFilterBar } from '@/components/FeedTopicFilterBar';
-import { TabFocusGate } from '@/components/TabFocusGate';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useArticles } from '@/hooks/useArticles';
 import { useDeferAfterFocus } from '@/hooks/useDeferAfterFocus';
 import { useDisplayOrderLock } from '@/hooks/useDisplayOrderLock';
 import { useTabDisplayState } from '@/hooks/useTabDisplayState';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
+import { getLatestFeed, buildLatestPersonalizationKey } from '@/services/recommendations';
 import { isAllSourcesEnabled } from '@/services/sourcePreferences';
 import { isAllTopicsEnabled } from '@/services/topicPreferences';
-import { orderLatestFeed, orderLatestFeedPage } from '@/utils/feedOrdering';
+import { Article } from '@/types';
 import {
   insertDisplayNewcomersAtSourceOrder,
   mergePaginatedDisplayFeed,
@@ -25,8 +25,9 @@ import {
 } from '@/utils/mergeDisplayFeed';
 import { getFeedEmptyMessage } from '@/utils/feedEmptyMessage';
 import { isFeedInteractionLocked, subscribeFeedInteractionLock } from '@/utils/feedInteractionLock';
+import { MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION } from '@/utils/feedLoadMoreGate';
 import { prewarmForYouDisplayCache } from '@/utils/forYouPrewarm';
-import { readTabDisplayCache, resolveTabDisplayFeed } from '@/utils/tabDisplayCache';
+import { readTabDisplayCache, resolveTabDisplayFeed, hasShowableTabDisplayCache, isDisplayFeedUnderstocked } from '@/utils/tabDisplayCache';
 
 function LatestScreenContent() {
   const navigation = useNavigation<BottomTabNavigationProp<ParamListBase>>();
@@ -49,7 +50,7 @@ function LatestScreenContent() {
     applyPending,
     loadMore,
   } = useArticles();
-  const { preferences, filterFeedArticles, filterByEnabledSources, recordFeedClick } = usePreferences();
+  const { preferences, filterFeedArticles, filterForYouFeedArticles, filterByEnabledSources, recordFeedClick } = usePreferences();
   const [emptyMessage, setEmptyMessage] = useState<string | undefined>();
   const syncDisplayHandledRef = useRef(false);
   const wasFocusedOnTabPressRef = useRef(false);
@@ -68,6 +69,13 @@ function LatestScreenContent() {
     [preferences?.enabledTopics, preferences?.enabledSportTags, preferences?.enabledSourceIds],
   );
 
+  const personalizationKey = useMemo(
+    () => buildLatestPersonalizationKey(preferences),
+    [preferences?.likedArticleIds, preferences?.clickedArticleIds],
+  );
+
+  const prevPersonalizationKeyRef = useRef(personalizationKey);
+
   const {
     displayArticles,
     displayReady,
@@ -77,10 +85,36 @@ function LatestScreenContent() {
     isCacheFresh,
     setDisplayArticles,
     setDisplayReady,
-  } = useTabDisplayState('latest', filterKey);
+  } = useTabDisplayState('latest', filterKey, {
+    feedGeneration,
+    rawLength: articles.length,
+    personalizationKey,
+  });
 
   const { markInitialDisplay, markUserRebuild, shouldAllowFullRebuild, shouldAllowSilentMerge } =
     useDisplayOrderLock(isRefreshing, 'latest');
+
+  const orderOpts = useMemo(() => {
+    const allTopics =
+      !preferences ||
+      isAllTopicsEnabled(normalizeFeedPreferences(preferences).enabledTopics);
+    return {
+      diversifyTopics: allTopics,
+      prefs: preferences,
+    };
+  }, [preferences]);
+
+  const orderLatest = useCallback(
+    (items: Article[]) =>
+      getLatestFeed(items, orderOpts.prefs, { diversifyTopics: orderOpts.diversifyTopics }),
+    [orderOpts],
+  );
+
+  const orderLatestPage = useCallback(
+    (items: Article[]) =>
+      getLatestFeed(items, orderOpts.prefs, { diversifyTopics: orderOpts.diversifyTopics }),
+    [orderOpts],
+  );
 
   const handleRefresh = useCallback(async () => {
     markUserRebuild();
@@ -94,11 +128,99 @@ function LatestScreenContent() {
 
   useEffect(() => {
     if (isLoading && articles.length === 0) {
+      if (hasShowableTabDisplayCache('latest')) return;
       setDisplayArticles([]);
       setDisplayReady(false);
       prevRawLengthRef.current = 0;
     }
   }, [isLoading, articles.length, setDisplayArticles, setDisplayReady, prevRawLengthRef]);
+
+  useLayoutEffect(() => {
+    if (!preferences || articles.length === 0) return;
+    if (isFeedInteractionLocked()) return;
+    if (articles.length <= prevRawLengthRef.current) return;
+    if (feedGeneration !== prevFeedGenerationRef.current) return;
+    if (filterKey !== prevFilterKeyRef.current) return;
+
+    const filteredArticles = filterFeedArticles(articles);
+    const seen = new Set(displayArticles.map((article) => article.id));
+    const newOnly = filteredArticles.filter((article) => !seen.has(article.id));
+    if (newOnly.length === 0) {
+      prevRawLengthRef.current = articles.length;
+      return;
+    }
+
+    syncDisplayHandledRef.current = true;
+    setDisplayArticles((prev) =>
+      mergePaginatedDisplayFeed(prev, newOnly, filteredArticles, orderLatestPage),
+    );
+    setDisplayReady(true);
+    prevRawLengthRef.current = articles.length;
+  }, [
+    articles,
+    displayArticles,
+    feedGeneration,
+    filterFeedArticles,
+    filterKey,
+    orderLatestPage,
+    preferences,
+    setDisplayArticles,
+    setDisplayReady,
+    prevFeedGenerationRef,
+    prevFilterKeyRef,
+    prevRawLengthRef,
+    feedInteractionEpoch,
+  ]);
+
+  useEffect(() => {
+    if (!isFocused || isLoading || isLoadingMore || !hasMore || !preferences) return;
+    if (isFeedInteractionLocked()) return;
+
+    const upstream = filterFeedArticles(articles);
+    if (!isDisplayFeedUnderstocked(displayArticles.length, upstream.length)) return;
+
+    const seen = new Set(displayArticles.map((article) => article.id));
+    const newOnly = upstream.filter((article) => !seen.has(article.id));
+    if (newOnly.length === 0) return;
+
+    setDisplayArticles((prev) =>
+      mergePaginatedDisplayFeed(prev, newOnly, upstream, orderLatestPage),
+    );
+    setDisplayReady(true);
+    prevRawLengthRef.current = articles.length;
+  }, [
+    isFocused,
+    isLoading,
+    isLoadingMore,
+    hasMore,
+    preferences,
+    articles,
+    displayArticles,
+    filterFeedArticles,
+    orderLatestPage,
+    setDisplayArticles,
+    setDisplayReady,
+    prevRawLengthRef,
+    feedInteractionEpoch,
+  ]);
+
+  useEffect(() => {
+    if (!isFocused || isLoading || isLoadingMore || !hasMore || !displayReady) return;
+    const upstream = filterFeedArticles(articles);
+    if (upstream.length >= MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION) return;
+    if (upstream.length <= displayArticles.length) return;
+    void loadMore();
+  }, [
+    isFocused,
+    isLoading,
+    isLoadingMore,
+    hasMore,
+    displayReady,
+    articles,
+    displayArticles.length,
+    filterFeedArticles,
+    loadMore,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
@@ -123,27 +245,20 @@ function LatestScreenContent() {
     }, [navigation, handleRefresh]),
   );
 
-  const orderOpts = useMemo(() => {
-    const allTopics =
-      !preferences ||
-      isAllTopicsEnabled(normalizeFeedPreferences(preferences).enabledTopics);
-    return { diversifyTopics: allTopics };
-  }, [preferences]);
-
   useEffect(() => {
     if (!isFocused || !preferences || articles.length === 0) return;
 
     let cancelled = false;
     const task = InteractionManager.runAfterInteractions(() => {
       if (cancelled) return;
-      prewarmForYouDisplayCache(articles, preferences, feedGeneration, filterFeedArticles);
+      prewarmForYouDisplayCache(articles, preferences, feedGeneration, filterForYouFeedArticles);
     });
 
     return () => {
       cancelled = true;
       task.cancel();
     };
-  }, [isFocused, articles, preferences, feedGeneration, filterFeedArticles]);
+  }, [isFocused, articles, preferences, feedGeneration, filterForYouFeedArticles]);
 
   useDeferAfterFocus(
     isFocused,
@@ -151,6 +266,25 @@ function LatestScreenContent() {
       if (isFeedInteractionLocked()) return;
       syncDisplayHandledRef.current = false;
       if (articles.length === 0) {
+        const cached = readTabDisplayCache('latest');
+        if (cached && cached.displayArticles.length > 0 && cached.filterKey === filterKey) {
+          if (cached.personalizationKey != null && cached.personalizationKey !== personalizationKey) {
+            startTransition(() => {
+              setDisplayArticles([]);
+              setDisplayReady(false);
+              prevRawLengthRef.current = 0;
+            });
+            return;
+          }
+          startTransition(() => {
+            setDisplayArticles(cached.displayArticles);
+            setDisplayReady(true);
+            prevRawLengthRef.current = cached.rawLength;
+            prevFeedGenerationRef.current = cached.feedGeneration;
+            prevFilterKeyRef.current = cached.filterKey;
+          });
+          return;
+        }
         startTransition(() => {
           setDisplayArticles([]);
           setDisplayReady(false);
@@ -160,27 +294,37 @@ function LatestScreenContent() {
       }
 
       if (isCacheFresh(feedGeneration, articles.length, filterKey)) {
-        prevRawLengthRef.current = articles.length;
-        prevFeedGenerationRef.current = feedGeneration;
-        prevFilterKeyRef.current = filterKey;
-        const cached = readTabDisplayCache('latest');
-        startTransition(() => {
-          if (displayArticles.length === 0 && cached && cached.displayArticles.length > 0) {
-            setDisplayArticles(cached.displayArticles);
-          }
-          setDisplayReady(true);
-        });
-        return;
+        const filteredArticles = filterFeedArticles(articles);
+        const visibleCount =
+          displayArticles.length > 0
+            ? displayArticles.length
+            : (readTabDisplayCache('latest')?.displayArticles.length ?? 0);
+        if (!isDisplayFeedUnderstocked(visibleCount, filteredArticles.length)) {
+          prevRawLengthRef.current = articles.length;
+          prevFeedGenerationRef.current = feedGeneration;
+          prevFilterKeyRef.current = filterKey;
+          const cached = readTabDisplayCache('latest');
+          startTransition(() => {
+            if (displayArticles.length === 0 && cached && cached.displayArticles.length > 0) {
+              setDisplayArticles(cached.displayArticles);
+            }
+            setDisplayReady(true);
+          });
+          return;
+        }
       }
 
       const filteredArticles = filterFeedArticles(articles);
       const generationChanged = feedGeneration !== prevFeedGenerationRef.current;
       const listShrunk = articles.length < prevRawLengthRef.current;
       const filtersChanged = filterKey !== prevFilterKeyRef.current;
+      const personalizationChanged =
+        personalizationKey !== prevPersonalizationKeyRef.current;
       const needsFullRebuild =
         generationChanged ||
         listShrunk ||
         filtersChanged ||
+        personalizationChanged ||
         prevRawLengthRef.current === 0;
 
       const applyDisplay = (updater: () => void) => {
@@ -191,10 +335,11 @@ function LatestScreenContent() {
         syncDisplayHandledRef.current = true;
         applyDisplay(() => {
           if (shouldAllowFullRebuild(filtersChanged, prevFilterKeyRef.current, filterKey)) {
-            setDisplayArticles(orderLatestFeed(filteredArticles, orderOpts));
+            setDisplayArticles(orderLatest(filteredArticles));
             markInitialDisplay();
             prevFeedGenerationRef.current = feedGeneration;
             prevFilterKeyRef.current = filterKey;
+            prevPersonalizationKeyRef.current = personalizationKey;
           } else {
             setDisplayArticles((prev) => updateDisplayArticlesInPlace(prev, filteredArticles));
           }
@@ -206,9 +351,7 @@ function LatestScreenContent() {
           setDisplayArticles((prev) => {
             const seen = new Set(prev.map((a) => a.id));
             const newOnly = filteredArticles.filter((a) => !seen.has(a.id));
-            return mergePaginatedDisplayFeed(prev, newOnly, filteredArticles, (items) =>
-              orderLatestFeedPage(items, orderOpts),
-            );
+            return mergePaginatedDisplayFeed(prev, newOnly, filteredArticles, orderLatestPage);
           });
           setDisplayReady(true);
         });
@@ -221,7 +364,7 @@ function LatestScreenContent() {
       applyDisplay(() => {
         setDisplayArticles((prev) => {
           if (prev.length === 0 && filteredArticles.length > 0) {
-            return orderLatestFeed(filteredArticles, orderOpts);
+            return orderLatest(filteredArticles);
           }
 
           if (!shouldAllowSilentMerge()) {
@@ -247,12 +390,15 @@ function LatestScreenContent() {
       filterFeedArticles,
       filterKey,
       isCacheFresh,
-      orderOpts,
+      orderLatest,
+      orderLatestPage,
+      personalizationKey,
       markInitialDisplay,
       shouldAllowFullRebuild,
       shouldAllowSilentMerge,
       feedInteractionEpoch,
     ],
+    'paint',
   );
 
   const filtered = useMemo(
@@ -265,6 +411,7 @@ function LatestScreenContent() {
         feedGeneration,
         rawLength: articles.length,
         filterKey,
+        personalizationKey,
       }),
     [
       isLoading,
@@ -273,6 +420,7 @@ function LatestScreenContent() {
       feedGeneration,
       articles.length,
       filterKey,
+      personalizationKey,
     ],
   );
 
@@ -367,10 +515,6 @@ function LatestScreenContent() {
 }
 
 export default memo(function LatestScreen() {
-  return (
-    <TabFocusGate>
-      <LatestScreenContent />
-    </TabFocusGate>
-  );
+  return <LatestScreenContent />;
 });
 

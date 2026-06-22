@@ -104,7 +104,7 @@ export function NotForMeModal({ article, visible, onClose }: NotForMeModalProps)
   return (
     <Modal
       visible={visible}
-      animationType="slide"
+      animationType="none"
       transparent
       onRequestClose={handleCancel}
       statusBarTranslucent>

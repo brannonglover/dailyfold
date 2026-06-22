@@ -78,7 +78,7 @@ test('interleaveBySource spreads a dominant outlet batch', () => {
   const espnNfl = Array.from({ length: 8 }, (_, i) =>
     article(`nfl-${i}`, 'sports', recent(i * 1000), {
       source: 'ESPN NFL',
-      sportTags: ['nfl'],
+      sportTags: ['football'],
     }),
   );
   const bbc = [article('bbc-0', 'world', recent(9_000), { source: 'BBC News' })];
@@ -102,7 +102,7 @@ test('interleaveBySource splits same-outlet sport facets', () => {
   const espnNfl = Array.from({ length: 4 }, (_, i) =>
     article(`nfl-${i}`, 'sports', recent(i * 1000), {
       source: 'ESPN',
-      sportTags: ['nfl'],
+      sportTags: ['football'],
     }),
   );
   const espnSoccer = Array.from({ length: 4 }, (_, i) =>
@@ -116,7 +116,7 @@ test('interleaveBySource splits same-outlet sport facets', () => {
   const firstEightBuckets = ordered.slice(0, 8).map(articleSpreadBucket);
 
   assert.ok(
-    firstEightBuckets.includes('ESPN::nfl') && firstEightBuckets.includes('ESPN::soccer'),
+    firstEightBuckets.includes('ESPN::football') && firstEightBuckets.includes('ESPN::soccer'),
     `expected both facets near the top, got ${firstEightBuckets.join(', ')}`,
   );
 });
@@ -125,8 +125,8 @@ test('spreadArticlesBySource matches interleaveBySource', () => {
   const now = Date.now();
   const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
   const batch = [
-    article('a', 'sports', recent(0), { source: 'ESPN NFL', sportTags: ['nfl'] }),
-    article('b', 'sports', recent(1000), { source: 'ESPN NFL', sportTags: ['nfl'] }),
+    article('a', 'sports', recent(0), { source: 'ESPN NFL', sportTags: ['football'] }),
+    article('b', 'sports', recent(1000), { source: 'ESPN NFL', sportTags: ['football'] }),
     article('c', 'world', recent(2000), { source: 'BBC News' }),
   ];
 
@@ -141,13 +141,13 @@ test('spreadAgainstFeedHead avoids boundary clustering on prepend', () => {
   const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
 
   const prev = [
-    article('prev-espn', 'sports', recent(60_000), { source: 'ESPN NFL', sportTags: ['nfl'] }),
+    article('prev-espn', 'sports', recent(60_000), { source: 'ESPN NFL', sportTags: ['football'] }),
     article('prev-bbc', 'world', recent(61_000), { source: 'BBC News' }),
   ];
   const newcomers = Array.from({ length: 4 }, (_, i) =>
     article(`new-nfl-${i}`, 'sports', recent(i * 1000), {
       source: 'ESPN NFL',
-      sportTags: ['nfl'],
+      sportTags: ['football'],
     }),
   );
 
@@ -164,13 +164,13 @@ test('interleaveByPrimaryTopic spreads within a dominant topic bucket', () => {
   const espnNfl = Array.from({ length: 4 }, (_, i) =>
     article(`nfl-${i}`, 'sports', recent(i * 1000), {
       source: 'ESPN NFL',
-      sportTags: ['nfl'],
+      sportTags: ['football'],
     }),
   );
   const cbsNfl = Array.from({ length: 4 }, (_, i) =>
     article(`cbs-${i}`, 'sports', recent(12_000 + i * 1000), {
       source: 'CBS Sports',
-      sportTags: ['nfl'],
+      sportTags: ['football'],
     }),
   );
   const world = [article('world-0', 'world', recent(20_000), { source: 'BBC News' })];
@@ -206,7 +206,7 @@ test('orderLatestFeed surfaces the newest story first even when another outlet h
   const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
 
   const espnBurst = Array.from({ length: 5 }, (_, i) =>
-    article(`espn-${i}`, 'sports', recent(10 * 60_000 + i * 1000), { source: 'ESPN NFL', sportTags: ['nfl'] }),
+    article(`espn-${i}`, 'sports', recent(10 * 60_000 + i * 1000), { source: 'ESPN NFL', sportTags: ['football'] }),
   );
   const newest = article('bbc-new', 'world', recent(60_000), { source: 'BBC News' });
 
@@ -222,7 +222,7 @@ test('orderLatestFeed spreads dominant outlets without breaking recency at the h
   const espnNfl = Array.from({ length: 6 }, (_, i) =>
     article(`nfl-${i}`, 'sports', recent(i * 1000), {
       source: 'ESPN NFL',
-      sportTags: ['nfl'],
+      sportTags: ['football'],
     }),
   );
   const bbc = [article('bbc-0', 'world', recent(7_000), { source: 'BBC News' })];
@@ -243,14 +243,40 @@ test('orderLatestFeedPage matches full-feed source spreading for a batch', () =>
   const now = Date.now();
   const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
   const batch = [
-    article('a', 'sports', recent(0), { source: 'ESPN NFL', sportTags: ['nfl'] }),
-    article('b', 'sports', recent(1000), { source: 'ESPN NFL', sportTags: ['nfl'] }),
+    article('a', 'sports', recent(0), { source: 'ESPN NFL', sportTags: ['football'] }),
+    article('b', 'sports', recent(1000), { source: 'ESPN NFL', sportTags: ['football'] }),
     article('c', 'world', recent(2000), { source: 'BBC News' }),
   ];
 
   assert.deepEqual(
     orderLatestFeedPage(batch).map((item) => item.id),
     orderLatestFeed(batch).map((item) => item.id),
+  );
+});
+
+test('orderLatestFeed compareWithinBucket reorders within an outlet before spreading', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+  const batch = [
+    article('older-match', 'culture', recent(60 * 60_000), { source: 'Vanity Fair' }),
+    article('newer-generic', 'culture', recent(30 * 60_000), { source: 'Vanity Fair' }),
+    article('bbc', 'world', recent(10 * 60_000), { source: 'BBC News' }),
+  ];
+
+  const ordered = orderLatestFeed(batch, {
+    compareWithinBucket: (left, right) => {
+      const affinity = (item: Article) =>
+        item.id === 'older-match' ? 2 : item.id === 'newer-generic' ? 1 : 0;
+      const affinityDiff = affinity(right) - affinity(left);
+      if (affinityDiff !== 0) return affinityDiff;
+      return new Date(right.publishedAt).getTime() - new Date(left.publishedAt).getTime();
+    },
+  });
+
+  assert.equal(
+    ordered.find((item) => item.source === 'Vanity Fair')?.id,
+    'older-match',
+    'expected within-outlet affinity ordering before interleaving',
   );
 });
 

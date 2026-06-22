@@ -11,10 +11,6 @@ function compareNewestFirst(a: Article, b: Article): number {
   return publishedAtMs(b) - publishedAtMs(a);
 }
 
-function isWithinTrendingWindow(article: Article, nowMs: number): boolean {
-  return nowMs - publishedAtMs(article) <= TRENDING_WINDOW_MS;
-}
-
 /**
  * Spread bucket for feed diversification. Uses outlet name, with a sport facet when
  * present so mixed ESPN NFL + soccer batches interleave instead of clustering.
@@ -71,7 +67,7 @@ function drainQueuesGreedy(
  */
 export function interleaveByPrimaryTopic(
   articles: Article[],
-  options?: { preserveInputOrder?: boolean },
+  options?: { preserveInputOrder?: boolean; compareWithinSource?: (a: Article, b: Article) => number },
 ): Article[] {
   if (articles.length <= 1) return articles;
 
@@ -85,7 +81,10 @@ export function interleaveByPrimaryTopic(
   }
 
   const queues = [...byTopic.values()].map((items) =>
-    interleaveBySource(items, { preserveInputOrder: options?.preserveInputOrder }),
+    interleaveBySource(items, {
+      preserveInputOrder: options?.preserveInputOrder,
+      compareWithinSource: options?.compareWithinSource,
+    }),
   );
 
   queues.sort(compareTopicQueues);
@@ -147,23 +146,21 @@ export function interleaveBySource(
   });
 }
 
-function partitionTrending(articles: Article[], nowMs: number): [Article[], Article[]] {
-  const trending: Article[] = [];
-  const rest: Article[] = [];
-  for (const article of articles) {
-    if (isWithinTrendingWindow(article, nowMs)) trending.push(article);
-    else rest.push(article);
-  }
-  return [trending, rest];
-}
-
 export type OrderLatestFeedOptions = {
   /**
    * When true (All topics), interleave by primary topic so sports-heavy ingest
    * does not fill the first cards.
    */
   diversifyTopics?: boolean;
+  /** Optional within-outlet ordering (e.g. affinity tie-break / boost in a recency window). */
+  compareWithinBucket?: (a: Article, b: Article) => number;
 };
+
+function latestInterleaveOptions(options?: OrderLatestFeedOptions) {
+  return options?.compareWithinBucket
+    ? { compareWithinSource: options.compareWithinBucket }
+    : undefined;
+}
 
 /**
  * Latest feed: newest stories first with light outlet spreading so one publisher
@@ -172,11 +169,13 @@ export type OrderLatestFeedOptions = {
 export function orderLatestFeed(articles: Article[], options?: OrderLatestFeedOptions): Article[] {
   if (articles.length <= 1) return articles;
 
+  const interleaveOptions = latestInterleaveOptions(options);
+
   if (options?.diversifyTopics) {
-    return interleaveByPrimaryTopic(articles);
+    return interleaveByPrimaryTopic(articles, interleaveOptions);
   }
 
-  return interleaveBySource(articles);
+  return interleaveBySource(articles, interleaveOptions);
 }
 
 /** Spread a batch so outlets (and sport facets when present) rarely appear back-to-back. */
@@ -212,21 +211,15 @@ export function orderLatestFeedPage(
   options?: OrderLatestFeedOptions,
 ): Article[] {
   if (articles.length <= 1) return articles;
-  if (options?.diversifyTopics) return interleaveByPrimaryTopic(articles);
-  return interleaveBySource(articles);
+  const interleaveOptions = latestInterleaveOptions(options);
+  if (options?.diversifyTopics) return interleaveByPrimaryTopic(articles, interleaveOptions);
+  return interleaveBySource(articles, interleaveOptions);
 }
 
 /**
- * For You: keep affinity rank within each topic, spread outlets inside a topic,
- * and surface the trending window first.
+ * For You: preserve affinity rank within each topic and spread outlets inside a topic.
  */
 export function orderPersonalizedFeed(articles: Article[]): Article[] {
   if (articles.length <= 1) return articles;
-
-  const nowMs = Date.now();
-  const [trending, rest] = partitionTrending(articles, nowMs);
-
-  const orderedTrending = interleaveByPrimaryTopic(trending, { preserveInputOrder: true });
-  const orderedRest = interleaveByPrimaryTopic(rest, { preserveInputOrder: true });
-  return [...orderedTrending, ...orderedRest];
+  return interleaveByPrimaryTopic(articles, { preserveInputOrder: true });
 }

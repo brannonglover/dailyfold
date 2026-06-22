@@ -19,6 +19,7 @@ import { ArticleSourceMenu } from '@/components/ArticleSourceMenu';
 import { ArticleVideoBlock } from '@/components/ArticleVideoBlock';
 import { SubscriptionBanner } from '@/components/SubscriptionBanner';
 import { SourceMenuHost } from '@/contexts/SourceMenuContext';
+import { usePreferences } from '@/contexts/PreferencesContext';
 import { useOpenPublisherArticle } from '@/hooks/useOpenPublisherArticle';
 import { useTheme } from '@/hooks/useTheme';
 import {
@@ -28,7 +29,7 @@ import {
 import { ARTICLE_NO_IMAGE, isArticlePlaceholderImageUrl, resolveArticleImageUrl } from '@/constants/images';
 import { Article } from '@/types';
 import { ArticleReaderBlock, ArticleReaderContent } from '@/types/articleContent';
-import { resolveReaderBlockLayout } from '@/utils/articleParagraphs';
+import { isUsableReaderParagraphText, resolveReaderBlockLayout } from '@/utils/articleParagraphs';
 
 interface ArticleReaderProps {
   article: Article;
@@ -56,6 +57,7 @@ function ReaderBlockView({
   }, [block.type === 'image' ? block.url : block.type === 'video' ? block.url : null]);
 
   if (block.type === 'paragraph') {
+    if (!isUsableReaderParagraphText(block.text)) return null;
     return (
       <Text style={[styles.paragraph, { color: colors.text }]}>
         {block.text}
@@ -132,6 +134,7 @@ function PublisherLink({
 
 export function ArticleReader({ article }: ArticleReaderProps) {
   const { colors } = useTheme();
+  const { recordArticleOpen } = usePreferences();
   const insets = useSafeAreaInsets();
   const requiresSubscription = article.requiresSubscription === true;
   const { open: openOnPublisher, isOpening: isOpeningPublisher, canOpen: canOpenOnPublisher } =
@@ -144,6 +147,13 @@ export function ArticleReader({ article }: ArticleReaderProps) {
     () => !getCachedReaderContent(article.id),
   );
   const activeContentArticleIdRef = useRef(article.id);
+  const recordedOpenRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (recordedOpenRef.current === article.id) return;
+    recordedOpenRef.current = article.id;
+    recordArticleOpen(article);
+  }, [article, recordArticleOpen]);
 
   useEffect(() => {
     let cancelled = false;

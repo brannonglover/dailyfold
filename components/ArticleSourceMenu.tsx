@@ -13,6 +13,9 @@ import {
   createSourceMenuGestureState,
   handleSourceMenuPress,
   handleSourceMenuPressIn,
+  isSourceMenuOpen,
+  markSourceMenuClosed,
+  markSourceMenuOpen,
   openSourceMenu,
   resetSourceMenuGesture,
 } from '@/utils/sourceMenuOpen';
@@ -31,23 +34,21 @@ export function ArticleSourceMenu({
   const { colors } = useTheme();
   const { sources } = usePreferences();
   const sourceMenu = useSourceMenu();
-  const [visible, setVisible] = useState(false);
-  const [sheetMounted, setSheetMounted] = useState(false);
+  const [localOpen, setLocalOpen] = useState(false);
   const gestureStateRef = useRef(createSourceMenuGestureState());
   const isHosted = sourceMenu != null;
-  const isMenuOpenForThisArticle = isHosted && sourceMenu.openArticleId === article.id;
   const accentColor = tone === 'onImage' ? '#FFFFFF' : colors.accent;
 
   const openLocal = useCallback(() => {
     if (isSourceMenuDismissCooldownActive()) return;
-    setSheetMounted(true);
-    setVisible(true);
+    markSourceMenuOpen();
+    setLocalOpen(true);
   }, []);
 
   const openSheet = useCallback(() => {
-    if (isHosted && sourceMenu.isOpen) return;
+    if (isSourceMenuOpen()) return;
     openSourceMenu(article, sourceMenu?.openSourceMenu ?? null, openLocal);
-  }, [article, sourceMenu, openLocal, isHosted]);
+  }, [article, sourceMenu, openLocal]);
 
   const handlePressIn = useCallback(() => {
     handleSourceMenuPressIn(gestureStateRef.current, openSheet);
@@ -63,18 +64,19 @@ export function ArticleSourceMenu({
 
   const handleClose = useCallback(() => {
     markSourceMenuDismissed();
-    setVisible(false);
+    markSourceMenuClosed();
+    setLocalOpen(false);
   }, []);
 
   useEffect(() => {
-    if (isHosted || !visible) return;
+    if (isHosted || !localOpen) return;
     return scheduleWarmNotForMeOptions(article, sources);
-  }, [isHosted, visible, article, sources]);
+  }, [isHosted, localOpen, article, sources]);
 
   useEffect(() => {
-    if (isHosted || !visible) return;
+    if (isHosted || !localOpen) return;
     return acquireFeedInteractionLock();
-  }, [isHosted, visible]);
+  }, [isHosted, localOpen]);
 
   return (
     <>
@@ -83,13 +85,11 @@ export function ArticleSourceMenu({
         onPress={handlePress}
         onPressOut={handlePressOut}
         delayPressIn={0}
-        disabled={isMenuOpenForThisArticle}
         hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
         style={({ pressed }) => [styles.trigger, pressed && styles.triggerPressed]}
         accessibilityRole="button"
         accessibilityLabel={`Source options for ${article.source}`}
-        accessibilityHint="Hide this outlet or show fewer stories like this one"
-        accessibilityState={{ disabled: isMenuOpenForThisArticle }}>
+        accessibilityHint="Hide this outlet or show fewer stories like this one">
         <Text
           style={[
             styles.source,
@@ -108,8 +108,8 @@ export function ArticleSourceMenu({
         />
       </Pressable>
 
-      {!isHosted && sheetMounted ? (
-        <NotForMeModal article={article} visible={visible} onClose={handleClose} />
+      {!isHosted && localOpen ? (
+        <NotForMeModal article={article} visible onClose={handleClose} />
       ) : null}
     </>
   );

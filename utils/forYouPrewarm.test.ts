@@ -29,33 +29,41 @@ const prefs = (overrides: Partial<UserPreferences> = {}): UserPreferences => ({
   },
   clickedArticles: {},
   enabledTopics: ['world'],
+  forYouTopics: ['technology'],
+  forYouKeywords: [],
+  forYouSportTags: [],
   enabledSportTags: [],
   enabledSourceIds: [],
   topicScores: { world: 2 } as UserPreferences['topicScores'],
+  sourceScores: {},
   keywordScores: {},
   sportTagScores: {},
   blockedTopics: [],
   blockedSportTags: [],
   blockedKeywords: [],
-  blockedSourceIds: [],
   folders: [],
   trendingNotificationsEnabled: false,
   ...overrides,
 });
 
-test('buildForYouCacheKeys sorts signal ids for stable cache keys', () => {
+test('buildForYouCacheKeys sorts selected topics for stable cache keys', () => {
   const keys = buildForYouCacheKeys(
     prefs({
-      likedArticleIds: ['b', 'a'],
-      clickedArticleIds: ['z', 'y'],
+      forYouTopics: ['technology', 'culture', 'science'],
     }),
   );
 
-  assert.equal(keys.personalizationKey, '{"liked":["a","b"],"clicked":["y","z"]}');
+  assert.equal(
+    keys.personalizationKey,
+    '{"forYouTopics":["culture","science","technology"],"forYouKeywords":[],"forYouSportTags":[]}',
+  );
 });
 
 test('prewarmForYouDisplayCache writes ranked for-you display cache', () => {
-  const articles = [article('a1'), article('a2')];
+  const articles: Article[] = [
+    { ...article('a1'), topics: ['technology'] },
+    { ...article('a2'), topics: ['technology'] },
+  ];
   const preferences = prefs();
 
   const wrote = prewarmForYouDisplayCache(

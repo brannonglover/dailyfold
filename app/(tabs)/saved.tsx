@@ -5,7 +5,6 @@ import { CreateFolderModal } from '@/components/CreateFolderModal';
 import { FolderPickerModal } from '@/components/FolderPickerModal';
 import { LikedArticleList } from '@/components/LikedArticleList';
 import { LikedFoldersBar } from '@/components/LikedFoldersBar';
-import { TabFocusGate } from '@/components/TabFocusGate';
 import { TAB_BAR_HEIGHT } from '@/constants/Layout';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useLikedArticles } from '@/hooks/useLikedArticles';
@@ -104,11 +103,7 @@ function SavedScreenContent() {
 }
 
 export default memo(function SavedScreen() {
-  return (
-    <TabFocusGate>
-      <SavedScreenContent />
-    </TabFocusGate>
-  );
+  return <SavedScreenContent />;
 });
 
 const styles = StyleSheet.create({

@@ -122,6 +122,16 @@ export const INTEREST_VOCABULARY = new Set([
   'premiere',
   'soccer',
   'baseball',
+  'bike',
+  'bikes',
+  'bicycle',
+  'bicycles',
+  'biking',
+  'cycling',
+  'cyclist',
+  'mtb',
+  'gravel',
+  'bikepacking',
 ]);
 
 /** Multi-word phrases worth keeping as a single keyword. */
@@ -135,7 +145,9 @@ const KNOWN_INTEREST_PHRASES = new Set([
   'true crime',
   'tv series',
   'tv show',
-  'video game',
+  'mountain bike',
+  'road bike',
+  'gravel bike',
 ]);
 
 const CULTURE_MEDIA_HINTS = new Set([

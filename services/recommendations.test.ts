@@ -6,13 +6,16 @@ import { Article, UserPreferences } from '@/types';
 
 import {
   articleAffinityScore,
+  buildLatestPersonalizationKey,
+  compareLatestFeedArticles,
   getArticleMatchReasons,
+  getLatestFeed,
   getLikedInterestBadgeItems,
   getPersonalizedFeed,
   isMeaningfulInterestMatch,
   rankArticles,
 } from './recommendations';
-import { buildLikedInterestProfile } from './interestSignals';
+import { buildInterestProfile, buildLikedInterestProfile } from './interestSignals';
 
 function basePrefs(overrides: Partial<UserPreferences> = {}): UserPreferences {
   return {
@@ -26,6 +29,9 @@ function basePrefs(overrides: Partial<UserPreferences> = {}): UserPreferences {
     sportTagScores: {},
     enabledSourceIds: [],
     enabledTopics: [],
+    forYouTopics: [],
+    forYouKeywords: [],
+    forYouSportTags: [],
     enabledSportTags: [],
     trendingNotificationsEnabled: false,
     blockedTopics: [],
@@ -43,6 +49,7 @@ function article(
     source?: string;
     topics?: UserPreferences['topicScores'] extends Record<infer K, number> ? K[] : never;
     sportTags?: Article['sportTags'];
+    publishedAt?: string;
   },
 ): Article {
   return {
@@ -55,7 +62,7 @@ function article(
     topics: options?.topics ?? ['culture'],
     sportTags: options?.sportTags,
     readTimeMinutes: 3,
-    publishedAt: new Date().toISOString(),
+    publishedAt: options?.publishedAt ?? new Date().toISOString(),
     url: `https://example.com/${id}`,
   };
 }
@@ -163,167 +170,95 @@ test('isMeaningfulInterestMatch allows single-like topic expansion for narrow to
   );
 });
 
-test('getPersonalizedFeed surfaces keyword matches from a single TV like', () => {
-  const liked = article('liked-1', 'The Last of Us season 2 premiere review', { topics: ['culture'] });
-  const prefs = prefsWithLikedArticles([liked]);
-
+test('getPersonalizedFeed returns empty when no topics are selected', () => {
   const feed = getPersonalizedFeed(
-    [
-      liked,
-      article('match-1', 'Fall premiere week highlights best new series', { topics: ['culture'] }),
-      article('match-2', 'Another season premiere draws record ratings', { topics: ['culture'] }),
-      article('unrelated-fashion', 'Spring fashion week trends', { topics: ['culture'] }),
-      article('unrelated-sports', 'College football playoff bracket', {
-        topics: ['sports'],
-        sportTags: ['football'],
-      }),
-      article('unrelated-politics', 'Election polling update', { topics: ['politics'] }),
-    ],
-    prefs,
-  );
-
-  assert.equal(feed.length, 2);
-  assert.ok(feed.every((item) => item.title.includes('premiere')));
-  assert.ok(!feed.some((item) => item.id === 'liked-1'));
-});
-
-test('getPersonalizedFeed returns only interest-matching articles', () => {
-  const liked = article('liked-1', 'Must-watch series season finale', { topics: ['culture'] });
-  const prefs = prefsWithLikedArticles([liked]);
-
-  const cultureMatches = Array.from({ length: 10 }, (_, index) =>
-    article(`culture-${index}`, `Must-watch series season ${index}`, { topics: ['culture'] }),
-  );
-
-  const feed = getPersonalizedFeed(
-    [
-      ...cultureMatches,
-      article('unrelated', 'Election results update', { topics: ['politics'] }),
-      article('fashion', 'Spring fashion week trends', { topics: ['culture'] }),
-    ],
-    prefs,
-  );
-
-  assert.equal(feed.length, 10);
-  assert.ok(feed.every((item) => item.title.includes('series')));
-});
-
-test('getPersonalizedFeed does not backfill unrelated articles when matches are sparse', () => {
-  const liked = article('liked-1', 'Must-watch series season finale', { topics: ['culture'] });
-  const prefs = prefsWithLikedArticles([liked]);
-
-  const feed = getPersonalizedFeed(
-    [
-      article('match', 'Must-watch series season preview', { topics: ['culture'] }),
-      article('filler-1', 'Election results update', { topics: ['politics'] }),
-      article('filler-2', 'Markets close higher', { topics: ['business'] }),
-    ],
-    prefs,
-  );
-
-  assert.equal(feed.length, 1);
-  assert.equal(feed[0]?.id, 'match');
-});
-
-test('getPersonalizedFeed excludes already-liked articles', () => {
-  const saved = article('saved-culture', 'Saved series season recap', { topics: ['culture'] });
-  const prefs = prefsWithLikedArticles([
-    article('liked-1', 'Placeholder like', { topics: ['culture'] }),
-    saved,
-  ], {
-    likedArticleIds: ['liked-1', 'saved-culture'],
-  });
-
-  const feed = getPersonalizedFeed(
-    [
-      saved,
-      article('new-match', 'New series season preview', { topics: ['culture'] }),
-      article('unrelated', 'Election results update', { topics: ['politics'] }),
-    ],
-    prefs,
-  );
-
-  assert.ok(!feed.some((item) => item.id === 'saved-culture'));
-  assert.equal(feed[0]?.id, 'new-match');
-});
-
-test('getPersonalizedFeed returns empty when liked snapshots are unavailable', () => {
-  const prefs = basePrefs({
-    likedArticleIds: ['missing-like'],
-    likedArticles: {},
-    topicScores: Object.fromEntries(CURIOSITY_ORDER.map((t) => [t, 0])) as UserPreferences['topicScores'],
-    keywordScores: {},
-    sportTagScores: {},
-  });
-
-  const feed = getPersonalizedFeed(
-    [article('culture-1', 'Must-watch series season preview', { topics: ['culture'] })],
-    prefs,
+    [article('culture-1', 'Gallery opens', { topics: ['culture'] })],
+    basePrefs({ forYouTopics: [] }),
   );
 
   assert.deepEqual(feed, []);
 });
 
-test('getPersonalizedFeed surfaces matches from saved likes with empty persisted scores', () => {
-  const liked = article('liked-1', 'Must-watch series season finale', { topics: ['culture'] });
-  const prefs = prefsWithLikedArticles([liked], {
-    topicScores: Object.fromEntries(CURIOSITY_ORDER.map((t) => [t, 0])) as UserPreferences['topicScores'],
-    keywordScores: {},
-    sportTagScores: {},
-  });
-
+test('getPersonalizedFeed returns articles matching selected topics', () => {
   const feed = getPersonalizedFeed(
     [
-      liked,
-      article('match', 'Must-watch series season preview', { topics: ['culture'] }),
-      article('unrelated', 'Election results update', { topics: ['politics'] }),
+      article('culture-1', 'Gallery opens', { topics: ['culture'] }),
+      article('tech-1', 'Chip launch', { topics: ['technology'] }),
+      article('politics-1', 'Election update', { topics: ['politics'] }),
     ],
-    prefs,
-  );
-
-  assert.equal(feed.length, 1);
-  assert.equal(feed[0]?.id, 'match');
-});
-
-test('getPersonalizedFeed handles mixed non-sports likes generically', () => {
-  const likedScience = article('liked-science', 'Mars rover discovers water ice', { topics: ['science'] });
-  const likedPolitics = article('liked-politics', 'Senate passes climate bill', { topics: ['politics'] });
-  const prefs = prefsWithLikedArticles([likedScience, likedPolitics]);
-
-  const feed = getPersonalizedFeed(
-    [
-      likedScience,
-      likedPolitics,
-      article('science-match', 'Mars sample analysis complete', { topics: ['science'] }),
-      article('politics-match', 'House votes on budget deal', { topics: ['politics'] }),
-      article('unrelated', 'New smartphone chip unveiled', { topics: ['technology'] }),
-    ],
-    prefs,
+    basePrefs({ forYouTopics: ['culture', 'technology'] }),
   );
 
   assert.equal(feed.length, 2);
-  assert.ok(feed.some((item) => item.id === 'science-match'));
-  assert.ok(feed.some((item) => item.id === 'politics-match'));
+  assert.ok(feed.some((item) => item.id === 'culture-1'));
+  assert.ok(feed.some((item) => item.id === 'tech-1'));
+  assert.ok(!feed.some((item) => item.id === 'politics-1'));
 });
 
-test('getPersonalizedFeed falls back to persisted scores when snapshots are missing', () => {
-  const prefs = basePrefs({
-    likedArticleIds: ['missing-like'],
-    likedArticles: {},
-    topicScores: { ...basePrefs().topicScores, culture: 1 },
-    keywordScores: { series: 1, season: 1 },
-  });
+test('getPersonalizedFeed keeps liked articles when they match selected topics', () => {
+  const saved = article('saved-culture', 'Saved exhibition review', { topics: ['culture'] });
 
   const feed = getPersonalizedFeed(
+    [saved, article('tech-1', 'Chip launch', { topics: ['technology'] })],
+    basePrefs({ forYouTopics: ['culture'] }),
+  );
+
+  assert.deepEqual(feed.map((item) => item.id), ['saved-culture']);
+});
+
+test('getPersonalizedFeed returns articles matching custom keyword interests', () => {
+  const feed = getPersonalizedFeed(
     [
-      article('match', 'Must-watch series season preview', { topics: ['culture'] }),
-      article('unrelated', 'Election results update', { topics: ['politics'] }),
+      article('bike-1', 'Best trail bikes for 2026', {
+        topics: ['sports'],
+        sportTags: ['mtb'],
+      }),
+      article('tech-1', 'Chip launch', { topics: ['technology'] }),
     ],
-    prefs,
+    basePrefs({ forYouTopics: [], forYouKeywords: ['bikes'], forYouSportTags: [] }),
   );
 
   assert.equal(feed.length, 1);
-  assert.equal(feed[0]?.id, 'match');
+  assert.equal(feed[0]?.id, 'bike-1');
+});
+
+test('getPersonalizedFeed matches bikes keyword to cycling stories without bike in headline', () => {
+  const feed = getPersonalizedFeed(
+    [
+      article('tdf-1', 'Tour de France stage recap', {
+        topics: ['sports'],
+        sportTags: ['cycling'],
+        excerpt: 'Peloton battles through the Alps',
+      }),
+      article('ball-1', 'NBA playoffs preview', {
+        topics: ['sports'],
+        sportTags: ['basketball'],
+      }),
+    ],
+    basePrefs({ forYouTopics: [], forYouKeywords: ['bikes'], forYouSportTags: [] }),
+  );
+
+  assert.equal(feed.length, 1);
+  assert.equal(feed[0]?.id, 'tdf-1');
+});
+
+test('getPersonalizedFeed returns articles matching sport tag interests', () => {
+  const feed = getPersonalizedFeed(
+    [
+      article('bike-1', 'Tour de France stage recap', {
+        topics: ['sports'],
+        sportTags: ['cycling'],
+      }),
+      article('ball-1', 'NBA playoffs preview', {
+        topics: ['sports'],
+        sportTags: ['basketball'],
+      }),
+    ],
+    basePrefs({ forYouTopics: [], forYouKeywords: [], forYouSportTags: ['cycling'] }),
+  );
+
+  assert.equal(feed.length, 1);
+  assert.equal(feed[0]?.id, 'bike-1');
 });
 
 test('rankArticles prefers keyword matches over shared source', () => {
@@ -359,27 +294,17 @@ test('getLikedInterestBadgeItems surfaces tv and genre keywords for a culture TV
   assert.ok(!keywordBadges.some((item) => item.key.includes(' ')));
 });
 
-test('getPersonalizedFeed surfaces matches for a culture TV like with genre keywords', () => {
-  const liked = article('liked-tv', "Patricia's Widow Bay horror comedy TV series review", {
-    topics: ['culture'],
-  });
-  const prefs = prefsWithLikedArticles([liked]);
-
+test('getPersonalizedFeed includes every culture story when culture is selected', () => {
   const feed = getPersonalizedFeed(
     [
-      liked,
-      article('match-horror', 'Horror anthology series returns for season 2', { topics: ['culture'] }),
+      article('match-horror', 'Horror anthology series returns', { topics: ['culture'] }),
       article('match-comedy', 'New comedy series lands on streaming', { topics: ['culture'] }),
-      article('match-tv', 'Television critics pick top shows this fall', { topics: ['culture'] }),
-      article('unrelated', 'Spring fashion week trends', { topics: ['culture'] }),
+      article('unrelated', 'Election results update', { topics: ['politics'] }),
     ],
-    prefs,
+    basePrefs({ forYouTopics: ['culture'] }),
   );
 
-  assert.equal(feed.length, 3);
-  assert.ok(feed.some((item) => item.id === 'match-horror'));
-  assert.ok(feed.some((item) => item.id === 'match-comedy'));
-  assert.ok(feed.some((item) => item.id === 'match-tv'));
+  assert.equal(feed.length, 2);
 });
 
 test('getArticleMatchReasons returns up to two personal keyword reasons per article', () => {
@@ -482,22 +407,201 @@ test('getLikedInterestBadgeItems lists topics, specific keywords, and sport tags
   assert.ok(!badges.some((item) => item.kind === 'keyword' && item.key === 'preview'));
 });
 
-test('getPersonalizedFeed works from feed clicks without likes', () => {
-  const clicked = article('clicked-1', 'Must-watch series season finale', { topics: ['culture'] });
-  const prefs = basePrefs({
-    likedArticleIds: [],
-    clickedArticleIds: ['clicked-1'],
-    clickedArticles: { 'clicked-1': clicked },
+test('getPersonalizedFeed orders multiple selected topics with light spreading', () => {
+  const feed = getPersonalizedFeed(
+    [
+      article('culture-1', 'Gallery opens', { topics: ['culture'] }),
+      article('tech-1', 'Chip launch', { topics: ['technology'] }),
+    ],
+    basePrefs({ forYouTopics: ['culture', 'technology'] }),
+  );
+
+  assert.equal(feed.length, 2);
+});
+
+test('compareLatestFeedArticles demotes unrelated stories when affinity matches within trending window', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+  const liked = article('liked-1', 'Must-watch series season finale review', { topics: ['culture'] });
+  const profile = buildInterestProfile(prefsWithLikedArticles([liked]))!;
+  const affinityMatch = article('culture-match', 'Must-watch series season finale recap', {
+    topics: ['culture'],
+    source: 'BBC News',
+    publishedAt: recent(2 * 60 * 60 * 1000),
   });
-  const feed = [
-    clicked,
-    article('match', 'Best new series season preview', { topics: ['culture'] }),
-    article('miss', 'Senate passes budget bill', { topics: ['politics'] }),
-  ];
+  const unrelated = article('world', 'Diplomatic summit opens in Geneva', {
+    topics: ['world'],
+    source: 'BBC News',
+    publishedAt: recent(90 * 60 * 1000),
+  });
 
-  const personalized = getPersonalizedFeed(feed, prefs);
+  assert.ok(
+    compareLatestFeedArticles(affinityMatch, unrelated, profile, now) < 0,
+    'expected affinity match to rank above newer unrelated story within trending window',
+  );
+});
 
-  assert.ok(personalized.some((item) => item.id === 'match'));
-  assert.ok(!personalized.some((item) => item.id === 'miss'));
-  assert.ok(!personalized.some((item) => item.id === 'clicked-1'));
+test('compareLatestFeedArticles keeps breaking news above affinity matches in same outlet', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+  const liked = article('liked-1', 'Must-watch series season finale review', { topics: ['culture'] });
+  const profile = buildInterestProfile(prefsWithLikedArticles([liked]))!;
+  const breaking = article('breaking', 'Major earthquake strikes capital', {
+    topics: ['world'],
+    source: 'BBC News',
+    publishedAt: recent(20 * 60 * 1000),
+  });
+  const affinityMatch = article('culture-match', 'Must-watch series season finale recap', {
+    topics: ['culture'],
+    source: 'BBC News',
+    publishedAt: recent(3 * 60 * 60 * 1000),
+  });
+
+  assert.ok(
+    compareLatestFeedArticles(breaking, affinityMatch, profile, now) < 0,
+    'expected breaking story to outrank older affinity match despite personalization',
+  );
+});
+
+test('getLatestFeed surfaces breaking news ahead of personalized matches from the same outlet', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+  const liked = article('liked-1', 'Must-watch series season finale review', { topics: ['culture'] });
+  const prefs = prefsWithLikedArticles([liked]);
+  const breaking = article('breaking', 'Major earthquake strikes capital', {
+    topics: ['world'],
+    source: 'BBC News',
+    publishedAt: recent(20 * 60 * 1000),
+  });
+  const affinityMatch = article('culture-match', 'Must-watch series season finale recap', {
+    topics: ['culture'],
+    source: 'BBC News',
+    publishedAt: recent(3 * 60 * 60 * 1000),
+  });
+
+  const feed = getLatestFeed([affinityMatch, breaking], prefs, { nowMs: now });
+
+  assert.equal(feed[0]?.id, 'breaking');
+});
+
+test('getLatestFeed still includes breaking news on unrelated topics', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+  const liked = article('liked-1', 'Must-watch series season finale review', { topics: ['culture'] });
+  const prefs = prefsWithLikedArticles([liked]);
+  const breaking = article('breaking', 'Central bank raises rates unexpectedly', {
+    topics: ['business'],
+    source: 'Reuters',
+    publishedAt: recent(15 * 60 * 1000),
+  });
+  const cultureMatch = article('culture-match', 'Must-watch series season finale recap', {
+    topics: ['culture'],
+    source: 'Vanity Fair',
+    publishedAt: recent(10 * 60 * 1000),
+  });
+
+  const feed = getLatestFeed([cultureMatch, breaking], prefs, { nowMs: now });
+
+  assert.ok(feed.some((item) => item.id === 'breaking'));
+  assert.ok(feed.some((item) => item.id === 'culture-match'));
+});
+
+test('buildLatestPersonalizationKey tracks liked and opened article ids', () => {
+  const key = buildLatestPersonalizationKey(
+    basePrefs({
+      likedArticleIds: ['a'],
+      clickedArticleIds: ['b', 'c'],
+    }),
+  );
+
+  assert.equal(key, JSON.stringify({ liked: ['a'], clicked: ['b', 'c'] }));
+});
+
+test('getLatestFeed falls back to chronological order without interest signals', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+  const newest = article('newest', 'Breaking update', {
+    topics: ['world'],
+    source: 'BBC News',
+    publishedAt: recent(60_000),
+  });
+  const olderBurst = article('espn-0', 'NFL score', {
+    topics: ['sports'],
+    source: 'ESPN NFL',
+    sportTags: ['football'],
+    publishedAt: recent(10 * 60_000),
+  });
+
+  const ordered = getLatestFeed([olderBurst, newest], basePrefs({ likedArticleIds: [] }));
+
+  assert.equal(ordered[0]?.id, 'newest');
+});
+
+test('getLatestFeed boosts matching stories within a recency window', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+  const liked = article('liked-1', 'Must-watch horror series finale', { topics: ['culture'] });
+  const prefs = basePrefs({
+    likedArticleIds: [liked.id],
+    likedArticles: { [liked.id]: liked },
+  });
+  const profile = buildInterestProfile(prefs, [liked])!;
+
+  const generic = article('generic', 'Gallery opens new exhibition', {
+    topics: ['culture'],
+    source: 'Vanity Fair',
+    publishedAt: recent(2 * 60 * 60_000),
+  });
+  const matching = article('match', 'Must-watch horror series returns', {
+    topics: ['culture'],
+    source: 'Vanity Fair',
+    publishedAt: recent(3 * 60 * 60_000),
+  });
+
+  assert.ok(
+    compareLatestFeedArticles(matching, generic, profile) < 0,
+    'expected affinity match to outrank a newer generic story in the same window',
+  );
+
+  const ordered = getLatestFeed([generic, matching], prefs);
+  const vanityFair = ordered.filter((item) => item.source === 'Vanity Fair');
+
+  assert.equal(vanityFair[0]?.id, 'match');
+});
+
+test('getLatestFeed weights likes above opens via interest profile', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+  const liked = article('liked-1', 'Chiefs playoff preview', {
+    topics: ['sports'],
+    sportTags: ['football'],
+  });
+  const opened = article('opened-1', 'Modern art gallery retrospective', {
+    topics: ['culture'],
+  });
+  const prefs = basePrefs({
+    likedArticleIds: [liked.id],
+    likedArticles: { [liked.id]: liked },
+    clickedArticleIds: [opened.id],
+    clickedArticles: { [opened.id]: opened },
+  });
+  const profile = buildInterestProfile(prefs, [liked, opened])!;
+
+  const nflCandidate = article('nfl', 'Chiefs advance in playoffs', {
+    topics: ['sports'],
+    sportTags: ['football'],
+    publishedAt: recent(3 * 60 * 60_000),
+  });
+  const cultureCandidate = article('culture', 'Gallery exhibition opens downtown', {
+    topics: ['culture'],
+    publishedAt: recent(2 * 60 * 60_000),
+  });
+
+  assert.ok(
+    articleAffinityScore(nflCandidate, profile) > articleAffinityScore(cultureCandidate, profile),
+  );
+  assert.ok(
+    compareLatestFeedArticles(nflCandidate, cultureCandidate, profile, now) < 0,
+    'like-derived affinity should beat click-only affinity inside the recency window',
+  );
 });

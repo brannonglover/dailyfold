@@ -59,6 +59,7 @@ export default function TabLayout() {
         name="saved"
         options={{
           title: 'Liked',
+          lazy: false,
           tabBarIcon: ({ color }) => <Ionicons name="heart-outline" size={24} color={color} />,
         }}
       />
@@ -66,6 +67,7 @@ export default function TabLayout() {
         name="profile"
         options={{
           title: 'Profile',
+          lazy: false,
           tabBarIcon: ({ color }) => (
             <Ionicons name="person-circle-outline" size={24} color={color} />
           ),

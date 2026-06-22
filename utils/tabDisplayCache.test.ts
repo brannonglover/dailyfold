@@ -3,12 +3,15 @@ import test from 'node:test';
 
 import { Article } from '@/types';
 import {
+  hydrateTabDisplayState,
+  isDisplayFeedUnderstocked,
   isDisplayFeedSynced,
   isForYouDisplayCacheFresh,
   isTabDisplayCacheFresh,
   readTabDisplayCache,
   resolveTabDisplayFeed,
   writeTabDisplayCache,
+  wouldClobberFreshTabDisplayCache,
 } from '@/utils/tabDisplayCache';
 
 const article = (id: string): Article => ({
@@ -63,16 +66,16 @@ test('forYou display cache requires matching personalization key', () => {
     feedGeneration: 3,
     rawLength: 100,
     filterKey: 'k1',
-    personalizationKey: '{"liked":["a1"],"clicked":[]}',
+    personalizationKey: '{"forYouTopics":["technology"]}',
     orderLocked: true,
   };
 
   assert.equal(
-    isForYouDisplayCacheFresh(entry, 3, 100, 'k1', '{"liked":["a1"],"clicked":[]}'),
+    isForYouDisplayCacheFresh(entry, 3, 100, 'k1', '{"forYouTopics":["technology"]}'),
     true,
   );
   assert.equal(
-    isForYouDisplayCacheFresh(entry, 3, 100, 'k1', '{"liked":["a2"],"clicked":[]}'),
+    isForYouDisplayCacheFresh(entry, 3, 100, 'k1', '{"forYouTopics":["culture"]}'),
     false,
   );
 });
@@ -90,33 +93,94 @@ test('hasShowableTabDisplayCache is true when cached articles exist', () => {
   assert.equal(readTabDisplayCache('for-you')?.displayArticles.length, 1);
 });
 
-test('resolveTabDisplayFeed hides display while context is loading', () => {
+test('resolveTabDisplayFeed shows same-filter cache while context is loading', () => {
+  const cached = [article('cached-1'), article('cached-2')];
+  writeTabDisplayCache('latest', {
+    displayArticles: cached,
+    displayReady: true,
+    feedGeneration: 2,
+    rawLength: 20,
+    filterKey: 'k1',
+    orderLocked: false,
+  });
+
   assert.deepEqual(
     resolveTabDisplayFeed({
       contextLoading: true,
-      displayArticles: [article('stale-1'), article('stale-2')],
-      displayReady: true,
-      tabKey: 'latest',
-      feedGeneration: 2,
-      rawLength: 20,
-      filterKey: 'k1',
-    }),
-    [],
-  );
-});
-
-test('resolveTabDisplayFeed hides in-memory display until displayReady', () => {
-  assert.deepEqual(
-    resolveTabDisplayFeed({
-      contextLoading: false,
-      displayArticles: [article('old-1'), article('old-2')],
+      displayArticles: [],
       displayReady: false,
       tabKey: 'latest',
       feedGeneration: 2,
       rawLength: 20,
       filterKey: 'k1',
     }),
+    cached,
+  );
+});
+
+test('resolveTabDisplayFeed hides display while context is loading without cache', () => {
+  assert.deepEqual(
+    resolveTabDisplayFeed({
+      contextLoading: true,
+      displayArticles: [],
+      displayReady: false,
+      tabKey: 'latest',
+      feedGeneration: 2,
+      rawLength: 20,
+      filterKey: 'k-no-cache',
+    }),
     [],
+  );
+});
+
+test('resolveTabDisplayFeed falls back to cache before displayReady', () => {
+  const cached = [article('cached-1'), article('cached-2')];
+  writeTabDisplayCache('latest', {
+    displayArticles: cached,
+    displayReady: true,
+    feedGeneration: 2,
+    rawLength: 20,
+    filterKey: 'k1',
+    orderLocked: false,
+  });
+
+  assert.deepEqual(
+    resolveTabDisplayFeed({
+      contextLoading: false,
+      displayArticles: [],
+      displayReady: false,
+      tabKey: 'latest',
+      feedGeneration: 2,
+      rawLength: 20,
+      filterKey: 'k1',
+    }),
+    cached,
+  );
+});
+
+test('resolveTabDisplayFeed prefers in-progress display over cache', () => {
+  const cached = [article('cached-1'), article('cached-2')];
+  const inProgress = [article('live-1'), article('live-2'), article('live-3')];
+  writeTabDisplayCache('latest', {
+    displayArticles: cached,
+    displayReady: true,
+    feedGeneration: 2,
+    rawLength: 20,
+    filterKey: 'k1',
+    orderLocked: false,
+  });
+
+  assert.deepEqual(
+    resolveTabDisplayFeed({
+      contextLoading: false,
+      displayArticles: inProgress,
+      displayReady: false,
+      tabKey: 'latest',
+      feedGeneration: 2,
+      rawLength: 20,
+      filterKey: 'k1',
+    }),
+    inProgress,
   );
 });
 
@@ -162,7 +226,7 @@ test('resolveTabDisplayFeed can fall back to a fresh cache snapshot', () => {
   );
 });
 
-test('resolveTabDisplayFeed ignores stale cache fallback', () => {
+test('resolveTabDisplayFeed ignores cache when filter key changed', () => {
   writeTabDisplayCache('latest', {
     displayArticles: [article('stale-1'), article('stale-2')],
     displayReady: true,
@@ -180,9 +244,128 @@ test('resolveTabDisplayFeed ignores stale cache fallback', () => {
       tabKey: 'latest',
       feedGeneration: 2,
       rawLength: 20,
+      filterKey: 'k2',
+    }),
+    [],
+  );
+});
+
+test('resolveTabDisplayFeed shows stale cache during loading after feed generation drift', () => {
+  const cached = Array.from({ length: 20 }, (_, index) => article(`cached-${index}`));
+  writeTabDisplayCache('latest', {
+    displayArticles: cached,
+    displayReady: true,
+    feedGeneration: 2,
+    rawLength: 20,
+    filterKey: 'k1',
+    orderLocked: false,
+  });
+
+  assert.deepEqual(
+    resolveTabDisplayFeed({
+      contextLoading: true,
+      displayArticles: [],
+      displayReady: false,
+      tabKey: 'latest',
+      feedGeneration: 3,
+      rawLength: 25,
+      filterKey: 'k1',
+    }),
+    cached,
+  );
+});
+
+test('resolveTabDisplayFeed ignores stale cache after load completes', () => {
+  const cached = Array.from({ length: 4 }, (_, index) => article(`cached-${index}`));
+  writeTabDisplayCache('latest', {
+    displayArticles: cached,
+    displayReady: true,
+    feedGeneration: 2,
+    rawLength: 20,
+    filterKey: 'k1',
+    orderLocked: false,
+  });
+
+  assert.deepEqual(
+    resolveTabDisplayFeed({
+      contextLoading: false,
+      displayArticles: [],
+      displayReady: false,
+      tabKey: 'latest',
+      feedGeneration: 3,
+      rawLength: 25,
       filterKey: 'k1',
     }),
     [],
+  );
+});
+
+test('isDisplayFeedUnderstocked detects truncated visible feeds', () => {
+  assert.equal(isDisplayFeedUnderstocked(4, 20), true);
+  assert.equal(isDisplayFeedUnderstocked(20, 20), false);
+  assert.equal(isDisplayFeedUnderstocked(0, 20), false);
+});
+
+test('hydrateTabDisplayState seeds in-memory state from a fresh cache snapshot', () => {
+  const cached = Array.from({ length: 5 }, (_, index) => article(`cached-${index}`));
+  writeTabDisplayCache('latest', {
+    displayArticles: cached,
+    displayReady: true,
+    feedGeneration: 2,
+    rawLength: 20,
+    filterKey: 'k1',
+    orderLocked: false,
+  });
+
+  assert.deepEqual(
+    hydrateTabDisplayState({
+      tabKey: 'latest',
+      filterKey: 'k1',
+      feedGeneration: 2,
+      rawLength: 20,
+    }),
+    { displayArticles: cached, displayReady: true },
+  );
+});
+
+test('hydrateTabDisplayState ignores stale cache snapshots', () => {
+  writeTabDisplayCache('latest', {
+    displayArticles: [article('stale')],
+    displayReady: true,
+    feedGeneration: 1,
+    rawLength: 2,
+    filterKey: 'k1',
+    orderLocked: false,
+  });
+
+  assert.deepEqual(
+    hydrateTabDisplayState({
+      tabKey: 'latest',
+      filterKey: 'k1',
+      feedGeneration: 2,
+      rawLength: 20,
+    }),
+    { displayArticles: [], displayReady: false },
+  );
+});
+
+test('wouldClobberFreshTabDisplayCache blocks wiping a fresh cache with empty state', () => {
+  writeTabDisplayCache('latest', {
+    displayArticles: [article('a1')],
+    displayReady: true,
+    feedGeneration: 2,
+    rawLength: 20,
+    filterKey: 'k1',
+    orderLocked: false,
+  });
+
+  assert.equal(
+    wouldClobberFreshTabDisplayCache('latest', [], false, 2, 20, 'k1'),
+    true,
+  );
+  assert.equal(
+    wouldClobberFreshTabDisplayCache('latest', [article('live')], true, 2, 20, 'k1'),
+    false,
   );
 });
 

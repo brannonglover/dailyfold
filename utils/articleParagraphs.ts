@@ -4,17 +4,35 @@ import { Article } from '@/types';
 import { ArticleReaderBlock } from '@/types/articleContent';
 import { hasRealHeroImage } from '@/utils/articleStoryMatch';
 
+const PLACEHOLDER_PARAGRAPH_TEXT = new Set(['null', 'undefined']);
+
+/** True when paragraph text is safe to render in the reader (not nullish or a JSON placeholder). */
+export function isUsableReaderParagraphText(text: unknown): text is string {
+  if (typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (PLACEHOLDER_PARAGRAPH_TEXT.has(trimmed.toLowerCase())) return false;
+  return true;
+}
+
+export function sanitizeReaderBlocks(blocks: ArticleReaderBlock[]): ArticleReaderBlock[] {
+  return blocks.filter((block) => {
+    if (block.type !== 'paragraph') return true;
+    return isUsableReaderParagraphText(block.text);
+  });
+}
+
 /** Paragraphs from feed body/excerpt when extracted reader content is missing or empty. */
 export function feedBlocksFromArticle(article: Article): ArticleReaderBlock[] {
-  const fromBody = article.body
+  const fromBody = (article.body ?? '')
     .split(/\n{2,}/)
     .map((p) => p.trim())
-    .filter(Boolean);
+    .filter(isUsableReaderParagraphText);
   if (fromBody.length > 0) {
     return fromBody.map((text) => ({ type: 'paragraph', text }));
   }
-  const excerpt = article.excerpt.trim();
-  if (excerpt) return [{ type: 'paragraph', text: excerpt }];
+  const excerpt = (article.excerpt ?? '').trim();
+  if (isUsableReaderParagraphText(excerpt)) return [{ type: 'paragraph', text: excerpt }];
   return [];
 }
 
@@ -99,10 +117,13 @@ export function resolveReaderBlockLayout(params: {
   extractedBlocks: ArticleReaderBlock[] | null;
 }): ReaderBlockLayout {
   const { article, extractedBlocks } = params;
-  const excerpt = article.excerpt.trim();
+  const excerpt = (article.excerpt ?? '').trim();
+  const usableExcerpt = isUsableReaderParagraphText(excerpt) ? excerpt : '';
   const feedBlocks = feedBlocksFromArticle(article);
 
-  const blocks = filterGuardianLiveBlogArtifacts(extractedBlocks ?? feedBlocks);
+  const blocks = sanitizeReaderBlocks(
+    filterGuardianLiveBlogArtifacts(extractedBlocks ?? feedBlocks),
+  );
 
   let layout: ReaderBlockLayout;
 
@@ -110,10 +131,10 @@ export function resolveReaderBlockLayout(params: {
     layout = { feedLede: null, bodyBlocks: blocks };
   } else {
     const firstText = firstParagraphText(blocks);
-    if (excerpt && firstText && excerptMatchesArticleLede(firstText, excerpt)) {
-      const bodyBlocks = dedupeLeadingParagraph(blocks, excerpt);
+    if (usableExcerpt && firstText && excerptMatchesArticleLede(firstText, usableExcerpt)) {
+      const bodyBlocks = dedupeLeadingParagraph(blocks, usableExcerpt);
       layout = {
-        feedLede: bodyBlocks.length > 0 ? excerpt : null,
+        feedLede: bodyBlocks.length > 0 ? usableExcerpt : null,
         bodyBlocks: bodyBlocks.length > 0 ? bodyBlocks : blocks,
       };
     } else {

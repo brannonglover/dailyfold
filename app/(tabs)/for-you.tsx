@@ -1,23 +1,21 @@
 import { useIsFocused } from '@react-navigation/native';
-import { startTransition, useEffect, useMemo, useRef, useState, memo } from 'react';
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from 'react';
 import { InteractionManager } from 'react-native';
 
 import { ArticleFeedScreen } from '@/components/ArticleFeedScreen';
+import { ForYouTopicPicker } from '@/components/ForYouTopicPicker';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useDeferAfterFocus } from '@/hooks/useDeferAfterFocus';
 import { useArticles } from '@/hooks/useArticles';
 import { useDisplayOrderLock } from '@/hooks/useDisplayOrderLock';
 import { useTabDisplayState } from '@/hooks/useTabDisplayState';
-import { buildInterestProfile, hasInterestSignals, hasPersonalizationSignals } from '@/services/interestSignals';
-import {
-  buildArticleMatchReasonsById,
-  getPersonalizedFeed,
-} from '@/services/recommendations';
+import { getForYouFeed } from '@/services/recommendations';
 import { isAllSourcesEnabled } from '@/services/sourcePreferences';
 import { buildForYouCacheKeys } from '@/utils/forYouPrewarm';
 import { getForYouEmptyMessage } from '@/utils/feedEmptyMessage';
 import { isFeedInteractionLocked, subscribeFeedInteractionLock } from '@/utils/feedInteractionLock';
-import { orderPersonalizedFeed } from '@/utils/feedOrdering';
+import { sourceIdsForForYouInterests } from '@/utils/forYouInterestSources';
+import { hasForYouTopicSelection } from '@/utils/forYouTopics';
 import {
   insertDisplayNewcomersAtSourceOrder,
   mergePaginatedDisplayFeed,
@@ -32,7 +30,7 @@ function ForYouScreenContent() {
   const {
     preferences,
     isLoading: isPreferencesLoading,
-    filterFeedArticles,
+    filterForYouFeedArticles,
     recordFeedClick,
   } = usePreferences();
   const {
@@ -44,17 +42,15 @@ function ForYouScreenContent() {
     notice,
     usingDemoArticles,
     refresh,
+    boostArticlesForInterests,
   } = useArticles();
 
-  const likedArticlesReady = preferences != null;
-  const userHasPersonalizationSignals =
-    likedArticlesReady && hasPersonalizationSignals(preferences);
+  const preferencesReady = preferences != null;
+  const hasForYouTopics = preferencesReady && hasForYouTopicSelection(preferences);
   const syncDisplayHandledRef = useRef(false);
+  const interestBoostKeyRef = useRef('');
   const isFocused = useIsFocused();
   const [feedInteractionEpoch, setFeedInteractionEpoch] = useState(0);
-  const [matchReasonsByArticleId, setMatchReasonsByArticleId] = useState(
-    () => new Map<string, string[]>(),
-  );
   const [emptyMessage, setEmptyMessage] = useState<string | undefined>();
 
   const { feedFilterKey, personalizationKey } = useMemo(
@@ -96,13 +92,38 @@ function ForYouScreenContent() {
 
   useEffect(() => subscribeFeedInteractionLock(() => setFeedInteractionEpoch((n) => n + 1)), []);
 
+  const rebuildForYouDisplay = useCallback(() => {
+    if (!preferences || !hasForYouTopics) return [];
+    return getForYouFeed(filterForYouFeedArticles(articles), preferences);
+  }, [articles, filterForYouFeedArticles, hasForYouTopics, preferences]);
+
   const showableArticles = useMemo(() => {
-    if (!userHasPersonalizationSignals || !preferences) return [];
+    if (!hasForYouTopics || !preferences) return [];
     if (displayArticles.length > 0) return displayArticles;
     const cached = readTabDisplayCache('for-you');
-    if (cached && cached.displayArticles.length > 0) return cached.displayArticles;
+    if (
+      cached &&
+      cached.displayArticles.length > 0 &&
+      isForYouDisplayCacheFresh(
+        cached,
+        feedGeneration,
+        articles.length,
+        feedFilterKey,
+        personalizationKey,
+      )
+    ) {
+      return cached.displayArticles;
+    }
     return [];
-  }, [displayArticles, preferences, userHasPersonalizationSignals]);
+  }, [
+    displayArticles,
+    preferences,
+    hasForYouTopics,
+    feedGeneration,
+    articles.length,
+    feedFilterKey,
+    personalizationKey,
+  ]);
 
   useEffect(() => {
     if (!isFocused) return;
@@ -112,7 +133,7 @@ function ForYouScreenContent() {
   }, [isFocused, showableArticles.length, displayReady, setDisplayReady]);
 
   useEffect(() => {
-    if (!isFocused || userHasPersonalizationSignals) return;
+    if (!isFocused || hasForYouTopics) return;
     if (displayArticles.length === 0 && !displayReady) return;
     startTransition(() => {
       setDisplayArticles([]);
@@ -121,7 +142,7 @@ function ForYouScreenContent() {
     });
   }, [
     isFocused,
-    userHasPersonalizationSignals,
+    hasForYouTopics,
     displayArticles.length,
     displayReady,
     setDisplayArticles,
@@ -129,12 +150,58 @@ function ForYouScreenContent() {
     prevRawLengthRef,
   ]);
 
+  useLayoutEffect(() => {
+    if (!isFocused || !preferences || !hasForYouTopics) return;
+    if (isFeedInteractionLocked()) return;
+
+    const ranked = rebuildForYouDisplay();
+    setDisplayArticles(ranked);
+    setDisplayReady(true);
+    prevRawLengthRef.current = articles.length;
+    prevFeedGenerationRef.current = feedGeneration;
+  }, [
+    isFocused,
+    personalizationKey,
+    rebuildForYouDisplay,
+    preferences,
+    hasForYouTopics,
+    articles.length,
+    feedGeneration,
+    setDisplayArticles,
+    setDisplayReady,
+    prevRawLengthRef,
+    prevFeedGenerationRef,
+    feedInteractionEpoch,
+  ]);
+
+  useEffect(() => {
+    if (!isFocused || !preferences || !hasForYouTopics || isLoading) return;
+    if (rebuildForYouDisplay().length > 0) return;
+
+    const sourceIds = sourceIdsForForYouInterests(preferences);
+    if (sourceIds.length === 0) return;
+
+    const boostKey = `${personalizationKey}\0${articles.length}`;
+    if (interestBoostKeyRef.current === boostKey) return;
+    interestBoostKeyRef.current = boostKey;
+    void boostArticlesForInterests(sourceIds, boostKey);
+  }, [
+    isFocused,
+    preferences,
+    hasForYouTopics,
+    isLoading,
+    personalizationKey,
+    articles.length,
+    rebuildForYouDisplay,
+    boostArticlesForInterests,
+  ]);
+
   useDeferAfterFocus(
     isFocused,
     () => {
       if (isFeedInteractionLocked()) return;
       syncDisplayHandledRef.current = false;
-      if (!userHasPersonalizationSignals || !preferences) {
+      if (!hasForYouTopics || !preferences) {
         return;
       }
 
@@ -145,14 +212,14 @@ function ForYouScreenContent() {
       }
 
       startTransition(() => {
-        const filtered = filterFeedArticles(articles);
-        const ranked = getPersonalizedFeed(filtered, preferences);
+        const filtered = filterForYouFeedArticles(articles);
+        const ranked = getForYouFeed(filtered, preferences);
         const generationChanged = feedGeneration !== prevFeedGenerationRef.current;
 
         if (generationChanged || prevRawLengthRef.current === 0) {
           syncDisplayHandledRef.current = true;
           if (shouldAllowFullRebuild(false, '', '')) {
-            setDisplayArticles(orderPersonalizedFeed(ranked));
+            setDisplayArticles(ranked);
             markInitialDisplay();
             prevFeedGenerationRef.current = feedGeneration;
           } else {
@@ -164,7 +231,7 @@ function ForYouScreenContent() {
           setDisplayArticles((prev) => {
             const seen = new Set(prev.map((a) => a.id));
             const newOnly = ranked.filter((a) => !seen.has(a.id));
-            return mergePaginatedDisplayFeed(prev, newOnly, ranked, orderPersonalizedFeed);
+            return mergePaginatedDisplayFeed(prev, newOnly, ranked, (items) => items);
           });
           setDisplayReady(true);
         }
@@ -175,7 +242,7 @@ function ForYouScreenContent() {
 
         setDisplayArticles((prev) => {
           if (prev.length === 0 && ranked.length > 0) {
-            return orderPersonalizedFeed(ranked);
+            return ranked;
           }
 
           if (!shouldAllowSilentMerge()) {
@@ -196,10 +263,10 @@ function ForYouScreenContent() {
     [
       articles,
       feedGeneration,
-      filterFeedArticles,
+      filterForYouFeedArticles,
       isForYouCacheFresh,
       preferences,
-      userHasPersonalizationSignals,
+      hasForYouTopics,
       markInitialDisplay,
       shouldAllowFullRebuild,
       shouldAllowSilentMerge,
@@ -211,50 +278,6 @@ function ForYouScreenContent() {
     ],
     'paint',
   );
-
-  useEffect(() => {
-    if (
-      !isFocused ||
-      !displayReady ||
-      !userHasPersonalizationSignals ||
-      !preferences ||
-      showableArticles.length === 0
-    ) {
-      setMatchReasonsByArticleId(new Map());
-      return;
-    }
-
-    let cancelled = false;
-    const task = InteractionManager.runAfterInteractions(() => {
-      if (cancelled) return;
-      startTransition(() => {
-        if (cancelled) return;
-        const filtered = filterFeedArticles(articles);
-        const profileArticles = [
-          ...filtered,
-          ...Object.values(preferences.likedArticles ?? {}),
-          ...Object.values(preferences.clickedArticles ?? {}),
-        ];
-        const profile = buildInterestProfile(preferences, profileArticles);
-        setMatchReasonsByArticleId(
-          buildArticleMatchReasonsById(showableArticles, profile, preferences, profileArticles),
-        );
-      });
-    });
-
-    return () => {
-      cancelled = true;
-      task.cancel();
-    };
-  }, [
-    isFocused,
-    displayReady,
-    userHasPersonalizationSignals,
-    preferences,
-    showableArticles,
-    filterFeedArticles,
-    articles,
-  ]);
 
   useEffect(() => {
     if (!isFocused || !displayReady) {
@@ -269,13 +292,6 @@ function ForYouScreenContent() {
         if (cancelled) return;
 
         const filtered = filterFeedArticles(articles);
-        const profile = preferences
-          ? buildInterestProfile(preferences, [
-              ...filtered,
-              ...Object.values(preferences.likedArticles ?? {}),
-              ...Object.values(preferences.clickedArticles ?? {}),
-            ])
-          : null;
         setEmptyMessage(
           getForYouEmptyMessage({
             error,
@@ -287,8 +303,7 @@ function ForYouScreenContent() {
             sourcesRestricted:
               !!preferences && !isAllSourcesEnabled(preferences.enabledSourceIds),
             usingDemoArticles,
-            hasPersonalizationSignals: userHasPersonalizationSignals,
-            hasInterestProfile: profile ? hasInterestSignals(profile) : false,
+            hasForYouTopics,
           }),
         );
       });
@@ -308,19 +323,24 @@ function ForYouScreenContent() {
     preferences?.enabledSportTags,
     preferences?.enabledSourceIds,
     usingDemoArticles,
-    userHasPersonalizationSignals,
+    hasForYouTopics,
     filterFeedArticles,
     articles,
     preferences,
   ]);
 
+  const headerExtra = useMemo(
+    () => <ForYouTopicPicker articles={articles} />,
+    [articles],
+  );
+
   return (
     <ArticleFeedScreen
       articles={showableArticles}
       title="For You"
-      matchReasonsByArticleId={matchReasonsByArticleId}
       emptyMessage={emptyMessage}
-      isLoading={isLoading || (isPreferencesLoading && !likedArticlesReady)}
+      headerExtra={headerExtra}
+      isLoading={isLoading || (isPreferencesLoading && !preferencesReady)}
       isRefreshing={isRefreshing}
       error={error}
       notice={notice}

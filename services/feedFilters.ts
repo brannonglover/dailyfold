@@ -10,7 +10,6 @@ import { filterArticlesByTopics, isAllTopicsEnabled } from '@/services/topicPref
 import { Article, FeedSource, UserPreferences } from '@/types';
 import { applyArticleStoryFallbacks } from '@/utils/articleStoryFallback';
 import { hasRealHeroImage } from '@/utils/articleStoryMatch';
-import { limitSportsInAllTopicsFeed } from '@/utils/limitAllTopicsSports';
 
 /** Drop feed rows without a real hero image (after story dedupe at fetch). */
 export function filterArticlesWithRealHeroImage(articles: Article[]): Article[] {
@@ -40,10 +39,29 @@ export function applyFeedFilters(
       const sourcePrimaryByName = buildSourcePrimaryTopicMap(catalogSources);
       result = filterArticlesByTopics(result, prefs.enabledTopics, sourcePrimaryByName);
       result = filterArticlesBySportTags(result, prefs.enabledSportTags, prefs.enabledTopics);
-    } else {
-      result = limitSportsInAllTopicsFeed(result);
     }
 
+    result = filterArticlesByBlocks(result, prefs);
+  }
+
+  return filterArticlesWithRealHeroImage(result);
+}
+
+/**
+ * For You candidate pool — source toggles and blocks apply, but profile topic/sport
+ * chips do not. Interest tiles drive what stories qualify, not Latest category filters.
+ */
+export function filterForYouFeedArticles(
+  articles: Article[],
+  preferences: UserPreferences | null | undefined,
+  sources: FeedSource[],
+): Article[] {
+  let result = applyArticleStoryFallbacks(articles);
+
+  if (preferences) {
+    const prefs = normalizeFeedPreferences(preferences);
+    const catalogSources = sources.length > 0 ? sources : FALLBACK_SOURCES;
+    result = filterArticlesBySources(result, catalogSources, prefs.enabledSourceIds);
     result = filterArticlesByBlocks(result, prefs);
   }
 

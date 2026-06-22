@@ -81,6 +81,12 @@ export interface UserPreferences {
   enabledSourceIds: string[];
   /** Empty array = all topics shown in feeds */
   enabledTopics: Topic[];
+  /** Topics chosen on For You — drives that tab's feed when non-empty. */
+  forYouTopics: Topic[];
+  /** Custom keyword interests for For You (e.g. "bikes", "bicycle parts"). */
+  forYouKeywords: string[];
+  /** Sport/league sub-interests for For You (e.g. cycling, mtb). */
+  forYouSportTags: SportTag[];
   /** Empty array = all sports/leagues when Sports topic is active */
   enabledSportTags: SportTag[];
   /** Local alerts for hot stories in the trending window. */

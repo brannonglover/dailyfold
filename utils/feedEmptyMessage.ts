@@ -4,13 +4,13 @@ import { isAllSportTagsEnabled, isSportsTopicActive } from '@/services/sportPref
 import { isAllTopicsEnabled } from '@/services/topicPreferences';
 
 export const FOR_YOU_NO_SIGNALS_MESSAGE =
-  'Like stories or tap articles on Latest to build your For You feed. Hearts save favorites; opening a story helps us learn what catches your eye.';
+  'Search for stories or interests you care about and add them above to build your For You feed.';
 
 /** @deprecated Use FOR_YOU_NO_SIGNALS_MESSAGE */
 export const FOR_YOU_NO_LIKES_MESSAGE = FOR_YOU_NO_SIGNALS_MESSAGE;
 
 export const FOR_YOU_NO_MATCHES_MESSAGE =
-  'No stories match your interests yet. Like more on Latest to refine your feed.';
+  'No stories match your selected interests yet. Try another search or pull to refresh.';
 
 export const FOR_YOU_NO_PROFILE_MESSAGE =
   'We could not load interest signals from your liked story. Pull to refresh, or unlike and re-like it on Latest.';
@@ -27,12 +27,10 @@ export function getForYouEmptyMessage(options: {
   enabledSportTags?: SportTag[];
   sourcesRestricted?: boolean;
   usingDemoArticles?: boolean;
-  hasPersonalizationSignals: boolean;
-  hasInterestProfile?: boolean;
+  hasForYouTopics: boolean;
 }): string | undefined {
   const {
-    hasPersonalizationSignals,
-    hasInterestProfile,
+    hasForYouTopics,
     error,
     totalCount,
     filteredCount,
@@ -40,15 +38,11 @@ export function getForYouEmptyMessage(options: {
     usingDemoArticles,
   } = options;
 
-  if (!hasPersonalizationSignals) {
+  if (!hasForYouTopics) {
     if (error && totalCount === 0) {
       return 'Could not load stories. Fix the connection above, then pull to refresh.';
     }
     return FOR_YOU_NO_SIGNALS_MESSAGE;
-  }
-
-  if (hasInterestProfile === false) {
-    return FOR_YOU_NO_PROFILE_MESSAGE;
   }
 
   if (filteredCount === 0 && usingDemoArticles) {

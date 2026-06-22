@@ -4,6 +4,25 @@ export type SourceMenuGestureState = {
   openedThisGesture: boolean;
 };
 
+/** Sync open flag — avoids putting menu state in context (which re-renders every trigger). */
+let menuOpen = false;
+
+export function markSourceMenuOpen(): void {
+  menuOpen = true;
+}
+
+export function markSourceMenuClosed(): void {
+  menuOpen = false;
+}
+
+export function isSourceMenuOpen(): boolean {
+  return menuOpen;
+}
+
+export function resetSourceMenuOpenState(): void {
+  menuOpen = false;
+}
+
 export function createSourceMenuGestureState(): SourceMenuGestureState {
   return { openedThisGesture: false };
 }

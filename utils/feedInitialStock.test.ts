@@ -16,7 +16,8 @@ function article(id: string): Article {
     source: 'Test',
     publishedAt: '2026-01-01T00:00:00.000Z',
     url: `https://example.com/${id}`,
-    imageUrl: null,
+    imageUrl: '',
+    readTimeMinutes: 1,
     topics: [],
     sportTags: [],
   };
@@ -85,4 +86,46 @@ test('fetchFeedUntilStocked stops when the feed is exhausted before minimum', as
   assert.equal(result.articles.length, 3);
   assert.equal(result.meta?.hasMore, false);
   assert.equal(result.meta?.nextCursor, null);
+});
+
+test('fetchFeedUntilStocked uses isStocked instead of raw count', async () => {
+  const calls: Array<string | undefined> = [];
+
+  const result = await fetchFeedUntilStocked(
+    async (cursor) => {
+      calls.push(cursor);
+      if (!cursor) {
+        return page(['a-1', 'a-2', 'a-3', 'a-4'], { hasMore: true, nextCursor: 'cursor-1' });
+      }
+      return page(['a-5', 'a-6', 'a-7', 'a-8'], { hasMore: true, nextCursor: 'cursor-2' });
+    },
+    {
+      isStocked: (articles) => articles.length >= 6,
+    },
+  );
+
+  assert.deepEqual(calls, [undefined, 'cursor-1']);
+  assert.equal(result.articles.length, 8);
+});
+
+test('fetchFeedUntilStocked returns only newly fetched rows when startingArticles is set', async () => {
+  const seed = [article('seed-1'), article('seed-2')];
+
+  const result = await fetchFeedUntilStocked(
+    async (cursor) => {
+      if (!cursor) {
+        return page(['seed-1', 'a-3', 'a-4'], { hasMore: true, nextCursor: 'cursor-1' });
+      }
+      return page(['a-5'], { hasMore: false, nextCursor: null });
+    },
+    {
+      startingArticles: seed,
+      minimum: 4,
+    },
+  );
+
+  assert.deepEqual(
+    result.articles.map((row) => row.id),
+    ['a-3', 'a-4'],
+  );
 });

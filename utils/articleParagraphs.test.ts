@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 
 import {
   excerptMatchesArticleLede,
+  feedBlocksFromArticle,
+  isUsableReaderParagraphText,
   resolveReaderBlockLayout,
 } from './articleParagraphs';
 import { Article } from '@/types';
@@ -15,6 +17,57 @@ function run(label: string, fn: () => void) {
     throw error;
   }
 }
+
+run('isUsableReaderParagraphText rejects nullish and placeholder strings', () => {
+  assert.equal(isUsableReaderParagraphText(null), false);
+  assert.equal(isUsableReaderParagraphText(undefined), false);
+  assert.equal(isUsableReaderParagraphText(''), false);
+  assert.equal(isUsableReaderParagraphText('   '), false);
+  assert.equal(isUsableReaderParagraphText('null'), false);
+  assert.equal(isUsableReaderParagraphText('NULL'), false);
+  assert.equal(isUsableReaderParagraphText('undefined'), false);
+  assert.equal(isUsableReaderParagraphText('Real article copy.'), true);
+});
+
+run('feedBlocksFromArticle ignores nullish body and placeholder excerpt', () => {
+  const article = {
+    id: 'espn-1',
+    title: 'Soccer headline',
+    excerpt: 'null',
+    body: 'null',
+    source: 'ESPN Soccer',
+    imageUrl: 'https://example.com/hero.jpg',
+    topics: ['sports'],
+    readTimeMinutes: 2,
+    publishedAt: '2026-06-10T12:00:00.000Z',
+    url: 'https://www.espn.com/soccer/story/_/id/example',
+  } satisfies Article;
+
+  assert.deepEqual(feedBlocksFromArticle(article), []);
+});
+
+run('resolveReaderBlockLayout drops extracted paragraph blocks with null text', () => {
+  const article = {
+    id: 'espn-2',
+    title: 'Soccer headline',
+    excerpt: '',
+    body: '',
+    source: 'ESPN Soccer',
+    imageUrl: 'https://example.com/hero.jpg',
+    topics: ['sports'],
+    readTimeMinutes: 2,
+    publishedAt: '2026-06-10T12:00:00.000Z',
+    url: 'https://www.espn.com/soccer/story/_/id/example',
+  } satisfies Article;
+
+  const layout = resolveReaderBlockLayout({
+    article,
+    extractedBlocks: [{ type: 'paragraph', text: null as unknown as string }],
+  });
+
+  assert.equal(layout.bodyBlocks.length, 0);
+  assert.equal(layout.feedLede, null);
+});
 
 run('Guardian multi-paragraph RSS excerpt is not treated as extracted lede', () => {
   const excerpt =

@@ -36,7 +36,7 @@ import {
   disableSourceInPreferences,
   findSourceIdForArticle,
 } from '@/services/blockPreferences';
-import { applyFeedFilters } from '@/services/feedFilters';
+import { applyFeedFilters, filterForYouFeedArticles as filterForYouCandidates } from '@/services/feedFilters';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import { fetchArticleById } from '@/services/articles';
 import {
@@ -66,6 +66,7 @@ import {
 } from '@/services/recommendations';
 import { Article, FeedSource, LikedFolder, SportTag, Topic, UserPreferences } from '@/types';
 import { createFolderId } from '@/utils/folderId';
+import { isBikeRelatedInterest, normalizeForYouKeyword } from '@/utils/forYouTopics';
 
 export type TrendingNotificationsToggleResult = 'updated' | 'denied' | 'unavailable';
 
@@ -76,6 +77,8 @@ interface PreferencesContextValue {
   isLiked: (articleId: string) => boolean;
   toggleLike: (article: Article) => void;
   recordFeedClick: (article: Article) => void;
+  /** Log a meaningful article open (feed tap, reader, saved row, etc.). */
+  recordArticleOpen: (article: Article) => void;
   rememberLikedArticles: (articles: Article[]) => Promise<void>;
   topTopics: string[];
   topSportTags: string[];
@@ -89,10 +92,17 @@ interface PreferencesContextValue {
   filterByEnabledTopics: (articles: Article[]) => Article[];
   filterByEnabledSportTags: (articles: Article[]) => Article[];
   filterFeedArticles: (articles: Article[]) => Article[];
+  filterForYouFeedArticles: (articles: Article[]) => Article[];
   toggleTopic: (topic: Topic) => Promise<void>;
   selectAllTopics: () => Promise<void>;
   toggleSportTag: (tag: SportTag) => Promise<void>;
   selectAllSportTags: () => Promise<void>;
+  addForYouTopic: (topic: Topic) => Promise<void>;
+  removeForYouTopic: (topic: Topic) => Promise<void>;
+  addForYouKeyword: (keyword: string) => Promise<void>;
+  removeForYouKeyword: (keyword: string) => Promise<void>;
+  addForYouSportTag: (tag: SportTag) => Promise<void>;
+  removeForYouSportTag: (tag: SportTag) => Promise<void>;
   folders: LikedFolder[];
   createFolder: (name: string) => Promise<LikedFolder | null>;
   addArticleToFolder: (folderId: string, articleId: string) => Promise<void>;
@@ -480,6 +490,11 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     [preferences, sources],
   );
 
+  const filterForYouFeedArticles = useCallback(
+    (items: Article[]) => filterForYouCandidates(items, preferences, sources),
+    [preferences, sources],
+  );
+
   const selectAllTopics = useCallback(async () => {
     if (!user) return;
     const prev = preferencesRef.current;
@@ -592,6 +607,85 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     [user, preferences, persist],
   );
 
+  const addForYouTopic = useCallback(
+    async (topic: Topic) => {
+      if (!user || !preferences) return;
+      if (preferences.forYouTopics.includes(topic)) return;
+      await persist({
+        ...preferences,
+        forYouTopics: [...preferences.forYouTopics, topic],
+      });
+    },
+    [user, preferences, persist],
+  );
+
+  const removeForYouTopic = useCallback(
+    async (topic: Topic) => {
+      if (!user || !preferences) return;
+      await persist({
+        ...preferences,
+        forYouTopics: preferences.forYouTopics.filter((item) => item !== topic),
+      });
+    },
+    [user, preferences, persist],
+  );
+
+  const addForYouKeyword = useCallback(
+    async (keyword: string) => {
+      if (!user || !preferences) return;
+      const normalized = normalizeForYouKeyword(keyword);
+      if (!normalized) return;
+      const existing = preferences.forYouKeywords ?? [];
+      if (existing.includes(normalized)) return;
+      const nextSportTags = [...(preferences.forYouSportTags ?? [])];
+      if (isBikeRelatedInterest(normalized) && !nextSportTags.includes('cycling')) {
+        nextSportTags.push('cycling');
+      }
+      await persist({
+        ...preferences,
+        forYouKeywords: [...existing, normalized],
+        forYouSportTags: nextSportTags,
+      });
+    },
+    [user, preferences, persist],
+  );
+
+  const removeForYouKeyword = useCallback(
+    async (keyword: string) => {
+      if (!user || !preferences) return;
+      const normalized = normalizeForYouKeyword(keyword);
+      await persist({
+        ...preferences,
+        forYouKeywords: (preferences.forYouKeywords ?? []).filter((item) => item !== normalized),
+      });
+    },
+    [user, preferences, persist],
+  );
+
+  const addForYouSportTag = useCallback(
+    async (tag: SportTag) => {
+      if (!user || !preferences) return;
+      const existing = preferences.forYouSportTags ?? [];
+      if (existing.includes(tag)) return;
+      await persist({
+        ...preferences,
+        forYouSportTags: [...existing, tag],
+      });
+    },
+    [user, preferences, persist],
+  );
+
+  const removeForYouSportTag = useCallback(
+    async (tag: SportTag) => {
+      if (!user || !preferences) return;
+      await persist({
+        ...preferences,
+        forYouSportTags: (preferences.forYouSportTags ?? []).filter((item) => item !== tag),
+      });
+    },
+    [user, preferences, persist],
+  );
+
   const enabledSourceCount = useMemo(
     () =>
       preferences ? countEnabledSources(sources, preferences.enabledSourceIds) : sources.length,
@@ -631,6 +725,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       isLiked,
       toggleLike,
       recordFeedClick,
+      recordArticleOpen: recordFeedClick,
       rememberLikedArticles,
       topTopics,
       topSportTags,
@@ -644,10 +739,17 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       filterByEnabledTopics,
       filterByEnabledSportTags,
       filterFeedArticles,
+      filterForYouFeedArticles,
       toggleTopic,
       selectAllTopics,
       toggleSportTag,
       selectAllSportTags,
+      addForYouTopic,
+      removeForYouTopic,
+      addForYouKeyword,
+      removeForYouKeyword,
+      addForYouSportTag,
+      removeForYouSportTag,
       folders,
       createFolder,
       addArticleToFolder,
@@ -681,10 +783,17 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       filterByEnabledTopics,
       filterByEnabledSportTags,
       filterFeedArticles,
+      filterForYouFeedArticles,
       toggleTopic,
       selectAllTopics,
       toggleSportTag,
       selectAllSportTags,
+      addForYouTopic,
+      removeForYouTopic,
+      addForYouKeyword,
+      removeForYouKeyword,
+      addForYouSportTag,
+      removeForYouSportTag,
       folders,
       createFolder,
       addArticleToFolder,

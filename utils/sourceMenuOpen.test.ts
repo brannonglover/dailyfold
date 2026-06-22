@@ -6,11 +6,24 @@ import {
   createSourceMenuGestureState,
   handleSourceMenuPress,
   handleSourceMenuPressIn,
+  isSourceMenuOpen,
+  markSourceMenuClosed,
+  markSourceMenuOpen,
   openSourceMenu,
   resetSourceMenuGesture,
+  resetSourceMenuOpenState,
 } from './sourceMenuOpen';
 
 const article = { id: 'a1', source: 'Test Source' } as Article;
+
+test('markSourceMenuOpen tracks sync open state for dedup guards', () => {
+  resetSourceMenuOpenState();
+  assert.equal(isSourceMenuOpen(), false);
+  markSourceMenuOpen();
+  assert.equal(isSourceMenuOpen(), true);
+  markSourceMenuClosed();
+  assert.equal(isSourceMenuOpen(), false);
+});
 
 test('openSourceMenu prefers hosted opener when available', () => {
   let hostedArticle: Article | undefined;

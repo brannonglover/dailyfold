@@ -8,9 +8,15 @@ export const MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION = 20;
 export function shouldAllowFeedLoadMore(
   userHasScrolledFeed: boolean,
   articleCount: number,
+  atFeedEnd = false,
 ): boolean {
   if (articleCount < MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION) {
     return true;
   }
-  return userHasScrolledFeed;
+  return userHasScrolledFeed || atFeedEnd;
+}
+
+/** True when the visible feed is shorter than the stocked minimum and should auto-fetch. */
+export function shouldAutoTopUpFeed(visibleCount: number): boolean {
+  return visibleCount > 0 && visibleCount < MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION;
 }

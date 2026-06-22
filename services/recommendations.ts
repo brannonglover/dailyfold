@@ -7,7 +7,6 @@ import {
   buildLikedInterestProfile,
   CLICK_BOOST,
   hasInterestSignals,
-  hasPersonalizationSignals,
   LIKE_BOOST,
   LikedInterestProfile,
 } from '@/services/interestSignals';
@@ -21,7 +20,10 @@ import {
   PRIMARY_INTEREST_KEYWORDS,
   SECONDARY_INTEREST_KEYWORDS,
 } from '@/utils/interestKeywords';
-import { Article, SportTag, Topic, UserPreferences } from '@/types';
+import { Article, Topic, UserPreferences, SportTag } from '@/types';
+import { articleMatchesForYouInterests, hasForYouTopicSelection } from '@/utils/forYouTopics';
+import { orderLatestFeed, TRENDING_WINDOW_MS, type OrderLatestFeedOptions } from '@/utils/feedOrdering';
+import { isBreakingTrendingArticle } from '@/utils/trendingArticles';
 
 const MIN_SOURCE_AFFINITY = CLICK_BOOST;
 
@@ -153,26 +155,84 @@ export function hasLikedArticles(prefs: UserPreferences | null | undefined): boo
 }
 
 export function getPersonalizedFeed(articles: Article[], prefs: UserPreferences | null): Article[] {
-  if (!hasPersonalizationSignals(prefs)) {
-    return [];
+  return getForYouFeed(articles, prefs);
+}
+
+/** Cache-bust key when liked/opened articles change on Latest. */
+export function buildLatestPersonalizationKey(prefs: UserPreferences | null | undefined): string {
+  if (!prefs) return '';
+  return JSON.stringify({
+    liked: prefs.likedArticleIds,
+    clicked: prefs.clickedArticleIds ?? [],
+  });
+}
+
+function publishedAtMs(article: Article): number {
+  return new Date(article.publishedAt).getTime();
+}
+
+/**
+ * Within a recent window, prefer stories that match learned interests; otherwise
+ * keep strict newest-first ordering inside each outlet bucket.
+ *
+ * Breaking news (<1h) always sorts by recency so open/like personalization cannot
+ * bury unrelated urgent stories within the same outlet bucket.
+ */
+export function compareLatestFeedArticles(
+  a: Article,
+  b: Article,
+  profile: LikedInterestProfile,
+  nowMs: number = Date.now(),
+): number {
+  const timeA = publishedAtMs(a);
+  const timeB = publishedAtMs(b);
+
+  if (isBreakingTrendingArticle(a, nowMs) || isBreakingTrendingArticle(b, nowMs)) {
+    return timeB - timeA;
   }
 
-  const profileArticles = [
-    ...articles,
-    ...Object.values(prefs!.likedArticles ?? {}),
-    ...Object.values(prefs!.clickedArticles ?? {}),
-  ];
-  const profile = buildInterestProfile(prefs!, profileArticles);
+  if (Math.abs(timeA - timeB) <= TRENDING_WINDOW_MS) {
+    const affinityDiff = articleAffinityScore(b, profile) - articleAffinityScore(a, profile);
+    if (affinityDiff !== 0) return affinityDiff;
+  }
+  return timeB - timeA;
+}
+
+export type GetLatestFeedOptions = OrderLatestFeedOptions & {
+  /** Test hook — defaults to Date.now(). */
+  nowMs?: number;
+};
+
+/** Latest feed: chronological with light spreading, boosted by open/like signals. */
+export function getLatestFeed(
+  articles: Article[],
+  prefs: UserPreferences | null,
+  options?: GetLatestFeedOptions,
+): Article[] {
+  const profile = prefs ? buildInterestProfile(prefs, articles) : null;
   if (!profile || !hasInterestSignals(profile)) {
+    return orderLatestFeed(articles, options);
+  }
+
+  const nowMs = options?.nowMs ?? Date.now();
+  const compareWithinBucket = (left: Article, right: Article) =>
+    compareLatestFeedArticles(left, right, profile, nowMs);
+
+  return orderLatestFeed(articles, { ...options, compareWithinBucket });
+}
+
+/** For You feed from explicitly selected interests — newest stories first with light spreading. */
+export function getForYouFeed(articles: Article[], prefs: UserPreferences | null): Article[] {
+  if (!hasForYouTopicSelection(prefs)) {
     return [];
   }
 
-  const likedIds = new Set(prefs!.likedArticleIds);
-  const clickedIds = new Set(prefs!.clickedArticleIds ?? []);
-  const excludedIds = new Set([...likedIds, ...clickedIds]);
-  const discoverable = articles.filter((article) => !excludedIds.has(article.id));
-  const matches = discoverable.filter((article) => isMeaningfulInterestMatch(article, profile));
-  return rankArticles(matches, profile, likedIds);
+  const matches = articles.filter((article) => articleMatchesForYouInterests(article, prefs!));
+  const topicCount =
+    (prefs!.forYouTopics?.length ?? 0) +
+    (prefs!.forYouKeywords?.length ?? 0) +
+    (prefs!.forYouSportTags?.length ?? 0);
+  return orderLatestFeed(matches, { diversifyTopics: topicCount > 1 });
 }
 
 function topScoredKeys(scores: Record<string, number>, limit: number): string[] {

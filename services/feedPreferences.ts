@@ -5,6 +5,7 @@ import { SportTag, Topic, UserPreferences } from '@/types';
 import { normalizeBlockPreferences } from './blockPreferences';
 import { isSportsTopicActive } from './sportPreferences';
 import { isAllTopicsEnabled } from './topicPreferences';
+import { normalizeForYouKeyword } from '@/utils/forYouTopics';
 
 const VALID_TOPICS = new Set<Topic>(CURIOSITY_ORDER);
 const VALID_SPORT_TAGS = new Set<SportTag>(SPORT_TAG_ORDER);
@@ -16,6 +17,18 @@ function uniqueTopics(topics: Topic[]): Topic[] {
     if (seen.has(topic)) continue;
     seen.add(topic);
     out.push(topic);
+  }
+  return out;
+}
+
+function uniqueKeywords(keywords: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const keyword of keywords) {
+    const normalized = normalizeForYouKeyword(keyword);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
   }
   return out;
 }
@@ -47,6 +60,18 @@ export function normalizeFeedPreferences(prefs: UserPreferences): UserPreference
   let enabledSportTags = uniqueSportTags(
     rawSportTags.filter((tag): tag is SportTag => VALID_SPORT_TAGS.has(tag as SportTag)),
   );
+  const rawForYouTopics = Array.isArray(prefs.forYouTopics) ? prefs.forYouTopics : [];
+  const forYouTopics = uniqueTopics(
+    rawForYouTopics.filter((topic): topic is Topic => VALID_TOPICS.has(topic as Topic)),
+  );
+  const rawForYouKeywords = Array.isArray(prefs.forYouKeywords) ? prefs.forYouKeywords : [];
+  const forYouKeywords = uniqueKeywords(
+    rawForYouKeywords.filter((keyword): keyword is string => typeof keyword === 'string'),
+  );
+  const rawForYouSportTags = Array.isArray(prefs.forYouSportTags) ? prefs.forYouSportTags : [];
+  const forYouSportTags = uniqueSportTags(
+    rawForYouSportTags.filter((tag): tag is SportTag => VALID_SPORT_TAGS.has(tag as SportTag)),
+  );
 
   // Legacy / explicit full selection is equivalent to All (empty = no topic filter).
   if (
@@ -69,6 +94,9 @@ export function normalizeFeedPreferences(prefs: UserPreferences): UserPreference
 
   if (
     sameStringArray(enabledTopics, prefs.enabledTopics) &&
+    sameStringArray(forYouTopics, prefs.forYouTopics ?? []) &&
+    sameStringArray(forYouKeywords, prefs.forYouKeywords ?? []) &&
+    sameStringArray(forYouSportTags, prefs.forYouSportTags ?? []) &&
     sameStringArray(enabledSportTags, prefs.enabledSportTags) &&
     trendingNotificationsEnabled === prefs.trendingNotificationsEnabled &&
     sameStringArray(blockedTopics, prefs.blockedTopics ?? []) &&
@@ -81,6 +109,9 @@ export function normalizeFeedPreferences(prefs: UserPreferences): UserPreference
   return normalizeBlockPreferences({
     ...prefs,
     enabledTopics,
+    forYouTopics,
+    forYouKeywords,
+    forYouSportTags,
     enabledSportTags,
     trendingNotificationsEnabled,
     blockedTopics,

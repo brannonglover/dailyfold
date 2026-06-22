@@ -58,14 +58,12 @@ import {
   groupNewspaperFeedRows,
   NewspaperFeedRow,
 } from '@/utils/newspaperFeedRows';
-import {
-  buildFeedTrendingBadgeByArticleId,
-  TrendingBadge,
-} from '@/utils/trendingArticles';
-import { shouldAllowFeedLoadMore } from '@/utils/feedLoadMoreGate';
+import { shouldAllowFeedLoadMore, shouldAutoTopUpFeed } from '@/utils/feedLoadMoreGate';
 import { isFeedInteractionLocked } from '@/utils/feedInteractionLock';
 import { readLastFeedListHeight, rememberFeedListHeight } from '@/utils/feedListViewport';
 import { buildLoadMoreTriggerKey } from '@/utils/paginationRevision';
+
+const AnimatedFlatList = Animated.createAnimatedComponent(FlatList<Article>);
 
 /** Let child pressables (e.g. Source menu) receive taps during scroll deceleration. */
 const FEED_SCROLL_PRESS_PROPS = {
@@ -208,7 +206,6 @@ function areFeedCardItemPropsEqual(
     prev.showTopSeparator === next.showTopSeparator &&
     prev.endPullDistance === next.endPullDistance &&
     prev.allowPress === next.allowPress &&
-    prev.trendingBadge === next.trendingBadge &&
     prev.matchReasons === next.matchReasons &&
     prev.onFeedClick === next.onFeedClick
   );
@@ -221,7 +218,6 @@ type FeedCardItemProps = {
   showTopSeparator: boolean;
   endPullDistance: SharedValue<number>;
   allowPress: () => boolean;
-  trendingBadge?: TrendingBadge;
   matchReasons?: string[];
   onFeedClick?: (article: Article) => void;
 };
@@ -233,7 +229,6 @@ const FeedCardItem = memo(function FeedCardItem({
   showTopSeparator,
   endPullDistance,
   allowPress,
-  trendingBadge,
   matchReasons,
   onFeedClick,
 }: FeedCardItemProps) {
@@ -254,7 +249,6 @@ const FeedCardItem = memo(function FeedCardItem({
           article={article}
           height={height}
           allowPress={allowPress}
-          trendingBadge={trendingBadge}
           matchReasons={matchReasons}
           onFeedClick={onFeedClick}
         />
@@ -310,7 +304,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   const loadMoreTriggeredAtKeyRef = useRef('');
   const newspaperRowsCountRef = useRef(0);
   const newspaperLastVisibleRowRef = useRef(-1);
-  const requestLoadMoreRef = useRef<() => void>(() => {});
+  const requestLoadMoreRef = useRef<(options?: { atFeedEnd?: boolean }) => void>(() => {});
   const loadMoreCursorValue = loadMoreCursor ?? articles.length;
   const loadMoreTriggerKey = buildLoadMoreTriggerKey(loadMoreCursorValue, loadMoreEpoch ?? 0);
   const prevPendingCountRef = useRef(0);
@@ -329,13 +323,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   }
   const newspaperFeaturedIds =
     layout === 'newspaper' ? newspaperFeaturedIdsRef.current : new Set<string>();
-  const feedTrendingBadges = useMemo(
-    () =>
-      buildFeedTrendingBadgeByArticleId(articles, {
-        featuredIds: newspaperFeaturedIds,
-      }),
-    [articles, newspaperFeaturedIds],
-  );
   const newspaperHeroArticle = layout === 'newspaper' && articles.length > 0 ? articles[0] : null;
   const newspaperFeedRows = useMemo(() => {
     if (layout !== 'newspaper' || articles.length <= 1) return [];
@@ -526,8 +513,10 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     onDismissPending();
   }, [activeIndex, pendingCount, onDismissPending]);
 
-  const requestLoadMore = useCallback(() => {
-    if (!shouldAllowFeedLoadMore(userInitiatedScrollRef.current, articles.length)) return;
+  const requestLoadMore = useCallback((options?: { atFeedEnd?: boolean }) => {
+    if (!shouldAllowFeedLoadMore(userInitiatedScrollRef.current, articles.length, options?.atFeedEnd)) {
+      return;
+    }
     if (isFeedInteractionLocked()) return;
     if (!onLoadMore || !canLoadMore || isLoadingMore) return;
     if (loadMoreTriggeredAtKeyRef.current === loadMoreTriggerKey) return;
@@ -549,6 +538,29 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   useEffect(() => {
     loadMoreTriggeredAtKeyRef.current = '';
   }, [loadMoreTriggerKey]);
+
+  useEffect(() => {
+    if (!onLoadMore || !canLoadMore || isLoadingMore) return;
+    if (!shouldAutoTopUpFeed(articles.length)) return;
+    requestLoadMore({ atFeedEnd: true });
+  }, [
+    articles.length,
+    canLoadMore,
+    isLoadingMore,
+    loadMoreTriggerKey,
+    onLoadMore,
+    requestLoadMore,
+  ]);
+
+  const onNewspaperContentSizeChange = useCallback(
+    (_width: number, height: number) => {
+      if (!onLoadMore || !canLoadMore || isLoadingMore || pageHeight <= 0) return;
+      if (height <= pageHeight + 1) {
+        requestLoadMore({ atFeedEnd: true });
+      }
+    },
+    [onLoadMore, canLoadMore, isLoadingMore, pageHeight, requestLoadMore],
+  );
 
   const onNewspaperViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
@@ -574,7 +586,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
       const totalRows = newspaperRowsCountRef.current;
       if (totalRows > 0 && maxIndex >= totalRows - NEWSPAPER_LOAD_MORE_PREFETCH_ROWS) {
-        requestLoadMoreRef.current();
+        requestLoadMoreRef.current({ atFeedEnd: true });
       }
 
       for (const id of prefetchIds) {
@@ -597,7 +609,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         NEWSPAPER_FEATURED_CARD_HEIGHT * NEWSPAPER_LOAD_MORE_PREFETCH_ROWS +
         NEWSPAPER_COMPACT_CARD_HEIGHT * NEWSPAPER_LOAD_MORE_PREFETCH_ROWS;
       if (distanceFromEnd <= prefetchLeadPx) {
-        requestLoadMore();
+        requestLoadMore({ atFeedEnd: true });
       }
     },
     [onLoadMore, canLoadMore, isLoadingMore, pageHeight, requestLoadMore],
@@ -612,7 +624,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   );
 
   const onNewspaperEndReached = useCallback(() => {
-    requestLoadMore();
+    requestLoadMore({ atFeedEnd: true });
   }, [requestLoadMore]);
 
   const handleApplyPending = useCallback(() => {
@@ -647,7 +659,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         showTopSeparator={index > 0}
         endPullDistance={endPullDistance}
         allowPress={allowCardPress}
-        trendingBadge={feedTrendingBadges.get(item.id)}
         matchReasons={matchReasonsByArticleId?.get(item.id)}
         onFeedClick={onFeedClick}
       />
@@ -657,7 +668,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       articlesCount,
       endPullDistance,
       allowCardPress,
-      feedTrendingBadges,
       matchReasonsByArticleId,
       onFeedClick,
     ],
@@ -674,7 +684,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
               height={NEWSPAPER_FEATURED_CARD_HEIGHT}
               variant="featured"
               allowPress={allowCardPress}
-              trendingBadge={feedTrendingBadges.get(row.article.id)}
               matchReasons={matchReasonsByArticleId?.get(row.article.id)}
               onFeedClick={onFeedClick}
             />
@@ -707,7 +716,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         </View>
       );
     },
-    [colors.feedDivider, allowCardPress, feedTrendingBadges, matchReasonsByArticleId, onFeedClick],
+    [colors.feedDivider, allowCardPress, matchReasonsByArticleId, onFeedClick],
   );
 
   const pendingBannerOverlay = (
@@ -811,7 +820,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
                     height={heroHeight}
                     variant="hero"
                     allowPress={allowCardPress}
-                    trendingBadge={feedTrendingBadges.get(heroArticle.id)}
                     matchReasons={matchReasonsByArticleId?.get(heroArticle.id)}
                     onFeedClick={onFeedClick}
                   />
@@ -834,6 +842,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
               viewabilityConfig={newspaperViewabilityConfig.current}
               onEndReached={onNewspaperEndReached}
               onEndReachedThreshold={NEWSPAPER_END_REACHED_THRESHOLD}
+              onContentSizeChange={onNewspaperContentSizeChange}
               ListFooterComponent={loadMoreListFooter}
             />
           ) : null}
@@ -881,7 +890,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             onViewableItemsChanged={onViewableItemsChanged.current}
             viewabilityConfig={viewabilityConfig.current}
             getItemLayout={getSnapItemLayout}
-            onEndReached={requestLoadMore}
+            onEndReached={() => requestLoadMore({ atFeedEnd: true })}
             onEndReachedThreshold={0.65}
           />
         )}

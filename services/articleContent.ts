@@ -1,5 +1,6 @@
 import { API_URL } from '@/constants/api';
 import { ArticleReaderBlock, ArticleReaderContent } from '@/types/articleContent';
+import { isUsableReaderParagraphText, sanitizeReaderBlocks } from '@/utils/articleParagraphs';
 
 interface ContentResponse {
   content: ArticleReaderContent & { paragraphs?: string[] };
@@ -11,17 +12,19 @@ function normalizeReaderContent(
   if (content.blocks?.length) {
     return {
       title: content.title,
-      blocks: content.blocks,
+      blocks: sanitizeReaderBlocks(content.blocks),
       readTimeMinutes: content.readTimeMinutes,
       source: content.source,
     };
   }
 
   const legacyParagraphs = content.paragraphs ?? [];
-  const blocks: ArticleReaderBlock[] = legacyParagraphs.map((text) => ({
-    type: 'paragraph',
-    text,
-  }));
+  const blocks: ArticleReaderBlock[] = legacyParagraphs
+    .filter(isUsableReaderParagraphText)
+    .map((text) => ({
+      type: 'paragraph',
+      text,
+    }));
 
   return {
     title: content.title,

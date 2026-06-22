@@ -16,11 +16,6 @@ import { useTheme } from '@/hooks/useTheme';
 import { rememberOpenArticle } from '@/services/articleSession';
 import { prefetchArticleReaderContent } from '@/services/articleContent';
 import { Article } from '@/types';
-import {
-  TrendingBadge as TrendingBadgeInfo,
-  trendingBadgeAccessibilityLabel,
-  trendingBadgeLabel,
-} from '@/utils/trendingArticles';
 
 type ArticleCardVariant = 'default' | 'hero' | 'compact' | 'featured';
 
@@ -30,8 +25,6 @@ interface ArticleCardProps {
   variant?: ArticleCardVariant;
   /** When false, taps are ignored (e.g. user just scrolled the feed). */
   allowPress?: () => boolean;
-  /** When set, shows why the story is prioritized in the feed. */
-  trendingBadge?: TrendingBadgeInfo;
   /** For You only — which liked-interest signals matched this article (max 3). */
   matchReasons?: string[];
   /** Latest/For You feed opens — records curiosity signal, not a like. */
@@ -119,49 +112,6 @@ const NEWSPAPER_OVERLAY_SCRIM_COLORS = [
 const NEWSPAPER_OVERLAY_SCRIM_LOCATIONS = [0, 0.45, 0.78, 1] as const;
 /** Localized scrim behind meta + title — keeps the rest of the hero unobstructed. */
 const SUBSCRIPTION_BADGE_LABEL = 'May need subscription';
-function TrendingBadge({
-  compact,
-  hero,
-  badge,
-}: {
-  compact?: boolean;
-  hero?: boolean;
-  badge: TrendingBadgeInfo;
-}) {
-  const { colors } = useTheme();
-  const label = trendingBadgeLabel(badge);
-  const accessibilityLabel = trendingBadgeAccessibilityLabel(badge);
-
-  if (compact) {
-    return (
-      <View
-        style={styles.trendingIconBadge}
-        accessibilityRole="text"
-        accessibilityLabel={accessibilityLabel}>
-        <Ionicons name="flame" size={14} color={OVERLAY_TITLE_COLOR} />
-      </View>
-    );
-  }
-
-  if (hero) {
-    return (
-      <View
-        style={[styles.trendingBadgeHero, { backgroundColor: colors.accent }]}
-        accessibilityRole="text"
-        accessibilityLabel={accessibilityLabel}>
-        <Ionicons name="flame" size={15} color={OVERLAY_TITLE_COLOR} />
-        <Text style={styles.trendingBadgeHeroText}>{label}</Text>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.trendingBadge} accessibilityRole="text" accessibilityLabel={accessibilityLabel}>
-      <Ionicons name="flame" size={13} color={OVERLAY_TITLE_COLOR} />
-      <Text style={styles.trendingBadgeText}>{label}</Text>
-    </View>
-  );
-}
 
 function MatchReasonText({ reasons }: { reasons: string[] }) {
   const { colors } = useTheme();
@@ -237,7 +187,6 @@ function NewspaperOverlayCard({
   height,
   variant,
   allowPress,
-  trendingBadge,
   matchReasons,
   onFeedClick,
 }: {
@@ -245,7 +194,6 @@ function NewspaperOverlayCard({
   height: number;
   variant: 'hero' | 'compact' | 'featured';
   allowPress?: () => boolean;
-  trendingBadge?: TrendingBadgeInfo;
   matchReasons?: string[];
   onFeedClick?: (article: Article) => void;
 }) {
@@ -297,13 +245,6 @@ function NewspaperOverlayCard({
             compact={!isHero && !isFeatured}
           />
         </Pressable>
-        {trendingBadge ? (
-          <View
-            style={isHero ? styles.heroImageBadgeProminent : styles.heroImageBadge}
-            pointerEvents="none">
-            <TrendingBadge compact={isCompact} hero={isHero} badge={trendingBadge} />
-          </View>
-        ) : null}
         {!isHero ? (
           <LinearGradient
             colors={[...NEWSPAPER_OVERLAY_SCRIM_COLORS]}
@@ -366,11 +307,6 @@ function matchReasonsKey(reasons?: string[]) {
   return reasons?.join('\0') ?? '';
 }
 
-function trendingBadgeKey(badge?: TrendingBadgeInfo) {
-  if (!badge) return '';
-  return `${badge.kind}:${badge.days}`;
-}
-
 function areArticleCardPropsEqual(prev: ArticleCardProps, next: ArticleCardProps) {
   return (
     prev.article.id === next.article.id &&
@@ -385,7 +321,6 @@ function areArticleCardPropsEqual(prev: ArticleCardProps, next: ArticleCardProps
     prev.height === next.height &&
     prev.variant === next.variant &&
     prev.allowPress === next.allowPress &&
-    trendingBadgeKey(prev.trendingBadge) === trendingBadgeKey(next.trendingBadge) &&
     matchReasonsKey(prev.matchReasons) === matchReasonsKey(next.matchReasons) &&
     prev.onFeedClick === next.onFeedClick
   );
@@ -396,7 +331,6 @@ export const ArticleCard = memo(function ArticleCard({
   height,
   variant = 'default',
   allowPress,
-  trendingBadge,
   matchReasons,
   onFeedClick,
 }: ArticleCardProps) {
@@ -407,7 +341,6 @@ export const ArticleCard = memo(function ArticleCard({
         height={height}
         variant={variant}
         allowPress={allowPress}
-        trendingBadge={trendingBadge}
         matchReasons={matchReasons}
         onFeedClick={onFeedClick}
       />
@@ -462,11 +395,6 @@ export const ArticleCard = memo(function ArticleCard({
               locations={[...ARTICLE_CARD_HERO_VIGNETTE_GRADIENT_LOCATIONS]}
               style={[styles.imageGradient, { height: heroVignetteHeight }]}
             />
-            {trendingBadge ? (
-              <View style={styles.heroImageBadgeProminent} pointerEvents="none">
-                <TrendingBadge hero badge={trendingBadge} />
-              </View>
-            ) : null}
           </View>
         </Pressable>
 
@@ -557,59 +485,6 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-  },
-  heroImageBadge: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    zIndex: 2,
-  },
-  heroImageBadgeProminent: {
-    position: 'absolute',
-    top: 14,
-    right: 12,
-    zIndex: 2,
-  },
-  trendingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(0,0,0,0.72)',
-  },
-  trendingIconBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(0,0,0,0.72)',
-  },
-  trendingBadgeText: {
-    fontFamily: 'InterSemiBold',
-    fontSize: 11,
-    letterSpacing: 0.25,
-    color: OVERLAY_TITLE_COLOR,
-    ...OVERLAY_TEXT_SHADOW,
-  },
-  trendingBadgeHero: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 999,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  trendingBadgeHeroText: {
-    fontFamily: 'InterSemiBold',
-    fontSize: 13,
-    letterSpacing: 0.3,
-    color: OVERLAY_TITLE_COLOR,
   },
   textBlock: {
     flex: 1,

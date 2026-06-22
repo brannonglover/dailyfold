@@ -20,6 +20,9 @@ function basePrefs(overrides: Partial<UserPreferences> = {}): UserPreferences {
     sportTagScores: {},
     enabledSourceIds: [],
     enabledTopics: [],
+    forYouTopics: [],
+    forYouKeywords: [],
+    forYouSportTags: [],
     enabledSportTags: [],
     trendingNotificationsEnabled: false,
     blockedTopics: [],
@@ -200,17 +203,18 @@ test('applyFeedFilters removes articles with blocked topics even when all topics
   assert.ok(!result.some((a) => a.id === 'tech'));
 });
 
-test('All topics drops stale sports but keeps hot trending sports', () => {
+test('All topics keeps every sports story including older ones', () => {
   const staleSport = hotSportArticle({
     id: 'stale-sport',
+    title: 'Cricket league standings update',
     publishedAt: new Date(now - 8 * 60 * 60 * 1000).toISOString(),
   });
   const result = applyFeedFilters([...articles, staleSport], basePrefs(), FALLBACK_SOURCES);
   assert.ok(result.some((a) => a.id === 'sport'));
-  assert.ok(!result.some((a) => a.id === 'stale-sport'));
+  assert.ok(result.some((a) => a.id === 'stale-sport'));
 });
 
-test('All topics limits a flood of hot NFL and soccer stories', () => {
+test('All topics does not cap hot sports floods', () => {
   const nflFlood = Array.from({ length: 6 }, (_, index) =>
     hotSportArticle({
       id: `nfl-${index}`,
@@ -236,7 +240,7 @@ test('All topics limits a flood of hot NFL and soccer stories', () => {
     FALLBACK_SOURCES,
   );
   const sportsKept = result.filter((a) => a.topics.includes('sports'));
-  assert.ok(sportsKept.length <= 4);
+  assert.ok(sportsKept.length > 4, 'All topics should not apply trending sports caps');
   assert.ok(result.some((a) => a.id === 'tech'));
   assert.ok(result.some((a) => a.id === 'world'));
 });
