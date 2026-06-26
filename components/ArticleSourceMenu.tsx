@@ -12,7 +12,6 @@ import { acquireFeedInteractionLock } from '@/utils/feedInteractionLock';
 import {
   createSourceMenuGestureState,
   handleSourceMenuPress,
-  handleSourceMenuPressIn,
   isSourceMenuOpen,
   markSourceMenuClosed,
   markSourceMenuOpen,
@@ -50,10 +49,6 @@ export function ArticleSourceMenu({
     openSourceMenu(article, sourceMenu?.openSourceMenu ?? null, openLocal);
   }, [article, sourceMenu, openLocal]);
 
-  const handlePressIn = useCallback(() => {
-    handleSourceMenuPressIn(gestureStateRef.current, openSheet);
-  }, [openSheet]);
-
   const handlePress = useCallback(() => {
     handleSourceMenuPress(gestureStateRef.current, openSheet);
   }, [openSheet]);
@@ -81,10 +76,8 @@ export function ArticleSourceMenu({
   return (
     <>
       <Pressable
-        onPressIn={handlePressIn}
         onPress={handlePress}
         onPressOut={handlePressOut}
-        delayPressIn={0}
         hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
         style={({ pressed }) => [styles.trigger, pressed && styles.triggerPressed]}
         accessibilityRole="button"

@@ -21,7 +21,14 @@ import {
   SECONDARY_INTEREST_KEYWORDS,
 } from '@/utils/interestKeywords';
 import { Article, Topic, UserPreferences, SportTag } from '@/types';
-import { articleMatchesForYouInterests, hasForYouTopicSelection } from '@/utils/forYouTopics';
+import {
+  articleMatchesForYouInterests,
+  articleMatchesForYouKeywords,
+  articleMatchesForYouSportTags,
+  articleMatchesForYouTopics,
+  hasForYouTopicSelection,
+} from '@/utils/forYouTopics';
+import { rankArticlesForSearchQuery } from '@/catalog/articleSearch';
 import { orderLatestFeed, TRENDING_WINDOW_MS, type OrderLatestFeedOptions } from '@/utils/feedOrdering';
 import { isBreakingTrendingArticle } from '@/utils/trendingArticles';
 
@@ -219,6 +226,60 @@ export function getLatestFeed(
     compareLatestFeedArticles(left, right, profile, nowMs);
 
   return orderLatestFeed(articles, { ...options, compareWithinBucket });
+}
+
+export type ForYouInterestKind = 'topic' | 'keyword' | 'sportTag';
+
+export function articleMatchesSingleForYouInterest(
+  article: Article,
+  kind: ForYouInterestKind,
+  value: string,
+): boolean {
+  switch (kind) {
+    case 'topic':
+      return articleMatchesForYouTopics(article, [value as Topic]);
+    case 'keyword':
+      return articleMatchesForYouKeywords(article, [value]);
+    case 'sportTag':
+      return articleMatchesForYouSportTags(article, [value as SportTag]);
+  }
+}
+
+/** Fast, unranked slice for instant interest-feed paint before full ranking runs. */
+export function getQuickInterestFeedPreview(
+  articles: Article[],
+  kind: ForYouInterestKind,
+  value: string,
+  limit = 12,
+): Article[] {
+  const matches = articles.filter((article) =>
+    articleMatchesSingleForYouInterest(article, kind, value),
+  );
+  if (matches.length === 0) return [];
+  return [...matches]
+    .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+    .slice(0, limit);
+}
+
+/** Single-interest For You feed — relevance-ranked for keywords, newest-first for topics/sports. */
+export function getSingleInterestForYouFeed(
+  articles: Article[],
+  kind: ForYouInterestKind,
+  value: string,
+  options?: { interestKeywords?: string[] },
+): Article[] {
+  const matches = articles.filter((article) =>
+    articleMatchesSingleForYouInterest(article, kind, value),
+  );
+
+  if (kind === 'keyword') {
+    const ranked = rankArticlesForSearchQuery(matches, value, {
+      interestKeywords: options?.interestKeywords,
+    });
+    return orderLatestFeed(ranked.length > 0 ? ranked : matches, { diversifyTopics: false });
+  }
+
+  return orderLatestFeed(matches, { diversifyTopics: false });
 }
 
 /** For You feed from explicitly selected interests — newest stories first with light spreading. */

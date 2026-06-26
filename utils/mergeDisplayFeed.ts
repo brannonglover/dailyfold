@@ -1,6 +1,21 @@
 import { Article } from '@/types';
 import { spreadAgainstFeedHead } from '@/utils/feedOrdering';
 
+/** Drop repeated rows when multiple display sync paths merge the same page. */
+export function dedupeArticlesById(articles: Article[]): Article[] {
+  if (articles.length <= 1) return articles;
+
+  const seen = new Set<string>();
+  const result: Article[] = [];
+  for (const article of articles) {
+    if (seen.has(article.id)) continue;
+    seen.add(article.id);
+    result.push(article);
+  }
+
+  return result.length === articles.length ? articles : result;
+}
+
 const ARTICLE_FEED_CARD_FIELDS = [
   'title',
   'excerpt',
@@ -127,7 +142,7 @@ export function insertDisplayNewcomersAtSourceOrder(
     display = [...display.slice(0, insertAt), article, ...display.slice(insertAt)];
   }
 
-  return display;
+  return dedupeArticlesById(display);
 }
 
 /**
@@ -150,8 +165,8 @@ export function mergePaginatedDisplayFeed(
   const newMinIndex = minSourceIndex(newOnly, indexById);
 
   if (newMinIndex > prevMaxIndex) {
-    return [...visiblePrev, ...orderedNew];
+    return dedupeArticlesById([...visiblePrev, ...orderedNew]);
   }
 
-  return spreadAgainstFeedHead(orderedNew, visiblePrev);
+  return dedupeArticlesById(spreadAgainstFeedHead(orderedNew, visiblePrev));
 }

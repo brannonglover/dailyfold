@@ -31,6 +31,8 @@ interface ArticleFeedScreenProps {
   layout?: ArticleFeedLayout;
   matchReasonsByArticleId?: Map<string, string[]>;
   onFeedClick?: (article: Article) => void;
+  /** When true, omit the in-content FeedHeader (e.g. stack nav already shows the title). */
+  hideFeedHeader?: boolean;
 }
 
 export const ArticleFeedScreen = memo(
@@ -59,6 +61,7 @@ export const ArticleFeedScreen = memo(
       layout,
       matchReasonsByArticleId,
       onFeedClick,
+      hideFeedHeader = false,
     },
     ref,
   ) {
@@ -67,7 +70,9 @@ export const ArticleFeedScreen = memo(
   if (isLoading && articles.length === 0) {
     return (
       <View style={[styles.flex, { backgroundColor: colors.background }]}>
-        <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
+        {!hideFeedHeader ? (
+          <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
+        ) : null}
         {headerExtra}
         <View style={styles.centered}>
           <ActivityIndicator color={colors.text} />
@@ -116,6 +121,7 @@ export const ArticleFeedScreen = memo(
         matchReasonsByArticleId={matchReasonsByArticleId}
         onFeedClick={onFeedClick}
         isRefreshing={isRefreshing}
+        hideFeedHeader={hideFeedHeader}
       />
       </View>
     </SourceMenuHost>

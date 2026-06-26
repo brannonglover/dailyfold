@@ -14,8 +14,28 @@ import {
 } from '@/constants/Layout';
 import { useTheme } from '@/hooks/useTheme';
 import { rememberOpenArticle } from '@/services/articleSession';
-import { prefetchArticleReaderContent } from '@/services/articleContent';
+import { prefetchArticleReaderContent, seedReaderContentFromArticle } from '@/services/articleContent';
 import { Article } from '@/types';
+
+function warmArticleForOpen(article: Article) {
+  rememberOpenArticle(article);
+  seedReaderContentFromArticle(article);
+  prefetchArticleReaderContent(article.id, article);
+}
+
+function navigateToArticle(
+  article: Article,
+  router: ReturnType<typeof useRouter>,
+  onFeedClick?: (article: Article) => void,
+) {
+  rememberOpenArticle(article);
+  router.push(`/article/${article.id}`);
+  queueMicrotask(() => {
+    seedReaderContentFromArticle(article);
+    prefetchArticleReaderContent(article.id, article);
+    onFeedClick?.(article);
+  });
+}
 
 type ArticleCardVariant = 'default' | 'hero' | 'compact' | 'featured';
 
@@ -23,8 +43,6 @@ interface ArticleCardProps {
   article: Article;
   height: number;
   variant?: ArticleCardVariant;
-  /** When false, taps are ignored (e.g. user just scrolled the feed). */
-  allowPress?: () => boolean;
   /** For You only — which liked-interest signals matched this article (max 3). */
   matchReasons?: string[];
   /** Latest/For You feed opens — records curiosity signal, not a like. */
@@ -186,14 +204,12 @@ function NewspaperOverlayCard({
   article,
   height,
   variant,
-  allowPress,
   matchReasons,
   onFeedClick,
 }: {
   article: Article;
   height: number;
   variant: 'hero' | 'compact' | 'featured';
-  allowPress?: () => boolean;
   matchReasons?: string[];
   onFeedClick?: (article: Article) => void;
 }) {
@@ -210,11 +226,7 @@ function NewspaperOverlayCard({
   const textPanelGradient = NEWSPAPER_TEXT_PANEL_GRADIENT[variant];
 
   function openArticle() {
-    if (allowPress && !allowPress()) return;
-    onFeedClick?.(article);
-    prefetchArticleReaderContent(article.id);
-    rememberOpenArticle(article);
-    router.push(`/article/${article.id}`);
+    navigateToArticle(article, router, onFeedClick);
   }
 
   return (
@@ -232,6 +244,7 @@ function NewspaperOverlayCard({
       ) : null}
       <View style={[styles.newspaperImageWrap, { height: imageHeight }]}>
         <Pressable
+          onPressIn={() => warmArticleForOpen(article)}
           onPress={openArticle}
           accessibilityRole="button"
           accessibilityLabel={`Read ${article.title}`}
@@ -278,6 +291,7 @@ function NewspaperOverlayCard({
               </View>
             </View>
             <Pressable
+              onPressIn={() => warmArticleForOpen(article)}
               onPress={openArticle}
               accessibilityRole="button"
               accessibilityLabel={`Read ${article.title}`}
@@ -320,7 +334,6 @@ function areArticleCardPropsEqual(prev: ArticleCardProps, next: ArticleCardProps
     prev.article.topics.join('\0') === next.article.topics.join('\0') &&
     prev.height === next.height &&
     prev.variant === next.variant &&
-    prev.allowPress === next.allowPress &&
     matchReasonsKey(prev.matchReasons) === matchReasonsKey(next.matchReasons) &&
     prev.onFeedClick === next.onFeedClick
   );
@@ -330,7 +343,6 @@ export const ArticleCard = memo(function ArticleCard({
   article,
   height,
   variant = 'default',
-  allowPress,
   matchReasons,
   onFeedClick,
 }: ArticleCardProps) {
@@ -340,7 +352,6 @@ export const ArticleCard = memo(function ArticleCard({
         article={article}
         height={height}
         variant={variant}
-        allowPress={allowPress}
         matchReasons={matchReasons}
         onFeedClick={onFeedClick}
       />
@@ -355,11 +366,7 @@ export const ArticleCard = memo(function ArticleCard({
   const requiresSubscription = article.requiresSubscription === true;
 
   function openArticle() {
-    if (allowPress && !allowPress()) return;
-    onFeedClick?.(article);
-    prefetchArticleReaderContent(article.id);
-    rememberOpenArticle(article);
-    router.push(`/article/${article.id}`);
+    navigateToArticle(article, router, onFeedClick);
   }
 
   const hasMatchReasons = (matchReasons?.length ?? 0) > 0;
@@ -373,6 +380,7 @@ export const ArticleCard = memo(function ArticleCard({
           </View>
         ) : null}
         <Pressable
+          onPressIn={() => warmArticleForOpen(article)}
           onPress={openArticle}
           accessibilityRole="button"
           accessibilityLabel={`Read ${article.title}`}
@@ -412,6 +420,7 @@ export const ArticleCard = memo(function ArticleCard({
           </View>
 
           <Pressable
+            onPressIn={() => warmArticleForOpen(article)}
             onPress={openArticle}
             accessibilityRole="button"
             accessibilityLabel={`Read ${article.title}`}

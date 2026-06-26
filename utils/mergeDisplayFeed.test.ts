@@ -5,6 +5,7 @@ import { Article } from '@/types';
 import { articleSpreadBucket } from '@/utils/feedOrdering';
 import {
   articleFeedCardFieldsEqual,
+  dedupeArticlesById,
   insertDisplayNewcomersAtSourceOrder,
   isFilterExpansion,
   mergePaginatedDisplayFeed,
@@ -25,6 +26,30 @@ function article(id: string, source = 'Source'): Article {
     url: `https://example.com/${id}`,
   };
 }
+
+test('dedupeArticlesById keeps first occurrence and preserves order', () => {
+  const first = article('a');
+  const duplicate = { ...article('a'), title: 'duplicate-title' };
+  const deduped = dedupeArticlesById([first, article('b'), duplicate, article('c'), article('b')]);
+
+  assert.deepEqual(
+    deduped.map((item) => item.id),
+    ['a', 'b', 'c'],
+  );
+  assert.equal(deduped[0], first);
+});
+
+test('mergePaginatedDisplayFeed drops duplicate ids when the same page is merged twice', () => {
+  const source = [article('a'), article('b'), article('c'), article('d')];
+  const prev = [article('a'), article('b')];
+  const newOnly = [article('c'), article('d')];
+
+  const once = mergePaginatedDisplayFeed(prev, newOnly, source, (items) => items);
+  const twice = mergePaginatedDisplayFeed(once, newOnly, source, (items) => items);
+
+  assert.equal(twice.length, 4);
+  assert.deepEqual(new Set(twice.map((item) => item.id)), new Set(['a', 'b', 'c', 'd']));
+});
 
 test('mergePaginatedDisplayFeed appends when new items are later in the source list', () => {
   const source = [article('a'), article('b'), article('c'), article('d')];

@@ -12,6 +12,7 @@ import {
   getLatestFeed,
   getLikedInterestBadgeItems,
   getPersonalizedFeed,
+  getSingleInterestForYouFeed,
   isMeaningfulInterestMatch,
   rankArticles,
 } from './recommendations';
@@ -240,6 +241,83 @@ test('getPersonalizedFeed matches bikes keyword to cycling stories without bike 
 
   assert.equal(feed.length, 1);
   assert.equal(feed[0]?.id, 'tdf-1');
+});
+
+test('getSingleInterestForYouFeed excludes gaming and non-cycling publisher articles for bikes', () => {
+  const kotakuGame = article('kotaku-control', 'Control Resonant Hands-On preview', {
+    topics: ['gaming', 'culture'],
+    source: 'Kotaku',
+  });
+  kotakuGame.excerpt = 'Early impressions of the new action game';
+  kotakuGame.body =
+    'Developers are recycling assets while the team develops new combat mechanics.';
+
+  const tentReview = article('road-tent', 'TentBox Lite', {
+    topics: ['sports'],
+    source: 'road.cc',
+    sportTags: ['cycling'],
+  });
+  tentReview.excerpt = 'A lightweight rooftop tent for car camping adventures';
+
+  const bikeReview = article('road-bike', 'Canyon Grail review', {
+    topics: ['sports'],
+    source: 'road.cc',
+    sportTags: ['cycling'],
+  });
+  bikeReview.excerpt = 'We test the latest gravel bike on mixed terrain';
+
+  const feed = getSingleInterestForYouFeed(
+    [kotakuGame, tentReview, bikeReview],
+    'keyword',
+    'bikes',
+  );
+
+  assert.equal(feed.length, 1);
+  assert.equal(feed[0]?.id, 'road-bike');
+});
+
+test('getSingleInterestForYouFeed separates cycling and mtb sport tag feeds', () => {
+  const roadStage = article('road-stage', 'Tour de France stage recap', {
+    topics: ['sports'],
+    sportTags: ['cycling'],
+  });
+  roadStage.excerpt = 'Peloton battles through the Alps';
+
+  const trailReview = article('trail-review', 'Best trail bikes for 2026', {
+    topics: ['sports'],
+    sportTags: ['mtb'],
+  });
+  trailReview.excerpt = 'Our favorite mountain bikes tested on singletrack';
+
+  const cyclingFeed = getSingleInterestForYouFeed(
+    [roadStage, trailReview],
+    'sportTag',
+    'cycling',
+  );
+  const mtbFeed = getSingleInterestForYouFeed([roadStage, trailReview], 'sportTag', 'mtb');
+
+  assert.deepEqual(cyclingFeed.map((item) => item.id), ['road-stage']);
+  assert.deepEqual(mtbFeed.map((item) => item.id), ['trail-review']);
+});
+
+test('getSingleInterestForYouFeed separates cycling and mtb keyword feeds', () => {
+  const roadStage = article('road-stage', 'Tour de France stage recap', {
+    topics: ['sports'],
+    sportTags: ['cycling'],
+  });
+  roadStage.excerpt = 'Peloton battles through the Alps';
+
+  const trailReview = article('trail-review', 'Best trail bikes for 2026', {
+    topics: ['sports'],
+    sportTags: ['mtb'],
+  });
+  trailReview.excerpt = 'Our favorite mountain bikes tested on singletrack';
+
+  const cyclingFeed = getSingleInterestForYouFeed([roadStage, trailReview], 'keyword', 'cycling');
+  const mtbFeed = getSingleInterestForYouFeed([roadStage, trailReview], 'keyword', 'mtb');
+
+  assert.deepEqual(cyclingFeed.map((item) => item.id), ['road-stage']);
+  assert.deepEqual(mtbFeed.map((item) => item.id), ['trail-review']);
 });
 
 test('getPersonalizedFeed returns articles matching sport tag interests', () => {

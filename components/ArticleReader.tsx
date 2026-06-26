@@ -4,7 +4,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  InteractionManager,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -25,6 +24,8 @@ import { useTheme } from '@/hooks/useTheme';
 import {
   fetchArticleReaderContent,
   getCachedReaderContent,
+  resolveReaderContentForArticle,
+  seedReaderContentFromArticle,
 } from '@/services/articleContent';
 import { ARTICLE_NO_IMAGE, isArticlePlaceholderImageUrl, resolveArticleImageUrl } from '@/constants/images';
 import { Article } from '@/types';
@@ -140,11 +141,11 @@ export function ArticleReader({ article }: ArticleReaderProps) {
   const { open: openOnPublisher, isOpening: isOpeningPublisher, canOpen: canOpenOnPublisher } =
     useOpenPublisherArticle(article.url);
   const [readerContent, setReaderContent] = useState<ArticleReaderContent | null>(
-    () => getCachedReaderContent(article.id) ?? null,
+    () => resolveReaderContentForArticle(article),
   );
   const [contentError, setContentError] = useState(false);
   const [isLoadingContent, setIsLoadingContent] = useState(
-    () => !getCachedReaderContent(article.id),
+    () => resolveReaderContentForArticle(article) == null,
   );
   const activeContentArticleIdRef = useRef(article.id);
   const recordedOpenRef = useRef<string | null>(null);
@@ -156,11 +157,16 @@ export function ArticleReader({ article }: ArticleReaderProps) {
   }, [article, recordArticleOpen]);
 
   useEffect(() => {
+    seedReaderContentFromArticle(article);
+  }, [article]);
+
+  useEffect(() => {
     let cancelled = false;
     const contentArticleId = article.id;
     activeContentArticleIdRef.current = contentArticleId;
 
-    const cached = getCachedReaderContent(contentArticleId);
+    const preview = resolveReaderContentForArticle(article);
+    const cached = getCachedReaderContent(contentArticleId) ?? preview;
     if (cached) {
       setReaderContent(cached);
       setContentError(false);
@@ -171,26 +177,22 @@ export function ArticleReader({ article }: ArticleReaderProps) {
       setReaderContent(null);
     }
 
-    const task = InteractionManager.runAfterInteractions(() => {
-      if (cancelled) return;
-      fetchArticleReaderContent(contentArticleId)
-        .then((content) => {
-          if (cancelled || activeContentArticleIdRef.current !== contentArticleId) return;
-          setReaderContent(content);
-        })
-        .catch(() => {
-          if (cancelled || activeContentArticleIdRef.current !== contentArticleId) return;
-          setContentError(true);
-        })
-        .finally(() => {
-          if (cancelled || activeContentArticleIdRef.current !== contentArticleId) return;
-          setIsLoadingContent(false);
-        });
-    });
+    fetchArticleReaderContent(contentArticleId)
+      .then((content) => {
+        if (cancelled || activeContentArticleIdRef.current !== contentArticleId) return;
+        setReaderContent(content);
+      })
+      .catch(() => {
+        if (cancelled || activeContentArticleIdRef.current !== contentArticleId) return;
+        setContentError(true);
+      })
+      .finally(() => {
+        if (cancelled || activeContentArticleIdRef.current !== contentArticleId) return;
+        setIsLoadingContent(false);
+      });
 
     return () => {
       cancelled = true;
-      task.cancel();
     };
   }, [article.id]);
 

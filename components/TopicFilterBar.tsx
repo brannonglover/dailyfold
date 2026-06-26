@@ -1,5 +1,13 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useRef } from 'react';
+import {
+  LayoutChangeEvent,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { CURIOSITY_LABELS, CURIOSITY_ORDER } from '@/constants/curiosities';
 import { useTheme } from '@/hooks/useTheme';
@@ -11,58 +19,97 @@ interface TopicFilterBarProps {
   onToggleTopic: (topic: Topic) => void;
 }
 
+type ChipKey = 'all' | Topic;
+
 export function TopicFilterBar({ enabledTopics, onSelectAll, onToggleTopic }: TopicFilterBarProps) {
   const { colors } = useTheme();
   const allSelected = enabledTopics.length === 0;
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollWidthRef = useRef(0);
+  const chipLayoutsRef = useRef<Partial<Record<ChipKey, { x: number; width: number }>>>({});
+
+  const centerChip = useCallback((key: ChipKey) => {
+    const layout = chipLayoutsRef.current[key];
+    const viewportWidth = scrollWidthRef.current;
+    if (!layout || viewportWidth <= 0) return;
+
+    const x = layout.x + layout.width / 2 - viewportWidth / 2;
+    scrollRef.current?.scrollTo({ x: Math.max(0, x), animated: true });
+  }, []);
+
+  const recordChipLayout = useCallback((key: ChipKey, event: LayoutChangeEvent) => {
+    const { x, width } = event.nativeEvent.layout;
+    chipLayoutsRef.current[key] = { x, width };
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    centerChip('all');
+    onSelectAll();
+  }, [centerChip, onSelectAll]);
+
+  const handleToggleTopic = useCallback(
+    (topic: Topic) => {
+      centerChip(topic);
+      onToggleTopic(topic);
+    },
+    [centerChip, onToggleTopic],
+  );
 
   return (
     <View style={[styles.container, { borderBottomColor: colors.border }]}>
       <ScrollView
+        ref={scrollRef}
         horizontal
         showsHorizontalScrollIndicator={false}
+        onLayout={(event) => {
+          scrollWidthRef.current = event.nativeEvent.layout.width;
+        }}
         contentContainerStyle={styles.scrollContent}>
-        <Pressable
-          onPress={onSelectAll}
-          accessibilityRole="button"
-          accessibilityState={{ selected: allSelected }}
-          accessibilityLabel="Show all topics"
-          style={({ pressed }) => [
-            styles.chip,
-            {
-              backgroundColor: allSelected ? colors.accentMuted : colors.surface,
-              borderColor: allSelected ? colors.accent : colors.border,
-            },
-            pressed && { opacity: 0.7 },
-          ]}>
-          <Text
-            style={[styles.chipText, { color: allSelected ? colors.accent : colors.text }]}>
-            All
-          </Text>
-        </Pressable>
+        <View onLayout={(event) => recordChipLayout('all', event)}>
+          <Pressable
+            onPress={handleSelectAll}
+            accessibilityRole="button"
+            accessibilityState={{ selected: allSelected }}
+            accessibilityLabel="Show all topics"
+            style={({ pressed }) => [
+              styles.chip,
+              {
+                backgroundColor: allSelected ? colors.accentMuted : colors.surface,
+                borderColor: allSelected ? colors.accent : colors.border,
+              },
+              pressed && { opacity: 0.7 },
+            ]}>
+            <Text
+              style={[styles.chipText, { color: allSelected ? colors.accent : colors.text }]}>
+              All
+            </Text>
+          </Pressable>
+        </View>
 
         {CURIOSITY_ORDER.map((topic) => {
           const selected = !allSelected && enabledTopics.includes(topic);
           return (
-            <Pressable
-              key={topic}
-              onPress={() => onToggleTopic(topic)}
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              accessibilityLabel={`Filter by ${CURIOSITY_LABELS[topic]}`}
-              style={({ pressed }) => [
-                styles.chip,
-                {
-                  backgroundColor: selected ? colors.accentMuted : colors.surface,
-                  borderColor: selected ? colors.accent : colors.border,
-                },
-                pressed && { opacity: 0.7 },
-              ]}>
-              <Text
-                style={[styles.chipText, { color: selected ? colors.accent : colors.text }]}
-                numberOfLines={1}>
-                {CURIOSITY_LABELS[topic]}
-              </Text>
-            </Pressable>
+            <View key={topic} onLayout={(event) => recordChipLayout(topic, event)}>
+              <Pressable
+                onPress={() => handleToggleTopic(topic)}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`Filter by ${CURIOSITY_LABELS[topic]}`}
+                style={({ pressed }) => [
+                  styles.chip,
+                  {
+                    backgroundColor: selected ? colors.accentMuted : colors.surface,
+                    borderColor: selected ? colors.accent : colors.border,
+                  },
+                  pressed && { opacity: 0.7 },
+                ]}>
+                <Text
+                  style={[styles.chipText, { color: selected ? colors.accent : colors.text }]}
+                  numberOfLines={1}>
+                  {CURIOSITY_LABELS[topic]}
+                </Text>
+              </Pressable>
+            </View>
           );
         })}
       </ScrollView>

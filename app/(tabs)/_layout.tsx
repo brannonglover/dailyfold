@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 
-import { ArticlesProvider } from '@/contexts/ArticlesContext';
 import Colors from '@/constants/Colors';
 import { TAB_BAR_HEIGHT, TAB_BAR_PADDING_BOTTOM, TAB_BAR_PADDING_TOP } from '@/constants/Layout';
 import { WORLD_CUP_TAB_ENABLED } from '@/constants/worldCup';
@@ -9,12 +8,12 @@ export default function TabLayout() {
   const colors = Colors.dark;
 
   return (
-    <ArticlesProvider>
     <Tabs
       screenOptions={{
         headerShown: false,
         freezeOnBlur: true,
-        lazy: true,
+        // Keep all tabs mounted so switching tabs never remounts heavy feed trees.
+        lazy: false,
         tabBarActiveTintColor: colors.tabIconSelected,
         tabBarInactiveTintColor: colors.tabIconDefault,
         tabBarStyle: {
@@ -33,6 +32,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Latest',
+          lazy: false,
           tabBarIcon: ({ color }) => <Ionicons name="newspaper-outline" size={24} color={color} />,
         }}
       />
@@ -74,6 +74,5 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
-    </ArticlesProvider>
   );
 }

@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useMemo, useState } from 'react';
+import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -15,8 +16,11 @@ import { ArticleImage } from '@/components/ArticleImage';
 import { SPORT_TAG_LABELS } from '@/catalog/sports';
 import { CURIOSITY_LABELS } from '@/constants/curiosities';
 import { usePreferences } from '@/contexts/PreferencesContext';
+import { useArticles } from '@/hooks/useArticles';
 import { useTheme } from '@/hooks/useTheme';
+import { fetchArticleSearch } from '@/services/articles';
 import { Article, SportTag, Topic } from '@/types';
+import { prewarmForYouInterestFeedCache } from '@/utils/forYouInterestFeedCache';
 import {
   buildKeywordHeroImageByKeyword,
   buildTopicHeroImageByTopic,
@@ -37,10 +41,14 @@ const TILE_ASPECT = 1.15;
 function SelectedTopicTile({
   topic,
   imageUrl,
+  onOpen,
+  onPrewarm,
   onRemove,
 }: {
   topic: Topic;
   imageUrl?: string;
+  onOpen: () => void;
+  onPrewarm: () => void;
   onRemove: () => void;
 }) {
   const { colors } = useTheme();
@@ -48,7 +56,12 @@ function SelectedTopicTile({
 
   return (
     <View style={styles.tile}>
-      <View style={styles.tileImageWrap}>
+      <Pressable
+        onPressIn={onPrewarm}
+        onPress={onOpen}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${label} feed`}
+        style={({ pressed }) => [styles.tileImageWrap, pressed && styles.pressed]}>
         {imageUrl ? (
           <ArticleImage uri={imageUrl} style={styles.tileImage} recyclingKey={topic} compact />
         ) : (
@@ -65,7 +78,7 @@ function SelectedTopicTile({
         <Text style={styles.tileLabel} numberOfLines={2}>
           {label}
         </Text>
-      </View>
+      </Pressable>
       <Pressable
         onPress={onRemove}
         accessibilityRole="button"
@@ -81,11 +94,15 @@ function SelectedTopicTile({
 function SelectedInterestTile({
   label,
   imageUrl,
+  onOpen,
+  onPrewarm,
   onRemove,
   recyclingKey,
 }: {
   label: string;
   imageUrl?: string;
+  onOpen: () => void;
+  onPrewarm: () => void;
   onRemove: () => void;
   recyclingKey: string;
 }) {
@@ -93,7 +110,12 @@ function SelectedInterestTile({
 
   return (
     <View style={styles.tile}>
-      <View style={styles.tileImageWrap}>
+      <Pressable
+        onPressIn={onPrewarm}
+        onPress={onOpen}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${label} feed`}
+        style={({ pressed }) => [styles.tileImageWrap, pressed && styles.pressed]}>
         {imageUrl ? (
           <ArticleImage uri={imageUrl} style={styles.tileImage} recyclingKey={recyclingKey} compact />
         ) : (
@@ -110,7 +132,7 @@ function SelectedInterestTile({
         <Text style={styles.tileLabel} numberOfLines={2}>
           {label}
         </Text>
-      </View>
+      </Pressable>
       <Pressable
         onPress={onRemove}
         accessibilityRole="button"
@@ -137,11 +159,13 @@ function resultIconName(kind: ForYouSearchResult['kind']): keyof typeof Ionicons
 }
 
 export function ForYouTopicPicker({ articles }: ForYouTopicPickerProps) {
+  const router = useRouter();
   const { colors } = useTheme();
   const { width } = useWindowDimensions();
+  const { articles: allArticles, feedGeneration } = useArticles();
   const {
     preferences,
-    isLoading,
+    filterForYouFeedArticles,
     addForYouTopic,
     removeForYouTopic,
     addForYouKeyword,
@@ -150,6 +174,36 @@ export function ForYouTopicPicker({ articles }: ForYouTopicPickerProps) {
     removeForYouSportTag,
   } = usePreferences();
   const [query, setQuery] = useState('');
+  const [remoteSearchArticles, setRemoteSearchArticles] = useState<Article[]>([]);
+  const poolArticles = allArticles.length > 0 ? allArticles : articles;
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      setRemoteSearchArticles([]);
+      return;
+    }
+
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      void fetchArticleSearch(trimmed, { limit: 25 }).then((result) => {
+        if (!cancelled) setRemoteSearchArticles(result.articles);
+      });
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [query]);
+
+  const searchPool = useMemo(() => {
+    const byId = new Map<string, Article>();
+    for (const item of [...remoteSearchArticles, ...poolArticles]) {
+      byId.set(item.id, item);
+    }
+    return [...byId.values()];
+  }, [remoteSearchArticles, poolArticles]);
 
   const selectedTopics = preferences?.forYouTopics ?? [];
   const selectedKeywords = preferences?.forYouKeywords ?? [];
@@ -158,29 +212,29 @@ export function ForYouTopicPicker({ articles }: ForYouTopicPickerProps) {
 
   const searchResults = useMemo(() => {
     return searchForYouInterests(query, {
-      articles,
+      articles: searchPool,
       exclude: {
         topics: selectedTopics,
         keywords: selectedKeywords,
         sportTags: selectedSportTags,
       },
     });
-  }, [query, selectedTopics, selectedKeywords, selectedSportTags, articles]);
+  }, [query, selectedTopics, selectedKeywords, selectedSportTags, searchPool]);
 
   const topicHeroImages = useMemo(
-    () => buildTopicHeroImageByTopic(articles, selectedTopics),
-    [articles, selectedTopics],
+    () => buildTopicHeroImageByTopic(poolArticles, selectedTopics),
+    [poolArticles, selectedTopics],
   );
 
   const keywordHeroImages = useMemo(
-    () => buildKeywordHeroImageByKeyword(articles, selectedKeywords),
-    [articles, selectedKeywords],
+    () => buildKeywordHeroImageByKeyword(poolArticles, selectedKeywords),
+    [poolArticles, selectedKeywords],
   );
 
   const sportTagHeroImages = useMemo(() => {
     const images = new Map<SportTag, string>();
     for (const tag of selectedSportTags) {
-      for (const article of articles) {
+      for (const article of poolArticles) {
         if (!article.topics.includes('sports')) continue;
         const text = `${article.title} ${article.excerpt}`.toLowerCase();
         const label = SPORT_TAG_LABELS[tag].toLowerCase();
@@ -193,10 +247,42 @@ export function ForYouTopicPicker({ articles }: ForYouTopicPickerProps) {
       }
     }
     return images;
-  }, [articles, selectedSportTags]);
+  }, [poolArticles, selectedSportTags]);
 
   const hasSelection =
     selectedTopics.length > 0 || selectedKeywords.length > 0 || selectedSportTags.length > 0;
+
+  const openInterestFeed = useCallback(
+    (kind: 'topic' | 'keyword' | 'sportTag', value: string) => {
+      router.push({
+        pathname: '/for-you/[type]/[value]',
+        params: { type: kind, value },
+      });
+    },
+    [router],
+  );
+
+  const prewarmInterestFeed = useCallback(
+    (kind: 'topic' | 'keyword' | 'sportTag', value: string) => {
+      if (poolArticles.length === 0) return;
+      prewarmForYouInterestFeedCache(
+        poolArticles,
+        kind,
+        value,
+        filterForYouFeedArticles,
+        feedGeneration,
+      );
+    },
+    [poolArticles, feedGeneration, filterForYouFeedArticles],
+  );
+
+  const handleOpenInterest = useCallback(
+    (kind: 'topic' | 'keyword' | 'sportTag', value: string) => {
+      prewarmInterestFeed(kind, value);
+      openInterestFeed(kind, value);
+    },
+    [openInterestFeed, prewarmInterestFeed],
+  );
 
   const handleSelectResult = (result: ForYouSearchResult) => {
     if (result.kind === 'topic' && result.topic) {
@@ -214,13 +300,13 @@ export function ForYouTopicPicker({ articles }: ForYouTopicPickerProps) {
     setQuery('');
   };
 
-  if (isLoading || !preferences) return null;
+  if (!preferences) return null;
 
   return (
     <View style={[styles.container, { borderBottomColor: colors.border }]}>
       <Text style={[styles.heading, { color: colors.text }]}>Your interests</Text>
       <Text style={[styles.hint, { color: colors.textSecondary }]}>
-        Search for stories, keywords, or topics to personalize this feed.
+        Search for stories, keywords, or topics. Tap a tile to open its feed.
       </Text>
 
       <View
@@ -322,6 +408,8 @@ export function ForYouTopicPicker({ articles }: ForYouTopicPickerProps) {
               <SelectedTopicTile
                 topic={topic}
                 imageUrl={topicHeroImages.get(topic)}
+                onPrewarm={() => prewarmInterestFeed('topic', topic)}
+                onOpen={() => handleOpenInterest('topic', topic)}
                 onRemove={() => void removeForYouTopic(topic)}
               />
             </View>
@@ -332,6 +420,8 @@ export function ForYouTopicPicker({ articles }: ForYouTopicPickerProps) {
                 label={formatInterestLabel(keyword)}
                 imageUrl={keywordHeroImages.get(keyword)}
                 recyclingKey={keyword}
+                onPrewarm={() => prewarmInterestFeed('keyword', keyword)}
+                onOpen={() => handleOpenInterest('keyword', keyword)}
                 onRemove={() => void removeForYouKeyword(keyword)}
               />
             </View>
@@ -342,6 +432,8 @@ export function ForYouTopicPicker({ articles }: ForYouTopicPickerProps) {
                 label={SPORT_TAG_LABELS[tag]}
                 imageUrl={sportTagHeroImages.get(tag)}
                 recyclingKey={tag}
+                onPrewarm={() => prewarmInterestFeed('sportTag', tag)}
+                onOpen={() => handleOpenInterest('sportTag', tag)}
                 onRemove={() => void removeForYouSportTag(tag)}
               />
             </View>

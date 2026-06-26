@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { Article } from '@/types';
+import { markFeedScrollBeginDrag, resetFeedScrollState } from '@/utils/feedScrollState';
 import {
   createSourceMenuGestureState,
   handleSourceMenuPress,
@@ -53,7 +54,8 @@ test('openSourceMenu falls back to local opener without host', () => {
   assert.equal(localOpens, 1);
 });
 
-test('handleSourceMenuPressIn opens immediately', () => {
+test('handleSourceMenuPressIn does not open (scroll-safe tap path uses press)', () => {
+  resetFeedScrollState();
   const state = createSourceMenuGestureState();
   let opens = 0;
 
@@ -61,24 +63,12 @@ test('handleSourceMenuPressIn opens immediately', () => {
     opens += 1;
   });
 
-  assert.equal(opens, 1);
-  assert.equal(state.openedThisGesture, true);
+  assert.equal(opens, 0);
+  assert.equal(state.openedThisGesture, false);
 });
 
-test('handleSourceMenuPress skips when pressIn already opened', () => {
-  const state = createSourceMenuGestureState();
-  let opens = 0;
-  const open = () => {
-    opens += 1;
-  };
-
-  handleSourceMenuPressIn(state, open);
-  handleSourceMenuPress(state, open);
-
-  assert.equal(opens, 1);
-});
-
-test('handleSourceMenuPress opens when pressIn was cancelled', () => {
+test('handleSourceMenuPress opens on intentional tap when feed is idle', () => {
+  resetFeedScrollState();
   const state = createSourceMenuGestureState();
   let opens = 0;
 
@@ -87,11 +77,39 @@ test('handleSourceMenuPress opens when pressIn was cancelled', () => {
   });
 
   assert.equal(opens, 1);
+  assert.equal(state.openedThisGesture, true);
+});
+
+test('handleSourceMenuPress skips when already opened this gesture', () => {
+  resetFeedScrollState();
+  const state = createSourceMenuGestureState();
+  let opens = 0;
+  const open = () => {
+    opens += 1;
+  };
+
+  handleSourceMenuPress(state, open);
+  handleSourceMenuPress(state, open);
+
+  assert.equal(opens, 1);
+});
+
+test('handleSourceMenuPress respects feed scroll guards', () => {
+  resetFeedScrollState();
+  markFeedScrollBeginDrag();
+  const state = createSourceMenuGestureState();
+  let opens = 0;
+
+  handleSourceMenuPress(state, () => {
+    opens += 1;
+  });
+
+  assert.equal(opens, 0);
 });
 
 test('resetSourceMenuGesture clears press dedup state', () => {
   const state = createSourceMenuGestureState();
-  handleSourceMenuPressIn(state, () => {});
+  handleSourceMenuPress(state, () => {});
   resetSourceMenuGesture(state);
   assert.equal(state.openedThisGesture, false);
 });

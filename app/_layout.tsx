@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { ArticlesProvider } from '@/contexts/ArticlesContext';
 import { PreferencesProvider } from '@/contexts/PreferencesContext';
 import { AppThemeProvider } from '@/contexts/ThemeContext';
 import { useAppFonts } from '@/constants/Fonts';
@@ -69,7 +70,9 @@ export default function RootLayout() {
       <AppThemeProvider>
         <AuthProvider>
           <PreferencesProvider>
-            <RootLayoutNav />
+            <ArticlesProvider>
+              <RootLayoutNav />
+            </ArticlesProvider>
           </PreferencesProvider>
         </AuthProvider>
       </AppThemeProvider>
@@ -110,6 +113,16 @@ const RootLayoutNav = memo(function RootLayoutNav() {
               gestureEnabled: true,
               fullScreenGestureEnabled: false,
               animationMatchesGesture: true,
+              animation: 'slide_from_right',
+            }}
+          />
+          <Stack.Screen
+            name="for-you/[type]/[value]"
+            options={{
+              headerShown: true,
+              presentation: 'card',
+              gestureEnabled: true,
+              fullScreenGestureEnabled: false,
               animation: 'slide_from_right',
             }}
           />

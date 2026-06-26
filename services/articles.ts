@@ -120,6 +120,33 @@ function buildArticlesSearchParams(options?: FetchArticlesOptions): URLSearchPar
   return params;
 }
 
+export async function fetchArticleSearch(
+  query: string,
+  options?: { limit?: number },
+): Promise<FetchArticlesResult> {
+  const trimmed = query.trim();
+  if (!trimmed) return { articles: [] };
+
+  const params = new URLSearchParams();
+  params.set('q', trimmed);
+  params.set('limit', String(options?.limit ?? 25));
+
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(
+      `${API_URL}/api/articles/search?${params.toString()}`,
+      { headers: { Accept: 'application/json' } },
+    );
+  } catch {
+    return { articles: [] };
+  }
+
+  if (!response.ok) return { articles: [] };
+
+  const data = (await response.json()) as ArticlesResponse;
+  return { articles: withResolvedArticleFields(data.articles) };
+}
+
 export async function fetchArticles(options?: FetchArticlesOptions): Promise<FetchArticlesResult> {
   const params = buildArticlesSearchParams(options);
   const isInitialPage = !options?.cursor;

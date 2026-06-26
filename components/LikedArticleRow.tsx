@@ -31,9 +31,11 @@ export function LikedArticleRow({
   const router = useRouter();
 
   function openArticle() {
-    prefetchArticleReaderContent(article.id);
     rememberOpenArticle(article);
     router.push(`/article/${article.id}`);
+    queueMicrotask(() => {
+      prefetchArticleReaderContent(article.id, article);
+    });
   }
 
   async function handleLongPress() {

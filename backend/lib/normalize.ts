@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 
 import { inferSportTags } from '../../catalog/sports';
+import { generateArticleSearchTags } from '../../catalog/articleSearch';
 import { stripAndDecodeHtml } from '../../catalog/decodeHtmlText';
 
 import { detectRequiresSubscription } from './subscription';
@@ -431,6 +432,15 @@ export function normalizeFeedItem(
     feed,
   });
 
+  const searchTags = generateArticleSearchTags({
+    title,
+    excerpt: excerpt || title,
+    body,
+    topics,
+    sportTags,
+    categories: item.categories,
+  });
+
   return {
     article: {
       id: hashId(url),
@@ -442,6 +452,7 @@ export function normalizeFeedItem(
       imageUrl,
       topics,
       sportTags: sportTags.length > 0 ? sportTags : undefined,
+      searchTags: searchTags.length > 0 ? searchTags : undefined,
       readTimeMinutes: readTimeMinutes(body),
       publishedAt,
       url,

@@ -1,4 +1,5 @@
 import { Article } from '@/types';
+import { canOpenFeedOverlay } from '@/utils/feedScrollState';
 
 export type SourceMenuGestureState = {
   openedThisGesture: boolean;
@@ -40,18 +41,20 @@ export function openSourceMenu(
   openLocal();
 }
 
-/** Try to open on finger-down; usually the fastest path when scroll is idle. */
-export function handleSourceMenuPressIn(state: SourceMenuGestureState, open: () => void): void {
-  open();
-  state.openedThisGesture = true;
-}
-
 /**
- * Fallback when pressIn was cancelled (common after scroll momentum).
- * Skips if pressIn already opened this gesture.
+ * Intentionally no-op: opening on pressIn fired before the feed scroll view could
+ * claim the gesture, so scroll attempts near the trigger opened the menu.
  */
-export function handleSourceMenuPress(state: SourceMenuGestureState, open: () => void): void {
+export function handleSourceMenuPressIn(_state: SourceMenuGestureState, _open: () => void): void {}
+
+/** Open on intentional tap after scroll guards pass. */
+export function handleSourceMenuPress(
+  state: SourceMenuGestureState,
+  open: () => void,
+  canOpen: () => boolean = canOpenFeedOverlay,
+): void {
   if (state.openedThisGesture) return;
+  if (!canOpen()) return;
   open();
   state.openedThisGesture = true;
 }

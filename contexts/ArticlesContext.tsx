@@ -14,6 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { takeWarmArticleCache } from '@/services/articleCache';
 import { fetchArticles, ARTICLE_PAGE_SIZE, FetchArticlesResult, resolveArticleDisplayFields } from '@/services/articles';
+import { registerFeedArticles } from '@/services/articleSession';
 import { loadFeedSnapshot, MAX_FEED_SNAPSHOT_ARTICLES, saveFeedSnapshot } from '@/services/feedPersistence';
 import { applyFeedFilters, applyTrendingNotificationFilters } from '@/services/feedFilters';
 import { getEnabledSourceIds, isAllSourcesEnabled } from '@/services/sourcePreferences';
@@ -153,6 +154,10 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
 
   articlesRef.current = articles;
   pendingArticlesRef.current = pendingArticles;
+
+  useEffect(() => {
+    if (articles.length > 0) registerFeedArticles(articles);
+  }, [articles]);
 
   const pendingCount = useMemo(() => {
     const actionable = pendingNotAlreadyInFeed(pendingArticles, articles);

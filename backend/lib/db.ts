@@ -2,6 +2,10 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'fs';
 import path from 'path';
 
+import {
+  buildFtsMatchQuery,
+  generateArticleSearchTags,
+} from '../../catalog/articleSearch';
 import { inferSportTags, type SportTag } from '../../catalog/sports';
 import { repairBrokenGuardianImageUrl } from '../../catalog/guardianImageUrl';
 
@@ -92,6 +96,74 @@ function migrate(database: Database.Database) {
       `ALTER TABLE articles ADD COLUMN requires_subscription INTEGER NOT NULL DEFAULT 0`,
     );
   }
+  if (!columns.some((column) => column.name === 'search_tags')) {
+    database.exec(`ALTER TABLE articles ADD COLUMN search_tags TEXT NOT NULL DEFAULT '[]'`);
+  }
+
+  database.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
+      article_id UNINDEXED,
+      title,
+      excerpt,
+      body,
+      search_tags,
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
+  `);
+
+  ensureArticleFtsIndex(database);
+}
+
+function ensureArticleFtsIndex(database: Database.Database): void {
+  const articleCount = (
+    database.prepare(`SELECT COUNT(*) as count FROM articles`).get() as { count: number }
+  ).count;
+  const ftsCount = (
+    database.prepare(`SELECT COUNT(*) as count FROM articles_fts`).get() as { count: number }
+  ).count;
+
+  if (articleCount === 0 || ftsCount >= articleCount) return;
+  rebuildArticleFtsIndex(database);
+}
+
+function rebuildArticleFtsIndex(database: Database.Database): void {
+  database.exec(`DELETE FROM articles_fts`);
+  const rows = database.prepare(`SELECT * FROM articles`).all() as ArticleRow[];
+  const insert = database.prepare(
+    `INSERT INTO articles_fts (article_id, title, excerpt, body, search_tags) VALUES (?, ?, ?, ?, ?)`,
+  );
+  for (const row of rows) {
+    const searchTags = parseStoredSearchTags(row.search_tags);
+    insert.run(row.id, row.title, row.excerpt, row.body, searchTags.join(' '));
+  }
+}
+
+function parseStoredSearchTags(raw: string | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function syncArticleFts(
+  database: Database.Database,
+  articleId: string,
+  title: string,
+  excerpt: string,
+  body: string,
+  searchTags: string[],
+): void {
+  database.prepare(`DELETE FROM articles_fts WHERE article_id = ?`).run(articleId);
+  database
+    .prepare(
+      `INSERT INTO articles_fts (article_id, title, excerpt, body, search_tags) VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(articleId, title, excerpt, body, searchTags.join(' '));
 }
 
 export interface CachedReaderContent {
@@ -139,6 +211,7 @@ interface ArticleRow {
   image_url: string;
   topics: string;
   sport_tags?: string;
+  search_tags?: string;
   requires_subscription?: number;
   read_time_minutes: number;
   published_at: string;
@@ -154,6 +227,8 @@ function rowToArticle(row: ArticleRow): Article {
     sportTags = inferSportTags(`${row.title} ${row.excerpt}`, storedTags);
   }
 
+  const searchTags = parseStoredSearchTags(row.search_tags);
+
   return {
     id: row.id,
     title: row.title,
@@ -163,11 +238,25 @@ function rowToArticle(row: ArticleRow): Article {
     imageUrl: repairBrokenGuardianImageUrl(row.image_url),
     topics,
     sportTags: sportTags.length > 0 ? sportTags : undefined,
+    searchTags: searchTags.length > 0 ? searchTags : undefined,
     readTimeMinutes: row.read_time_minutes,
     publishedAt: row.published_at,
     url: row.url,
     requiresSubscription: row.requires_subscription === 1 ? true : undefined,
   };
+}
+
+function resolveArticleSearchTags(article: Article): string[] {
+  if (article.searchTags && article.searchTags.length > 0) {
+    return [...article.searchTags];
+  }
+  return generateArticleSearchTags({
+    title: article.title,
+    excerpt: article.excerpt,
+    body: article.body,
+    topics: article.topics,
+    sportTags: article.sportTags,
+  });
 }
 
 export function upsertArticle(
@@ -181,13 +270,17 @@ export function upsertArticle(
 
   const feedPublishedAt = options?.feedPublishedAt ?? null;
 
+  const searchTags = resolveArticleSearchTags(article);
+  const articleWithTags =
+    searchTags.length > 0 ? { ...article, searchTags } : article;
+
   database
     .prepare(
       `INSERT INTO articles (
-        id, title, excerpt, body, source, image_url, topics, sport_tags,
+        id, title, excerpt, body, source, image_url, topics, sport_tags, search_tags,
         requires_subscription, read_time_minutes, published_at, url, ingested_at
       ) VALUES (
-        @id, @title, @excerpt, @body, @source, @image_url, @topics, @sport_tags,
+        @id, @title, @excerpt, @body, @source, @image_url, @topics, @sport_tags, @search_tags,
         @requires_subscription, @read_time_minutes,
         COALESCE(@feed_published_at, datetime('now')), @url, datetime('now')
       )
@@ -199,25 +292,36 @@ export function upsertArticle(
         image_url = excluded.image_url,
         topics = excluded.topics,
         sport_tags = excluded.sport_tags,
+        search_tags = excluded.search_tags,
         requires_subscription = excluded.requires_subscription,
         read_time_minutes = excluded.read_time_minutes,
         published_at = COALESCE(@feed_published_at, articles.published_at),
         ingested_at = datetime('now')`,
     )
     .run({
-      id: article.id,
-      title: article.title,
-      excerpt: article.excerpt,
-      body: article.body,
-      source: article.source,
-      image_url: article.imageUrl,
-      topics: JSON.stringify(article.topics),
-      sport_tags: JSON.stringify(article.sportTags ?? []),
-      requires_subscription: article.requiresSubscription ? 1 : 0,
-      read_time_minutes: article.readTimeMinutes,
+      id: articleWithTags.id,
+      title: articleWithTags.title,
+      excerpt: articleWithTags.excerpt,
+      body: articleWithTags.body,
+      source: articleWithTags.source,
+      image_url: articleWithTags.imageUrl,
+      topics: JSON.stringify(articleWithTags.topics),
+      sport_tags: JSON.stringify(articleWithTags.sportTags ?? []),
+      search_tags: JSON.stringify(searchTags),
+      requires_subscription: articleWithTags.requiresSubscription ? 1 : 0,
+      read_time_minutes: articleWithTags.readTimeMinutes,
       feed_published_at: feedPublishedAt,
-      url: article.url,
+      url: articleWithTags.url,
     });
+
+  syncArticleFts(
+    database,
+    articleWithTags.id,
+    articleWithTags.title,
+    articleWithTags.excerpt,
+    articleWithTags.body,
+    searchTags,
+  );
 
   return existing ? 'updated' : 'inserted';
 }
@@ -246,6 +350,30 @@ function decodeArticleCursor(cursor: string): { publishedAt: string; id: string 
   const id = cursor.slice(separator + 1);
   if (!publishedAt || !id) return null;
   return { publishedAt, id };
+}
+
+export interface SearchArticlesOptions {
+  limit?: number;
+}
+
+export function searchArticles(query: string, options?: SearchArticlesOptions): Article[] {
+  const database = getDb();
+  const ftsQuery = buildFtsMatchQuery(query);
+  if (!ftsQuery) return [];
+
+  const limit = Math.min(Math.max(1, options?.limit ?? 25), 50);
+  const rows = database
+    .prepare(
+      `SELECT a.*
+       FROM articles a
+       INNER JOIN articles_fts fts ON a.id = fts.article_id
+       WHERE articles_fts MATCH ?
+       ORDER BY bm25(articles_fts), a.published_at DESC
+       LIMIT ?`,
+    )
+    .all(ftsQuery, limit) as ArticleRow[];
+
+  return rows.map(rowToArticle);
 }
 
 export function listArticles(options?: ListArticlesOptions): ListArticlesResult {

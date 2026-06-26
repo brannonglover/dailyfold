@@ -1,6 +1,7 @@
 import { API_URL } from '@/constants/api';
+import { Article } from '@/types';
 import { ArticleReaderBlock, ArticleReaderContent } from '@/types/articleContent';
-import { isUsableReaderParagraphText, sanitizeReaderBlocks } from '@/utils/articleParagraphs';
+import { feedBlocksFromArticle, isUsableReaderParagraphText, resolveReaderContentForArticle as buildReaderContentForArticle, sanitizeReaderBlocks } from '@/utils/articleParagraphs';
 
 interface ContentResponse {
   content: ArticleReaderContent & { paragraphs?: string[] };
@@ -46,12 +47,35 @@ const inFlightFetches = new Map<string, Promise<ArticleReaderContent>>();
 
 export function getCachedReaderContent(articleId: string): ArticleReaderContent | undefined {
   const cached = readerContentCache.get(articleId);
-  if (cached?.source === 'extracted' && cached.blocks.length > 0) return cached;
-  return undefined;
+  if (!cached || cached.blocks.length === 0) return undefined;
+  return cached;
+}
+
+/** Cached extracted/feed content, or an instant preview from the feed row. */
+export function resolveReaderContentForArticle(article: Article): ArticleReaderContent | null {
+  return buildReaderContentForArticle(article, getCachedReaderContent);
+}
+
+/** Seed reader cache from feed excerpt/body so the screen paints before content API returns. */
+export function seedReaderContentFromArticle(article: Article): void {
+  const existing = readerContentCache.get(article.id);
+  if (existing?.source === 'extracted' && existing.blocks.length > 0) return;
+
+  const blocks = feedBlocksFromArticle(article);
+  if (blocks.length === 0) return;
+
+  readerContentCache.set(article.id, {
+    title: article.title,
+    blocks,
+    readTimeMinutes: existing?.readTimeMinutes ?? 0,
+    source: 'feed',
+  });
 }
 
 /** Start loading reader content before navigation so the article screen can render immediately. */
-export function prefetchArticleReaderContent(articleId: string): void {
+export function prefetchArticleReaderContent(articleId: string, article?: Article): void {
+  if (article) seedReaderContentFromArticle(article);
+
   const cached = readerContentCache.get(articleId);
   if ((cached?.source === 'extracted' && cached.blocks.length > 0) || inFlightFetches.has(articleId)) {
     return;

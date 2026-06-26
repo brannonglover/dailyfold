@@ -36,6 +36,8 @@ export interface Article {
   imageUrl: string;
   topics: Topic[];
   sportTags?: SportTag[];
+  /** Searchable tags generated at ingest (RSS categories, keywords, sport/topic labels). */
+  searchTags?: string[];
   readTimeMinutes: number;
   publishedAt: string;
   url: string;

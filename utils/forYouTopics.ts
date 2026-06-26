@@ -1,4 +1,17 @@
 import { inferSportTags, SPORT_TAG_LABELS, SPORT_TAG_ORDER } from '@/catalog/sports';
+import {
+  BIKE_QUERY_PATTERN,
+  BIKE_SEARCH_TERMS,
+  CYCLING_SEARCH_TERMS,
+  MTB_SEARCH_TERMS,
+  articleSearchTags,
+  expandBikeSearchTerms,
+  expandSearchQueryTerms,
+  rankArticlesForSearchQuery,
+  resolveBikeDiscipline,
+  textMatchesSearchTerms,
+  type BikeDiscipline,
+} from '@/catalog/articleSearch';
 import { CURIOSITY_LABELS, CURIOSITY_ORDER } from '@/constants/curiosities';
 import { articleInterestKeywords } from '@/services/interestSignals';
 import { articleSportTags } from '@/services/sportPreferences';
@@ -26,11 +39,9 @@ export function articleMatchesForYouTopics(article: Article, topics: Topic[]): b
   return article.topics.some((topic) => selected.has(topic));
 }
 
-function keywordMatchesInText(keyword: string, text: string): boolean {
-  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (new RegExp(`\\b${escaped}\\b`, 'i').test(text)) return true;
-  if (keyword.length >= 4 && text.toLowerCase().includes(keyword.toLowerCase())) return true;
-  return false;
+function articleSearchText(article: Article): string {
+  const tags = articleSearchTags(article).join(' ');
+  return `${article.title} ${article.excerpt} ${article.body ?? ''} ${tags}`.toLowerCase();
 }
 
 const BIKE_FOR_YOU_SPORT_TAGS: SportTag[] = ['cycling', 'mtb'];
@@ -44,11 +55,9 @@ export function isBikeRelatedInterest(term: string): boolean {
 /** Expand a saved For You keyword to equivalent match terms (synonyms, phrases). */
 export function expandForYouKeywordMatchTerms(keyword: string): string[] {
   const normalized = normalizeForYouKeyword(keyword);
-  const terms = new Set<string>([normalized]);
-  if (isBikeRelatedInterest(normalized)) {
-    for (const term of BIKE_SEARCH_TERMS) terms.add(term);
-  }
-  return [...terms];
+  const discipline = resolveBikeDiscipline(normalized);
+  if (discipline) return expandBikeSearchTerms(normalized);
+  return [normalized];
 }
 
 function textMatchesHashtagTerms(text: string, terms: string[]): boolean {
@@ -62,25 +71,96 @@ function textMatchesHashtagTerms(text: string, terms: string[]): boolean {
   return false;
 }
 
+function keywordMatchesInText(keyword: string, text: string): boolean {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (new RegExp(`\\b${escaped}\\b`, 'i').test(text)) return true;
+  if (keyword.length >= 4 && text.toLowerCase().includes(keyword.toLowerCase())) return true;
+  return false;
+}
+
 function textMatchesInterestTerms(terms: string[], text: string): boolean {
+  return textMatchesSearchTerms(terms, text);
+}
+
+function keywordMatchesInTextStrict(keyword: string, text: string): boolean {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`, 'i').test(text);
+}
+
+/** Bike feed matching — word boundaries only (avoids velo↔develop, cycling↔recycling). */
+function textMatchesBikeTermsStrict(terms: string[], text: string): boolean {
   const lower = text.toLowerCase();
-  if (terms.some((term) => keywordMatchesInText(term, lower))) return true;
+  if (terms.some((term) => keywordMatchesInTextStrict(term, lower))) return true;
   if (textMatchesHashtagTerms(lower, terms)) return true;
   return false;
 }
 
+function confirmedBikeDisciplines(article: Article): Set<BikeDiscipline> {
+  const headText = `${article.title} ${article.excerpt}`;
+  const disciplines = new Set<BikeDiscipline>();
+  for (const tag of contentConfirmedBikeSportTags(article)) {
+    disciplines.add(tag);
+  }
+  for (const tag of inferSportTags(headText, []).filter((entry) => BIKE_FOR_YOU_SPORT_TAGS.includes(entry))) {
+    disciplines.add(tag);
+  }
+  return disciplines;
+}
+
+function articleConfirmsBikeDiscipline(article: Article, discipline: Exclude<BikeDiscipline, 'generic'>): boolean {
+  return confirmedBikeDisciplines(article).has(discipline);
+}
+
+function articleConflictsWithBikeDiscipline(
+  article: Article,
+  discipline: Exclude<BikeDiscipline, 'generic'>,
+): boolean {
+  const confirmed = confirmedBikeDisciplines(article);
+  const other = discipline === 'cycling' ? 'mtb' : 'cycling';
+  return confirmed.has(other) && !confirmed.has(discipline);
+}
+
+/** Cycling/mtb tags inferred from title+excerpt only — no publisher source defaults. */
+function contentConfirmedBikeSportTags(article: Article): SportTag[] {
+  if (!article.topics.includes('sports')) return [];
+  const headText = `${article.title} ${article.excerpt}`;
+  return inferSportTags(headText, []).filter((tag) => BIKE_FOR_YOU_SPORT_TAGS.includes(tag));
+}
+
+function articleMatchesBikeForYouKeyword(article: Article, keyword: string): boolean {
+  const headText = `${article.title} ${article.excerpt}`;
+  const discipline = resolveBikeDiscipline(keyword);
+  const terms = expandForYouKeywordMatchTerms(keyword);
+  const articleKeywords = new Set(articleInterestKeywords(article));
+
+  if (discipline === 'cycling' || discipline === 'mtb') {
+    if (articleConflictsWithBikeDiscipline(article, discipline)) return false;
+  }
+
+  if (terms.some((term) => articleKeywords.has(term))) return true;
+  if (textMatchesBikeTermsStrict(terms, headText)) return true;
+
+  if (discipline === 'cycling' || discipline === 'mtb') {
+    return articleConfirmsBikeDiscipline(article, discipline);
+  }
+
+  return contentConfirmedBikeSportTags(article).length > 0;
+}
+
 export function articleMatchesForYouKeywords(article: Article, keywords: string[]): boolean {
   if (keywords.length === 0) return false;
-  const text = `${article.title} ${article.excerpt} ${article.body ?? ''}`;
-  const articleKeywords = new Set(articleInterestKeywords(article));
   return keywords.some((keyword) => {
+    if (isBikeRelatedInterest(keyword)) {
+      return articleMatchesBikeForYouKeyword(article, keyword);
+    }
+    const text = articleSearchText(article);
+    const articleKeywords = new Set([
+      ...articleInterestKeywords(article),
+      ...articleSearchTags(article),
+    ]);
     const terms = expandForYouKeywordMatchTerms(keyword);
     if (terms.some((term) => articleKeywords.has(term))) return true;
     if (textMatchesInterestTerms(terms, text)) return true;
-    if (isBikeRelatedInterest(keyword)) {
-      const tags = articleSportTags(article);
-      if (tags.some((tag) => BIKE_FOR_YOU_SPORT_TAGS.includes(tag))) return true;
-    }
     return false;
   });
 }
@@ -152,29 +232,13 @@ const TOPIC_SEARCH_TERMS: Partial<Record<Topic, readonly string[]>> = {
 };
 
 /** Bike-related queries should surface content matches, not collapse to Sports. */
-const BIKE_SEARCH_TERMS = [
-  'bike',
-  'bikes',
-  'bicycle',
-  'bicycles',
-  'biking',
-  'cycling',
-  'cyclist',
-  'cyclists',
-  'mtb',
-  'mountain bike',
-  'mountain bikes',
-  'mountain biking',
-  'road bike',
-  'gravel bike',
-  'bicycle parts',
-  'bike industry',
-  'bikepacking',
-  'velo',
-] as const;
-
-const BIKE_QUERY_PATTERN =
-  /\b(bike?s?|bicycles?|biking|cycling|cyclists?|mtb|mountain bikes?|road bikes?|gravel bikes?|bikepacking|velo)\b/i;
+export {
+  BIKE_QUERY_PATTERN,
+  BIKE_SEARCH_TERMS,
+  CYCLING_SEARCH_TERMS,
+  MTB_SEARCH_TERMS,
+  resolveBikeDiscipline,
+} from '@/catalog/articleSearch';
 
 export interface SearchTopicsOptions {
   /** When provided, topics from matching article titles/excerpts are included. */
@@ -213,30 +277,15 @@ function queryMatchesSearchTerm(query: string, term: string): boolean {
 }
 
 function expandSearchTerms(query: string): string[] {
-  const normalized = query.trim().toLowerCase();
-  const terms = new Set<string>([normalized]);
-  if (BIKE_QUERY_PATTERN.test(normalized)) {
-    for (const term of BIKE_SEARCH_TERMS) terms.add(term);
-  }
-  return [...terms];
+  return expandSearchQueryTerms(query);
 }
 
 function articleTextMatchesQuery(article: Article, terms: string[]): boolean {
-  const text = `${article.title} ${article.excerpt}`.toLowerCase();
-  return terms.some((term) => keywordMatchesInText(term, text) || text.includes(term));
+  return textMatchesSearchTerms(terms, articleSearchText(article));
 }
 
 function searchArticlesByQuery(articles: Article[], query: string, limit: number): Article[] {
-  const terms = expandSearchTerms(query);
-  const matches: Article[] = [];
-  for (const article of articles) {
-    if (!articleTextMatchesQuery(article, terms)) continue;
-    matches.push(article);
-    if (matches.length >= limit) break;
-  }
-  return matches.sort(
-    (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime(),
-  );
+  return rankArticlesForSearchQuery(articles, query, { limit });
 }
 
 function isBikeRelatedQuery(query: string): boolean {
@@ -317,10 +366,15 @@ function collectKeywordSuggestions(
   }
 
   for (const article of matchingArticles) {
-    const text = `${article.title} ${article.excerpt}`.toLowerCase();
+    const text = articleSearchText(article);
     for (const keyword of articleInterestKeywords(article)) {
       if (terms.some((term) => keywordMatchesInText(keyword, text) || keyword.includes(term))) {
         add(keyword);
+      }
+    }
+    for (const tag of articleSearchTags(article)) {
+      if (terms.some((term) => keywordMatchesInText(tag, text) || tag.includes(term))) {
+        add(tag);
       }
     }
     for (const term of terms) {
@@ -331,9 +385,14 @@ function collectKeywordSuggestions(
   }
 
   if (isBikeRelatedQuery(query)) {
-    for (const term of ['bikes', 'cycling', 'mountain bike', 'bicycle']) {
-      add(term);
-    }
+    const discipline = resolveBikeDiscipline(query);
+    const suggestions =
+      discipline === 'cycling'
+        ? ['cycling', 'road cycling', 'gravel bike']
+        : discipline === 'mtb'
+          ? ['mtb', 'mountain bike', 'trail riding']
+          : ['bikes', 'cycling', 'mountain bike', 'bicycle'];
+    for (const term of suggestions) add(term);
   }
 
   return results;
@@ -353,15 +412,16 @@ function collectSportTagSuggestions(query: string, matchingArticles: Article[]):
   }
 
   for (const article of matchingArticles) {
-    const text = `${article.title} ${article.excerpt} ${article.body ?? ''}`;
+    const text = articleSearchText(article);
     for (const tag of inferSportTags(text, article.sportTags ?? [])) {
       if (tag === 'cycling' || tag === 'mtb') add(tag);
     }
   }
 
   if (isBikeRelatedQuery(query)) {
-    add('cycling');
-    if (/\b(mountain|mtb|trail|enduro)\b/i.test(query)) add('mtb');
+    const discipline = resolveBikeDiscipline(query);
+    if (discipline === 'cycling' || discipline === 'generic') add('cycling');
+    if (discipline === 'mtb' || discipline === 'generic') add('mtb');
   }
 
   return SPORT_TAG_ORDER.filter((tag) => seen.has(tag));
@@ -369,8 +429,11 @@ function collectSportTagSuggestions(query: string, matchingArticles: Article[]):
 
 function keywordsFromArticleForQuery(article: Article, query: string): string[] {
   const terms = expandSearchTerms(query);
-  const fromArticle = articleInterestKeywords(article).filter((keyword) => {
-    const text = `${article.title} ${article.excerpt}`.toLowerCase();
+  const fromArticle = [
+    ...articleInterestKeywords(article),
+    ...articleSearchTags(article),
+  ].filter((keyword) => {
+    const text = articleSearchText(article);
     return terms.some((term) => keywordMatchesInText(keyword, text) || keyword.includes(term));
   });
   if (fromArticle.length > 0) return fromArticle.slice(0, 3);
@@ -459,6 +522,12 @@ export function searchForYouInterests(
 }
 
 export { keywordsFromArticleForQuery };
+
+export {
+  articleMatchesSearchQuery,
+  rankArticlesForSearchQuery,
+  scoreArticleForSearchQuery,
+} from '@/catalog/articleSearch';
 
 function publishedAtMs(article: Article): number {
   return new Date(article.publishedAt).getTime();

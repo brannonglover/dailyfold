@@ -1,7 +1,7 @@
 import { filterGuardianLiveBlogArtifacts } from '@/catalog/guardianLiveBlogSidebar';
 import { articleImageUrlsMatch } from '@/constants/images';
 import { Article } from '@/types';
-import { ArticleReaderBlock } from '@/types/articleContent';
+import { ArticleReaderBlock, ArticleReaderContent } from '@/types/articleContent';
 import { hasRealHeroImage } from '@/utils/articleStoryMatch';
 
 const PLACEHOLDER_PARAGRAPH_TEXT = new Set(['null', 'undefined']);
@@ -109,6 +109,25 @@ export interface ReaderBlockLayout {
   /** Text for the feed preview callout; null when body should stand alone. */
   feedLede: string | null;
   bodyBlocks: ArticleReaderBlock[];
+}
+
+/** Instant reader preview from cached extracted content or feed excerpt/body. */
+export function resolveReaderContentForArticle(
+  article: Article,
+  getCached?: (articleId: string) => ArticleReaderContent | undefined,
+): ArticleReaderContent | null {
+  const cached = getCached?.(article.id);
+  if (cached?.blocks.length) return cached;
+
+  const blocks = feedBlocksFromArticle(article);
+  if (blocks.length === 0) return null;
+
+  return {
+    title: article.title,
+    blocks,
+    readTimeMinutes: article.readTimeMinutes ?? 0,
+    source: 'feed',
+  };
 }
 
 /** Splits feed lede vs article body and dedupes standfirst/excerpt overlap after extraction. */

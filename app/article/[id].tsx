@@ -1,12 +1,13 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, InteractionManager, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { ArticleReader } from '@/components/ArticleReader';
 import { useTheme } from '@/hooks/useTheme';
-import { getRememberedArticle, rememberOpenArticle } from '@/services/articleSession';
+import { lookupArticleById, rememberOpenArticle } from '@/services/articleSession';
 import { patchFeedArticle } from '@/services/articleFeedPatch';
 import { fetchArticleById } from '@/services/articles';
+import { seedReaderContentFromArticle } from '@/services/articleContent';
 import { Article } from '@/types';
 import { isValidArticleRouteId } from '@/utils/notificationArticleLink';
 import { resolveDisplayArticle } from '@/utils/resolveDisplayArticle';
@@ -22,12 +23,11 @@ export default function ArticleScreen() {
   const { colors } = useTheme();
   const [article, setArticle] = useState<Article | undefined>(() => {
     if (!articleId) return undefined;
-    return getRememberedArticle(articleId);
+    return lookupArticleById(articleId);
   });
   const [isLoading, setIsLoading] = useState(() => !article);
 
-  const displayArticle = resolveDisplayArticle(articleId, article, getRememberedArticle);
-  const routeArticlePending = Boolean(articleId && !displayArticle);
+  const displayArticle = resolveDisplayArticle(articleId, article, lookupArticleById);
 
   useEffect(() => {
     if (!articleId) {
@@ -35,64 +35,62 @@ export default function ArticleScreen() {
       return;
     }
 
-    const remembered = getRememberedArticle(articleId);
-    if (remembered) {
-      setArticle(remembered);
+    const known = lookupArticleById(articleId);
+    if (known) {
+      seedReaderContentFromArticle(known);
+      setArticle(known);
       setIsLoading(false);
     } else {
       setIsLoading(true);
     }
 
     let cancelled = false;
-    const task = InteractionManager.runAfterInteractions(() => {
-      if (cancelled) return;
-      fetchArticleById(articleId)
-        .then((fetched) => {
-          if (cancelled) return;
-          if (!fetched) {
-            if (!remembered) setArticle(undefined);
-            return;
-          }
-          if (fetched.id !== articleId) return;
-          rememberOpenArticle(fetched);
-          patchFeedArticle(fetched);
-          setArticle(fetched);
-        })
-        .catch(() => {
-          if (!cancelled && !remembered) setArticle(undefined);
-        })
-        .finally(() => {
-          if (!cancelled) setIsLoading(false);
-        });
-    });
+    fetchArticleById(articleId)
+      .then((fetched) => {
+        if (cancelled) return;
+        if (!fetched) {
+          if (!known) setArticle(undefined);
+          return;
+        }
+        if (fetched.id !== articleId) return;
+        rememberOpenArticle(fetched);
+        seedReaderContentFromArticle(fetched);
+        patchFeedArticle(fetched);
+        setArticle(fetched);
+      })
+      .catch(() => {
+        if (!cancelled && !known) setArticle(undefined);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
 
     return () => {
       cancelled = true;
-      task.cancel();
     };
   }, [articleId]);
 
-  if (isLoading || routeArticlePending) {
-    return (
-      <>
-        <Stack.Screen
-          options={{
-            title: 'Loading…',
-            headerStyle: { backgroundColor: colors.background },
-            headerShadowVisible: false,
-            headerTintColor: colors.text,
-            headerBackTitle: 'Back',
-            contentStyle: { backgroundColor: colors.background },
-          }}
-        />
-        <View style={[styles.centered, { backgroundColor: colors.background }]}>
-          <ActivityIndicator color={colors.text} />
-        </View>
-      </>
-    );
-  }
-
   if (!displayArticle) {
+    if (isLoading) {
+      return (
+        <>
+          <Stack.Screen
+            options={{
+              title: 'Loading…',
+              headerStyle: { backgroundColor: colors.background },
+              headerShadowVisible: false,
+              headerTintColor: colors.text,
+              headerBackTitle: 'Back',
+              contentStyle: { backgroundColor: colors.background },
+            }}
+          />
+          <View style={[styles.centered, { backgroundColor: colors.background }]}>
+            <ActivityIndicator color={colors.text} />
+          </View>
+        </>
+      );
+    }
+
     return (
       <>
         <Stack.Screen options={{ title: 'Not found' }} />

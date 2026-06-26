@@ -52,6 +52,7 @@ import {
 } from '@/constants/Layout';
 import { useTheme } from '@/hooks/useTheme';
 import { prefetchArticleReaderContent } from '@/services/articleContent';
+import { registerFeedArticles } from '@/services/articleSession';
 import { Article } from '@/types';
 import {
   buildNewspaperFeaturedIds,
@@ -60,6 +61,11 @@ import {
 } from '@/utils/newspaperFeedRows';
 import { shouldAllowFeedLoadMore, shouldAutoTopUpFeed } from '@/utils/feedLoadMoreGate';
 import { isFeedInteractionLocked } from '@/utils/feedInteractionLock';
+import {
+  markFeedScrollBeginDrag,
+  markFeedScrollEnded,
+  reconcileFeedScrollAfterContentChange,
+} from '@/utils/feedScrollState';
 import { readLastFeedListHeight, rememberFeedListHeight } from '@/utils/feedListViewport';
 import { buildLoadMoreTriggerKey } from '@/utils/paginationRevision';
 
@@ -130,6 +136,8 @@ interface ArticleFeedProps {
   matchReasonsByArticleId?: Map<string, string[]>;
   /** Records feed curiosity when opening an article from Latest/For You. */
   onFeedClick?: (article: Article) => void;
+  /** When true, omit the in-content FeedHeader (e.g. stack nav already shows the title). */
+  hideFeedHeader?: boolean;
 }
 
 function FeedLoadMoreFooter() {
@@ -205,7 +213,6 @@ function areFeedCardItemPropsEqual(
     prev.isLast === next.isLast &&
     prev.showTopSeparator === next.showTopSeparator &&
     prev.endPullDistance === next.endPullDistance &&
-    prev.allowPress === next.allowPress &&
     prev.matchReasons === next.matchReasons &&
     prev.onFeedClick === next.onFeedClick
   );
@@ -217,7 +224,6 @@ type FeedCardItemProps = {
   isLast: boolean;
   showTopSeparator: boolean;
   endPullDistance: SharedValue<number>;
-  allowPress: () => boolean;
   matchReasons?: string[];
   onFeedClick?: (article: Article) => void;
 };
@@ -228,7 +234,6 @@ const FeedCardItem = memo(function FeedCardItem({
   isLast,
   showTopSeparator,
   endPullDistance,
-  allowPress,
   matchReasons,
   onFeedClick,
 }: FeedCardItemProps) {
@@ -248,7 +253,6 @@ const FeedCardItem = memo(function FeedCardItem({
         <ArticleCard
           article={article}
           height={height}
-          allowPress={allowPress}
           matchReasons={matchReasons}
           onFeedClick={onFeedClick}
         />
@@ -281,6 +285,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     layout = 'snap',
     matchReasonsByArticleId,
     onFeedClick,
+    hideFeedHeader = false,
   },
   ref,
 ) {
@@ -300,7 +305,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   const isAnimatingToTopShared = useSharedValue(false);
   const maxScrollOffset = useSharedValue(0);
   const endPullDistance = useSharedValue(0);
-  const feedScrollRef = useRef({ dragging: false, endedAt: 0 });
   const loadMoreTriggeredAtKeyRef = useRef('');
   const newspaperRowsCountRef = useRef(0);
   const newspaperLastVisibleRowRef = useRef(-1);
@@ -331,13 +335,8 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   const articlesRef = useRef(articles);
   articlesRef.current = articles;
 
-  const allowCardPress = useCallback(() => {
-    if (feedScrollRef.current.dragging) return false;
-    return Date.now() - feedScrollRef.current.endedAt > 200;
-  }, []);
-
   const onFeedScrollBeginDrag = useCallback(() => {
-    feedScrollRef.current.dragging = true;
+    markFeedScrollBeginDrag();
     userInitiatedScrollRef.current = true;
   }, []);
 
@@ -352,9 +351,8 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     [pendingCount, onDismissPending],
   );
 
-  const markFeedScrollEnded = useCallback(() => {
-    feedScrollRef.current.dragging = false;
-    feedScrollRef.current.endedAt = Date.now();
+  const onFeedScrollEnded = useCallback(() => {
+    markFeedScrollEnded();
   }, []);
 
   const onListLayout = useCallback((e: LayoutChangeEvent) => {
@@ -372,17 +370,25 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       }
 
       const prefetchIds = new Set<string>();
+      const visibleArticles: Article[] = [];
       for (const token of viewableItems) {
         const article = token.item as Article | undefined;
-        if (article?.id) prefetchIds.add(article.id);
+        if (article?.id) {
+          prefetchIds.add(article.id);
+          visibleArticles.push(article);
+        }
       }
       const leadIndex = viewableItems[0]?.index;
       if (leadIndex != null) {
         const next = articlesRef.current[leadIndex + 1];
         if (next?.id) prefetchIds.add(next.id);
       }
+      if (visibleArticles.length > 0) registerFeedArticles(visibleArticles);
       for (const id of prefetchIds) {
-        prefetchArticleReaderContent(id);
+        const article =
+          visibleArticles.find((row) => row.id === id) ??
+          articlesRef.current.find((row) => row.id === id);
+        prefetchArticleReaderContent(id, article);
       }
     },
   );
@@ -540,6 +546,10 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   }, [loadMoreTriggerKey]);
 
   useEffect(() => {
+    reconcileFeedScrollAfterContentChange();
+  }, [loadMoreTriggerKey, articleOrderKey]);
+
+  useEffect(() => {
     if (!onLoadMore || !canLoadMore || isLoadingMore) return;
     if (!shouldAutoTopUpFeed(articles.length)) return;
     requestLoadMore({ atFeedEnd: true });
@@ -566,6 +576,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       let maxIndex = -1;
       const prefetchIds = new Set<string>();
+      const visibleArticles: Article[] = [];
 
       for (const token of viewableItems) {
         if (token.index != null && token.index > maxIndex) {
@@ -574,10 +585,16 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         const row = token.item as NewspaperFeedRow | undefined;
         if (!row) continue;
         if (row.type === 'featured') {
-          if (row.article.id) prefetchIds.add(row.article.id);
+          if (row.article.id) {
+            prefetchIds.add(row.article.id);
+            visibleArticles.push(row.article);
+          }
         } else {
           for (const article of row.articles) {
-            if (article.id) prefetchIds.add(article.id);
+            if (article.id) {
+              prefetchIds.add(article.id);
+              visibleArticles.push(article);
+            }
           }
         }
       }
@@ -589,8 +606,10 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         requestLoadMoreRef.current({ atFeedEnd: true });
       }
 
+      if (visibleArticles.length > 0) registerFeedArticles(visibleArticles);
       for (const id of prefetchIds) {
-        prefetchArticleReaderContent(id);
+        const article = visibleArticles.find((row) => row.id === id);
+        prefetchArticleReaderContent(id, article);
       }
     },
   );
@@ -617,10 +636,10 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
   const onNewspaperScrollEnd = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      markFeedScrollEnded();
+      onFeedScrollEnded();
       maybeDismissPendingAfterScroll(event.nativeEvent.contentOffset.y);
     },
-    [markFeedScrollEnded, maybeDismissPendingAfterScroll],
+    [onFeedScrollEnded, maybeDismissPendingAfterScroll],
   );
 
   const onNewspaperEndReached = useCallback(() => {
@@ -658,7 +677,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         isLast={index === articlesCount - 1}
         showTopSeparator={index > 0}
         endPullDistance={endPullDistance}
-        allowPress={allowCardPress}
         matchReasons={matchReasonsByArticleId?.get(item.id)}
         onFeedClick={onFeedClick}
       />
@@ -667,7 +685,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       snapHeight,
       articlesCount,
       endPullDistance,
-      allowCardPress,
       matchReasonsByArticleId,
       onFeedClick,
     ],
@@ -683,7 +700,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
               article={row.article}
               height={NEWSPAPER_FEATURED_CARD_HEIGHT}
               variant="featured"
-              allowPress={allowCardPress}
               matchReasons={matchReasonsByArticleId?.get(row.article.id)}
               onFeedClick={onFeedClick}
             />
@@ -705,7 +721,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
                     article={article}
                     height={NEWSPAPER_COMPACT_CARD_HEIGHT}
                     variant="compact"
-                    allowPress={allowCardPress}
                     matchReasons={matchReasonsByArticleId?.get(article.id)}
                     onFeedClick={onFeedClick}
                   />
@@ -716,7 +731,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         </View>
       );
     },
-    [colors.feedDivider, allowCardPress, matchReasonsByArticleId, onFeedClick],
+    [colors.feedDivider, matchReasonsByArticleId, onFeedClick],
   );
 
   const pendingBannerOverlay = (
@@ -743,7 +758,9 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   if (articles.length === 0) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
+        {!hideFeedHeader ? (
+          <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
+        ) : null}
         <FeedStatusBanner error={error} notice={notice} />
         {headerExtra}
         <View style={styles.listWrap}>
@@ -761,12 +778,14 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             alwaysBounceVertical={!!refreshControl}
             scrollEventThrottle={16}
             onScrollBeginDrag={onFeedScrollBeginDrag}
-            onScrollEndDrag={(event) =>
-              maybeDismissPendingAfterScroll(event.nativeEvent.contentOffset.y)
-            }
-            onMomentumScrollEnd={(event) =>
-              maybeDismissPendingAfterScroll(event.nativeEvent.contentOffset.y)
-            }>
+            onScrollEndDrag={(event) => {
+              onFeedScrollEnded();
+              maybeDismissPendingAfterScroll(event.nativeEvent.contentOffset.y);
+            }}
+            onMomentumScrollEnd={(event) => {
+              onFeedScrollEnded();
+              maybeDismissPendingAfterScroll(event.nativeEvent.contentOffset.y);
+            }}>
             {isRefreshing ? (
               <FeedRefreshIndicator />
             ) : headerExtra ? (
@@ -799,7 +818,9 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
+        {!hideFeedHeader ? (
+          <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
+        ) : null}
         <FeedStatusBanner error={error} notice={notice} />
         {headerExtra}
         <View style={styles.listWrap} onLayout={onListLayout}>
@@ -819,7 +840,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
                     article={heroArticle}
                     height={heroHeight}
                     variant="hero"
-                    allowPress={allowCardPress}
                     matchReasons={matchReasonsByArticleId?.get(heroArticle.id)}
                     onFeedClick={onFeedClick}
                   />
@@ -855,7 +875,9 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
+      {!hideFeedHeader ? (
+        <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
+      ) : null}
       <FeedStatusBanner error={error} notice={notice} />
       {headerExtra}
       <View style={styles.listWrap} onLayout={onListLayout}>
@@ -885,8 +907,8 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             scrollEventThrottle={16}
             onScroll={scrollHandler}
             onScrollBeginDrag={onFeedScrollBeginDrag}
-            onScrollEndDrag={markFeedScrollEnded}
-            onMomentumScrollEnd={markFeedScrollEnded}
+            onScrollEndDrag={onFeedScrollEnded}
+            onMomentumScrollEnd={onFeedScrollEnded}
             onViewableItemsChanged={onViewableItemsChanged.current}
             viewabilityConfig={viewabilityConfig.current}
             getItemLayout={getSnapItemLayout}

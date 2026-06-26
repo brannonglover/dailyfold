@@ -175,6 +175,7 @@ function LatestScreenContent() {
   useEffect(() => {
     if (!isFocused || isLoading || isLoadingMore || !hasMore || !preferences) return;
     if (isFeedInteractionLocked()) return;
+    if (syncDisplayHandledRef.current) return;
 
     const upstream = filterFeedArticles(articles);
     if (!isDisplayFeedUnderstocked(displayArticles.length, upstream.length)) return;
@@ -264,6 +265,7 @@ function LatestScreenContent() {
     isFocused,
     () => {
       if (isFeedInteractionLocked()) return;
+      const handledSyncPagination = syncDisplayHandledRef.current;
       syncDisplayHandledRef.current = false;
       if (articles.length === 0) {
         const cached = readTabDisplayCache('latest');
@@ -345,7 +347,7 @@ function LatestScreenContent() {
           }
           setDisplayReady(true);
         });
-      } else if (articles.length > prevRawLengthRef.current) {
+      } else if (!handledSyncPagination && articles.length > prevRawLengthRef.current) {
         syncDisplayHandledRef.current = true;
         applyDisplay(() => {
           setDisplayArticles((prev) => {
@@ -359,7 +361,7 @@ function LatestScreenContent() {
 
       prevRawLengthRef.current = articles.length;
 
-      if (syncDisplayHandledRef.current) return;
+      if (handledSyncPagination || syncDisplayHandledRef.current) return;
 
       applyDisplay(() => {
         setDisplayArticles((prev) => {
@@ -484,7 +486,11 @@ function LatestScreenContent() {
   ]);
 
   const isBuildingFeed =
-    isFocused && !isLoading && articles.length > 0 && filtered.length === 0;
+    isFocused &&
+    !isLoading &&
+    articles.length > 0 &&
+    filtered.length === 0 &&
+    !hasShowableTabDisplayCache('latest');
 
   return (
     <ArticleFeedScreen

@@ -5,6 +5,7 @@ import {
   feedBlocksFromArticle,
   isUsableReaderParagraphText,
   resolveReaderBlockLayout,
+  resolveReaderContentForArticle,
 } from './articleParagraphs';
 import { Article } from '@/types';
 
@@ -320,4 +321,50 @@ run('resolveReaderBlockLayout strips Guardian live-blog Key events sidebar and p
   });
 
   assert.equal(layout.bodyBlocks.length, 0);
+});
+
+run('resolveReaderContentForArticle builds feed preview from excerpt', () => {
+  const article = {
+    id: 'story-1',
+    title: 'Headline',
+    excerpt: 'Standfirst from the feed.',
+    body: '',
+    source: 'Example',
+    imageUrl: 'https://example.com/hero.jpg',
+    topics: ['technology'],
+    readTimeMinutes: 4,
+    publishedAt: '2026-01-01T00:00:00.000Z',
+    url: 'https://example.com/story',
+  } satisfies Article;
+
+  const preview = resolveReaderContentForArticle(article);
+  assert.ok(preview);
+  assert.equal(preview.source, 'feed');
+  assert.equal(preview.blocks[0]?.type, 'paragraph');
+  assert.equal(preview.blocks[0]?.type === 'paragraph' ? preview.blocks[0].text : '', article.excerpt);
+});
+
+run('resolveReaderContentForArticle prefers cached extracted content', () => {
+  const article = {
+    id: 'story-2',
+    title: 'Headline',
+    excerpt: 'Feed excerpt',
+    body: '',
+    source: 'Example',
+    imageUrl: 'https://example.com/hero.jpg',
+    topics: ['technology'],
+    readTimeMinutes: 4,
+    publishedAt: '2026-01-01T00:00:00.000Z',
+    url: 'https://example.com/story',
+  } satisfies Article;
+
+  const cached = {
+    title: article.title,
+    blocks: [{ type: 'paragraph' as const, text: 'Extracted body.' }],
+    readTimeMinutes: 6,
+    source: 'extracted' as const,
+  };
+
+  const resolved = resolveReaderContentForArticle(article, () => cached);
+  assert.equal(resolved, cached);
 });
