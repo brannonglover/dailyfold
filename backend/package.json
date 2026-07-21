@@ -1,13 +1,13 @@
 {
   "name": "dailyfold-api",
-  "version": "2.5.1",
+  "version": "2.6.0",
   "private": true,
   "scripts": {
     "dev": "WATCHPACK_POLLING=true CHOKIDAR_USEPOLLING=true NODE_OPTIONS='--use-system-ca' next dev -p 3001 -H 0.0.0.0",
     "build": "next build",
     "start": "NODE_OPTIONS='--use-system-ca' next start -p 3001",
-    "ingest": "NODE_OPTIONS='--use-system-ca' tsx scripts/ingest.ts",
-    "ingest:watch": "NODE_OPTIONS='--use-system-ca' tsx scripts/ingest-watch.ts",
+    "ingest": "NODE_OPTIONS='--use-system-ca' tsx --env-file=.env scripts/ingest.ts",
+    "ingest:watch": "NODE_OPTIONS='--use-system-ca' tsx --env-file=.env scripts/ingest-watch.ts",
     "test:subscription": "tsx lib/subscription.detect.test.ts",
     "test:image": "tsx lib/normalize.image.test.ts",
     "test:feedMedia": "tsx --test lib/feedMedia.test.ts",
@@ -16,21 +16,21 @@
     "test:excerpt": "tsx lib/normalize.excerpt.test.ts",
     "test:embeddedMedia": "tsx --test lib/embeddedMedia.test.ts",
     "test:readerCache": "tsx --test lib/readerCache.test.ts",
-    "test:search": "tsx --test lib/db.search.test.ts"
+    "test:search": "tsx --test lib/db.search.test.ts",
+    "db:migrate": "NODE_OPTIONS='--use-system-ca' tsx --env-file=.env scripts/migrate.ts"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
     "@supabase/supabase-js": "^2.106.2",
-    "better-sqlite3": "^11.10.0",
     "drizzle-orm": "^0.44.2",
     "linkedom": "^0.18.12",
     "next": "^15.3.3",
+    "postgres": "^3.4.9",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "rss-parser": "^3.13.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.21",
     "@types/react": "^19.1.6",
     "tsx": "^4.19.4",

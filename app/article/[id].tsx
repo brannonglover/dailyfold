@@ -7,7 +7,6 @@ import { useTheme } from '@/hooks/useTheme';
 import { lookupArticleById, rememberOpenArticle } from '@/services/articleSession';
 import { patchFeedArticle } from '@/services/articleFeedPatch';
 import { fetchArticleById } from '@/services/articles';
-import { seedReaderContentFromArticle } from '@/services/articleContent';
 import { Article } from '@/types';
 import { isValidArticleRouteId } from '@/utils/notificationArticleLink';
 import { resolveDisplayArticle } from '@/utils/resolveDisplayArticle';
@@ -37,7 +36,6 @@ export default function ArticleScreen() {
 
     const known = lookupArticleById(articleId);
     if (known) {
-      seedReaderContentFromArticle(known);
       setArticle(known);
       setIsLoading(false);
     } else {
@@ -54,7 +52,6 @@ export default function ArticleScreen() {
         }
         if (fetched.id !== articleId) return;
         rememberOpenArticle(fetched);
-        seedReaderContentFromArticle(fetched);
         patchFeedArticle(fetched);
         setArticle(fetched);
       })
@@ -107,19 +104,15 @@ export default function ArticleScreen() {
     <>
       <Stack.Screen
         options={{
-          title: displayArticle.source,
+          title: '',
           headerStyle: { backgroundColor: colors.background },
           headerShadowVisible: false,
           headerTintColor: colors.text,
           headerBackTitle: 'Back',
           contentStyle: { backgroundColor: colors.background },
-          gestureEnabled: true,
-          fullScreenGestureEnabled: false,
-          animationMatchesGesture: true,
-          animation: 'slide_from_right',
         }}
       />
-      <ArticleReader key={articleId} article={displayArticle} />
+      <ArticleReader article={displayArticle} />
     </>
   );
 }

@@ -44,21 +44,12 @@ import { FeedEndStretch } from '@/components/FeedEndStretch';
 import { FeedHeader } from '@/components/FeedHeader';
 import { FeedPendingBanner } from '@/components/FeedPendingBanner';
 import {
-  FEED_SCROLL_PEEK_RATIO,
+  FEED_SCROLL_PEEK_PX,
   FEED_SEPARATOR_WIDTH,
-  NEWSPAPER_COMPACT_CARD_HEIGHT,
-  NEWSPAPER_FEATURED_CARD_HEIGHT,
-  NEWSPAPER_HERO_HEIGHT_RATIO,
 } from '@/constants/Layout';
 import { useTheme } from '@/hooks/useTheme';
-import { prefetchArticleReaderContent } from '@/services/articleContent';
 import { registerFeedArticles } from '@/services/articleSession';
 import { Article } from '@/types';
-import {
-  buildNewspaperFeaturedIds,
-  groupNewspaperFeedRows,
-  NewspaperFeedRow,
-} from '@/utils/newspaperFeedRows';
 import { shouldAllowFeedLoadMore, shouldAutoTopUpFeed } from '@/utils/feedLoadMoreGate';
 import { isFeedInteractionLocked } from '@/utils/feedInteractionLock';
 import {
@@ -68,6 +59,8 @@ import {
 } from '@/utils/feedScrollState';
 import { readLastFeedListHeight, rememberFeedListHeight } from '@/utils/feedListViewport';
 import { buildLoadMoreTriggerKey } from '@/utils/paginationRevision';
+import { computeFoldLayout } from '@/utils/foldFeedLayout';
+import { FOLD_GRID_GAP } from '@/constants/Layout';
 
 const AnimatedFlatList = Animated.createAnimatedComponent(FlatList<Article>);
 
@@ -80,10 +73,12 @@ const FEED_SCROLL_PRESS_PROPS = {
 
 /** Start fetching the next page this many snap cards before the end. */
 const SNAP_LOAD_MORE_PREFETCH_ITEMS = 5;
-/** Start fetching when the user scrolls within this many newspaper rows of the end. */
-const NEWSPAPER_LOAD_MORE_PREFETCH_ROWS = 4;
-/** Fraction of viewport height from the bottom that triggers onEndReached (newspaper). */
-const NEWSPAPER_END_REACHED_THRESHOLD = 0.75;
+/** Start fetching when the user scrolls within this many list items of the end. */
+const LIST_LOAD_MORE_PREFETCH_ITEMS = 4;
+/** Fraction of viewport height from the bottom that triggers onEndReached (list). */
+const LIST_END_REACHED_THRESHOLD = 0.75;
+/** Approximate story card height used to prefetch the next page while scrolling. */
+const LIST_CARD_PREFETCH_HEIGHT = 320;
 /** 1px rule between feed articles — explicit View so it stays visible on full-bleed cards. */
 function FeedArticleSeparator({ color, vertical = false }: { color: string; vertical?: boolean }) {
   const thickness = PixelRatio.roundToNearestPixel(FEED_SEPARATOR_WIDTH);
@@ -99,7 +94,7 @@ function FeedArticleSeparator({ color, vertical = false }: { color: string; vert
   );
 }
 
-export type ArticleFeedLayout = 'snap' | 'newspaper';
+export type ArticleFeedLayout = 'snap' | 'list' | 'fold';
 
 interface ArticleFeedProps {
   articles: Article[];
@@ -130,7 +125,7 @@ interface ArticleFeedProps {
    * Clears load-more dedup so the next user scroll near the end can fetch again.
    */
   loadMoreEpoch?: number;
-  /** Visual trial: hero story above the fold, compact cards below */
+  /** Clean single-column story list (Latest / For You interest feeds). */
   layout?: ArticleFeedLayout;
   /** For You only — per-article liked-interest match chips. */
   matchReasonsByArticleId?: Map<string, string[]>;
@@ -198,7 +193,7 @@ function normalizeHeight(height: number) {
 }
 
 function getSnapMetrics(pageHeight: number) {
-  const peekPx = Math.max(12, Math.round(pageHeight * FEED_SCROLL_PEEK_RATIO));
+  const peekPx = FEED_SCROLL_PEEK_PX;
   const snapHeight = normalizeHeight(pageHeight - peekPx);
   return { peekPx, snapHeight };
 }
@@ -211,7 +206,6 @@ function areFeedCardItemPropsEqual(
     prev.article === next.article &&
     prev.height === next.height &&
     prev.isLast === next.isLast &&
-    prev.showTopSeparator === next.showTopSeparator &&
     prev.endPullDistance === next.endPullDistance &&
     prev.matchReasons === next.matchReasons &&
     prev.onFeedClick === next.onFeedClick
@@ -222,7 +216,6 @@ type FeedCardItemProps = {
   article: Article;
   height: number;
   isLast: boolean;
-  showTopSeparator: boolean;
   endPullDistance: SharedValue<number>;
   matchReasons?: string[];
   onFeedClick?: (article: Article) => void;
@@ -232,12 +225,10 @@ const FeedCardItem = memo(function FeedCardItem({
   article,
   height,
   isLast,
-  showTopSeparator,
   endPullDistance,
   matchReasons,
   onFeedClick,
 }: FeedCardItemProps) {
-  const { colors } = useTheme();
   const stretchStyle = useAnimatedStyle(() => {
     if (!isLast) return {};
     const pull = Math.min(endPullDistance.value, 100);
@@ -247,17 +238,15 @@ const FeedCardItem = memo(function FeedCardItem({
   }, [isLast]);
 
   return (
-    <>
-      {showTopSeparator ? <FeedArticleSeparator color={colors.feedDivider} /> : null}
-      <Animated.View style={stretchStyle}>
-        <ArticleCard
-          article={article}
-          height={height}
-          matchReasons={matchReasons}
-          onFeedClick={onFeedClick}
-        />
-      </Animated.View>
-    </>
+    <Animated.View style={stretchStyle}>
+      <ArticleCard
+        article={article}
+        height={height}
+        variant="storyPage"
+        matchReasons={matchReasons}
+        onFeedClick={onFeedClick}
+      />
+    </Animated.View>
   );
 }, areFeedCardItemPropsEqual);
 
@@ -298,7 +287,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   const pendingScrollToTopRef = useRef(false);
   const scrollCompleteRef = useRef<(() => void) | null>(null);
   const listRef = useAnimatedRef<FlatList<Article>>();
-  const newspaperListRef = useRef<FlatList<NewspaperFeedRow>>(null);
+  const storyListRef = useRef<FlatList<Article>>(null);
   const emptyScrollRef = useRef<ScrollView>(null);
   const scrollY = useSharedValue(0);
   const isAnimatingScroll = useSharedValue(false);
@@ -306,8 +295,8 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   const maxScrollOffset = useSharedValue(0);
   const endPullDistance = useSharedValue(0);
   const loadMoreTriggeredAtKeyRef = useRef('');
-  const newspaperRowsCountRef = useRef(0);
-  const newspaperLastVisibleRowRef = useRef(-1);
+  const storyListCountRef = useRef(0);
+  const storyLastVisibleIndexRef = useRef(-1);
   const requestLoadMoreRef = useRef<(options?: { atFeedEnd?: boolean }) => void>(() => {});
   const loadMoreCursorValue = loadMoreCursor ?? articles.length;
   const loadMoreTriggerKey = buildLoadMoreTriggerKey(loadMoreCursorValue, loadMoreEpoch ?? 0);
@@ -319,19 +308,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     () => articles.map((article) => article.id).join('\0'),
     [articles],
   );
-  const newspaperFeaturedIdsRef = useRef(new Set<string>());
-  const newspaperFeaturedOrderKeyRef = useRef('');
-  if (layout === 'newspaper' && articleOrderKey !== newspaperFeaturedOrderKeyRef.current) {
-    newspaperFeaturedOrderKeyRef.current = articleOrderKey;
-    newspaperFeaturedIdsRef.current = buildNewspaperFeaturedIds(articles);
-  }
-  const newspaperFeaturedIds =
-    layout === 'newspaper' ? newspaperFeaturedIdsRef.current : new Set<string>();
-  const newspaperHeroArticle = layout === 'newspaper' && articles.length > 0 ? articles[0] : null;
-  const newspaperFeedRows = useMemo(() => {
-    if (layout !== 'newspaper' || articles.length <= 1) return [];
-    return groupNewspaperFeedRows(articles.slice(1), newspaperFeaturedIds);
-  }, [layout, articles, newspaperFeaturedIds]);
   const articlesRef = useRef(articles);
   articlesRef.current = articles;
 
@@ -369,27 +345,14 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         setActiveIndex(viewableItems[0].index);
       }
 
-      const prefetchIds = new Set<string>();
       const visibleArticles: Article[] = [];
       for (const token of viewableItems) {
         const article = token.item as Article | undefined;
         if (article?.id) {
-          prefetchIds.add(article.id);
           visibleArticles.push(article);
         }
       }
-      const leadIndex = viewableItems[0]?.index;
-      if (leadIndex != null) {
-        const next = articlesRef.current[leadIndex + 1];
-        if (next?.id) prefetchIds.add(next.id);
-      }
       if (visibleArticles.length > 0) registerFeedArticles(visibleArticles);
-      for (const id of prefetchIds) {
-        const article =
-          visibleArticles.find((row) => row.id === id) ??
-          articlesRef.current.find((row) => row.id === id);
-        prefetchArticleReaderContent(id, article);
-      }
     },
   );
 
@@ -424,8 +387,8 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       return Promise.resolve();
     }
 
-    if (layout === 'newspaper') {
-      newspaperListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    if (layout === 'list' || layout === 'fold') {
+      storyListRef.current?.scrollToOffset({ offset: 0, animated: true });
       return Promise.resolve();
     }
 
@@ -533,7 +496,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   requestLoadMoreRef.current = requestLoadMore;
 
   useEffect(() => {
-    if (!onLoadMore || !canLoadMore || isLoadingMore || layout === 'newspaper') return;
+    if (!onLoadMore || !canLoadMore || isLoadingMore || layout === 'list') return;
     if (activeIndex < articles.length - SNAP_LOAD_MORE_PREFETCH_ITEMS) {
       loadMoreTriggeredAtKeyRef.current = '';
       return;
@@ -562,7 +525,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     requestLoadMore,
   ]);
 
-  const onNewspaperContentSizeChange = useCallback(
+  const onListContentSizeChange = useCallback(
     (_width: number, height: number) => {
       if (!onLoadMore || !canLoadMore || isLoadingMore || pageHeight <= 0) return;
       if (height <= pageHeight + 1) {
@@ -572,51 +535,35 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     [onLoadMore, canLoadMore, isLoadingMore, pageHeight, requestLoadMore],
   );
 
-  const onNewspaperViewableItemsChanged = useRef(
+  const onListViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       let maxIndex = -1;
-      const prefetchIds = new Set<string>();
       const visibleArticles: Article[] = [];
 
       for (const token of viewableItems) {
         if (token.index != null && token.index > maxIndex) {
           maxIndex = token.index;
         }
-        const row = token.item as NewspaperFeedRow | undefined;
-        if (!row) continue;
-        if (row.type === 'featured') {
-          if (row.article.id) {
-            prefetchIds.add(row.article.id);
-            visibleArticles.push(row.article);
-          }
-        } else {
-          for (const article of row.articles) {
-            if (article.id) {
-              prefetchIds.add(article.id);
-              visibleArticles.push(article);
-            }
-          }
+        const article = token.item as Article | undefined;
+        if (article?.id) {
+          visibleArticles.push(article);
         }
       }
 
-      newspaperLastVisibleRowRef.current = maxIndex;
+      storyLastVisibleIndexRef.current = maxIndex;
 
-      const totalRows = newspaperRowsCountRef.current;
-      if (totalRows > 0 && maxIndex >= totalRows - NEWSPAPER_LOAD_MORE_PREFETCH_ROWS) {
+      const totalItems = storyListCountRef.current;
+      if (totalItems > 0 && maxIndex >= totalItems - LIST_LOAD_MORE_PREFETCH_ITEMS) {
         requestLoadMoreRef.current({ atFeedEnd: true });
       }
 
       if (visibleArticles.length > 0) registerFeedArticles(visibleArticles);
-      for (const id of prefetchIds) {
-        const article = visibleArticles.find((row) => row.id === id);
-        prefetchArticleReaderContent(id, article);
-      }
     },
   );
 
-  const newspaperViewabilityConfig = useRef({ itemVisiblePercentThreshold: 15 });
+  const listViewabilityConfig = useRef({ itemVisiblePercentThreshold: 15 });
 
-  const onNewspaperScroll = useCallback(
+  const onListScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
       const offsetY = contentOffset.y;
@@ -624,9 +571,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       if (!onLoadMore || !canLoadMore || isLoadingMore || pageHeight <= 0) return;
       const distanceFromEnd =
         contentSize.height - (offsetY + layoutMeasurement.height);
-      const prefetchLeadPx =
-        NEWSPAPER_FEATURED_CARD_HEIGHT * NEWSPAPER_LOAD_MORE_PREFETCH_ROWS +
-        NEWSPAPER_COMPACT_CARD_HEIGHT * NEWSPAPER_LOAD_MORE_PREFETCH_ROWS;
+      const prefetchLeadPx = LIST_CARD_PREFETCH_HEIGHT * LIST_LOAD_MORE_PREFETCH_ITEMS;
       if (distanceFromEnd <= prefetchLeadPx) {
         requestLoadMore({ atFeedEnd: true });
       }
@@ -634,7 +579,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     [onLoadMore, canLoadMore, isLoadingMore, pageHeight, requestLoadMore],
   );
 
-  const onNewspaperScrollEnd = useCallback(
+  const onListScrollEnd = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       onFeedScrollEnded();
       maybeDismissPendingAfterScroll(event.nativeEvent.contentOffset.y);
@@ -642,7 +587,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     [onFeedScrollEnded, maybeDismissPendingAfterScroll],
   );
 
-  const onNewspaperEndReached = useCallback(() => {
+  const onListEndReached = useCallback(() => {
     requestLoadMore({ atFeedEnd: true });
   }, [requestLoadMore]);
 
@@ -655,7 +600,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   }, [pendingCount, onApplyPending, scrollToTop]);
 
   const articleKeyExtractor = useCallback((item: Article) => item.id, []);
-  const newspaperRowKeyExtractor = useCallback((item: NewspaperFeedRow) => item.id, []);
 
   const snapHeight = snapMetrics?.snapHeight ?? 0;
   const articlesCount = articles.length;
@@ -675,7 +619,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         article={item}
         height={snapHeight}
         isLast={index === articlesCount - 1}
-        showTopSeparator={index > 0}
         endPullDistance={endPullDistance}
         matchReasons={matchReasonsByArticleId?.get(item.id)}
         onFeedClick={onFeedClick}
@@ -690,48 +633,70 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     ],
   );
 
-  const renderNewspaperItem = useCallback(
-    ({ item: row }: ListRenderItemInfo<NewspaperFeedRow>) => {
-      if (row.type === 'featured') {
+  const renderListItem = useCallback(
+    ({ item, index }: ListRenderItemInfo<Article>) => (
+      <View style={styles.listStoryRow}>
+        {index > 0 ? <FeedArticleSeparator color={colors.feedDivider} /> : null}
+        <ArticleCard
+          article={item}
+          variant={index === 0 ? 'storyLead' : 'story'}
+          matchReasons={matchReasonsByArticleId?.get(item.id)}
+          onFeedClick={onFeedClick}
+        />
+      </View>
+    ),
+    [colors.feedDivider, matchReasonsByArticleId, onFeedClick],
+  );
+
+  const foldSlots = useMemo(() => computeFoldLayout(articles.length), [articles.length]);
+
+  const renderFoldItem = useCallback(
+    ({ item, index }: ListRenderItemInfo<Article>) => {
+      const slot = foldSlots[index];
+      if (!slot) return null;
+
+      if (slot.kind === 'lead') {
         return (
-          <View style={styles.newspaperFeaturedRow}>
+          <View style={styles.listStoryRow}>
+            <ArticleCard article={item} variant="storyLead" onFeedClick={onFeedClick} />
+          </View>
+        );
+      }
+
+      if (slot.kind === 'gridRight') {
+        return null;
+      }
+
+      if (slot.kind === 'gridLeft') {
+        const rightItem = articles[index + 1];
+        if (!rightItem) {
+          return (
+            <View style={styles.listStoryRow}>
+              <FeedArticleSeparator color={colors.feedDivider} />
+              <ArticleCard article={item} variant="storyRow" onFeedClick={onFeedClick} />
+            </View>
+          );
+        }
+        return (
+          <View style={styles.listStoryRow}>
             <FeedArticleSeparator color={colors.feedDivider} />
-            <ArticleCard
-              article={row.article}
-              height={NEWSPAPER_FEATURED_CARD_HEIGHT}
-              variant="featured"
-              matchReasons={matchReasonsByArticleId?.get(row.article.id)}
-              onFeedClick={onFeedClick}
-            />
+            <View style={styles.gridPairRow}>
+              <ArticleCard article={item} variant="storyGrid" onFeedClick={onFeedClick} />
+              <View style={styles.gridPairDivider} />
+              <ArticleCard article={rightItem} variant="storyGrid" onFeedClick={onFeedClick} />
+            </View>
           </View>
         );
       }
 
       return (
-        <View style={styles.newspaperGridRow}>
+        <View style={styles.listStoryRow}>
           <FeedArticleSeparator color={colors.feedDivider} />
-          <View style={styles.newspaperGridCells}>
-            {row.articles.map((article, index) => (
-              <View key={article.id} style={styles.newspaperGridCellGroup}>
-                {index > 0 ? (
-                  <FeedArticleSeparator color={colors.feedDivider} vertical />
-                ) : null}
-                <View style={styles.newspaperGridCell}>
-                  <ArticleCard
-                    article={article}
-                    height={NEWSPAPER_COMPACT_CARD_HEIGHT}
-                    variant="compact"
-                    matchReasons={matchReasonsByArticleId?.get(article.id)}
-                    onFeedClick={onFeedClick}
-                  />
-                </View>
-              </View>
-            ))}
-          </View>
+          <ArticleCard article={item} variant="storyRow" onFeedClick={onFeedClick} />
         </View>
       );
     },
-    [colors.feedDivider, matchReasonsByArticleId, onFeedClick],
+    [foldSlots, articles, colors.feedDivider, onFeedClick],
   );
 
   const pendingBannerOverlay = (
@@ -809,12 +774,9 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     );
   }
 
-  if (layout === 'newspaper') {
-    const heroArticle = newspaperHeroArticle;
-    const newspaperRows = newspaperFeedRows;
-    newspaperRowsCountRef.current = newspaperRows.length;
-    const heroHeight =
-      pageHeight > 0 ? normalizeHeight(Math.round(pageHeight * NEWSPAPER_HERO_HEIGHT_RATIO)) : 0;
+  if (layout === 'list' || layout === 'fold') {
+    storyListCountRef.current = articles.length;
+    const renderItem = layout === 'fold' ? renderFoldItem : renderListItem;
 
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -824,30 +786,19 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         <FeedStatusBanner error={error} notice={notice} />
         {headerExtra}
         <View style={styles.listWrap} onLayout={onListLayout}>
-          {pageHeight > 0 && heroHeight > 0 ? (
+          {pageHeight > 0 ? (
             <FlatList
-              ref={newspaperListRef}
-              data={newspaperRows}
-              keyExtractor={newspaperRowKeyExtractor}
+              ref={storyListRef}
+              data={articles}
+              keyExtractor={articleKeyExtractor}
               {...FEED_SCROLL_PRESS_PROPS}
-              initialNumToRender={3}
-              maxToRenderPerBatch={2}
-              windowSize={5}
+              initialNumToRender={4}
+              maxToRenderPerBatch={3}
+              windowSize={7}
               updateCellsBatchingPeriod={50}
-              ListHeaderComponent={
-                heroArticle ? (
-                  <ArticleCard
-                    article={heroArticle}
-                    height={heroHeight}
-                    variant="hero"
-                    matchReasons={matchReasonsByArticleId?.get(heroArticle.id)}
-                    onFeedClick={onFeedClick}
-                  />
-                ) : null
-              }
-              renderItem={renderNewspaperItem}
+              renderItem={renderItem}
               style={[styles.list, { height: pageHeight }]}
-              contentContainerStyle={styles.newspaperListContent}
+              contentContainerStyle={styles.storyListContent}
               showsVerticalScrollIndicator={false}
               refreshControl={refreshControl}
               scrollEventThrottle={16}
@@ -855,14 +806,14 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
                 onFeedScrollBeginDrag();
                 userInitiatedScrollRef.current = true;
               }}
-              onScroll={onNewspaperScroll}
-              onScrollEndDrag={onNewspaperScrollEnd}
-              onMomentumScrollEnd={onNewspaperScrollEnd}
-              onViewableItemsChanged={onNewspaperViewableItemsChanged.current}
-              viewabilityConfig={newspaperViewabilityConfig.current}
-              onEndReached={onNewspaperEndReached}
-              onEndReachedThreshold={NEWSPAPER_END_REACHED_THRESHOLD}
-              onContentSizeChange={onNewspaperContentSizeChange}
+              onScroll={onListScroll}
+              onScrollEndDrag={onListScrollEnd}
+              onMomentumScrollEnd={onListScrollEnd}
+              onViewableItemsChanged={onListViewableItemsChanged.current}
+              viewabilityConfig={listViewabilityConfig.current}
+              onEndReached={onListEndReached}
+              onEndReachedThreshold={LIST_END_REACHED_THRESHOLD}
+              onContentSizeChange={onListContentSizeChange}
               ListFooterComponent={loadMoreListFooter}
             />
           ) : null}
@@ -998,8 +949,21 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     textAlign: 'center',
   },
-  newspaperListContent: {
-    paddingBottom: 16,
+  storyListContent: {
+    paddingBottom: 24,
+  },
+  listStoryRow: {
+    position: 'relative',
+    zIndex: 0,
+  },
+  gridPairRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 20,
+    paddingTop: 14,
+  },
+  gridPairDivider: {
+    width: FOLD_GRID_GAP,
   },
   feedSeparatorHorizontal: {
     width: '100%',
@@ -1012,27 +976,6 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     zIndex: 2,
     elevation: 2,
-  },
-  newspaperFeaturedRow: {
-    position: 'relative',
-    zIndex: 0,
-  },
-  newspaperGridRow: {
-    position: 'relative',
-    zIndex: 0,
-  },
-  newspaperGridCells: {
-    flexDirection: 'row',
-  },
-  newspaperGridCellGroup: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-  },
-  newspaperGridCell: {
-    flex: 1,
-    minWidth: 0,
-    overflow: 'hidden',
   },
   loadMoreFooter: {
     alignItems: 'center',

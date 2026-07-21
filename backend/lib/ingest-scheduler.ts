@@ -34,8 +34,8 @@ export interface EnsureFreshResult {
 export async function ensureFreshArticles(
   options: { force?: boolean; awaitIngest?: boolean } = {},
 ): Promise<EnsureFreshResult> {
-  const empty = articleCount() === 0;
-  const stale = options.force || isIngestStale(INGEST_INTERVAL_MS);
+  const empty = (await articleCount()) === 0;
+  const stale = options.force || (await isIngestStale(INGEST_INTERVAL_MS));
 
   if (!empty && !stale) {
     return { ingestTriggered: false, ingestAwaited: false };

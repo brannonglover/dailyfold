@@ -12,6 +12,6 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin');
-  const status = getIngestStatus();
+  const status = await getIngestStatus();
   return jsonResponse({ ok: true, ...status }, origin);
 }

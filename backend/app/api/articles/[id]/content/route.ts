@@ -29,13 +29,13 @@ export async function GET(
   const refresh = request.nextUrl.searchParams.get('refresh') === 'true';
 
   try {
-    let article = getArticleById(id);
+    let article = await getArticleById(id);
     if (!article) {
       return jsonResponse({ error: 'Article not found' }, origin, 404);
     }
 
     if (!refresh) {
-      const cached = getCachedReaderContent(id);
+      const cached = await getCachedReaderContent(id);
       if (cached && isUsableExtractedReaderCache(cached, article, { legacyTextOnlyFormat: cached.legacyTextOnlyFormat })) {
         const { legacyTextOnlyFormat: _legacy, ...content } = cached;
         return jsonResponse(
@@ -47,7 +47,7 @@ export async function GET(
 
     if (articleNeedsHeroEnrichment(article.imageUrl)) {
       void fetchPageOgImageUrl(article.url).then((heroUrl) => {
-        if (heroUrl) updateArticleImageUrl(id, heroUrl);
+        if (heroUrl) void updateArticleImageUrl(id, heroUrl);
       });
     }
 
@@ -65,12 +65,12 @@ export async function GET(
       ) &&
       !article.requiresSubscription
     ) {
-      setArticleRequiresSubscription(id, true);
+      await setArticleRequiresSubscription(id, true);
       article = { ...article, requiresSubscription: true };
     }
 
     if (extracted.source === 'extracted') {
-      saveReaderContent(id, extracted);
+      await saveReaderContent(id, extracted);
     }
 
     return jsonResponse({ content: extracted, requiresSubscription: article.requiresSubscription }, origin);

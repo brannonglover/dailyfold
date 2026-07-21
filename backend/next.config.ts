@@ -2,7 +2,6 @@ import type { NextConfig } from 'next';
 import path from 'path';
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ['better-sqlite3'],
   // Monorepo: backend imports ../../catalog at repo root (outside backend/).
   outputFileTracingRoot: path.join(__dirname, '..'),
 };

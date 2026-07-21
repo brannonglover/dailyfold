@@ -1,7 +1,7 @@
 import { getIngestStatus } from '@/lib/db';
 
-export default function Home() {
-  const status = getIngestStatus();
+export default async function Home() {
+  const status = await getIngestStatus();
 
   return (
     <main style={{ fontFamily: 'system-ui, sans-serif', padding: 32, maxWidth: 560 }}>

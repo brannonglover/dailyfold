@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import test from 'node:test';
 
-import { resetDbConnectionForTests, searchArticles, upsertArticle } from './db';
+import { getSql } from './postgres';
+import { searchArticles, upsertArticle } from './db';
 import type { Article } from './types';
+
+// These tests hit the real Postgres database in DATABASE_URL (Supabase), using
+// unique per-run ids/urls so they never collide with real data, cleaned up below.
+const hasDatabaseUrl = !!process.env.DATABASE_URL?.trim();
+const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 function bikeArticle(overrides: Partial<Article> = {}): Article {
   return {
-    id: 'bike-article',
+    id: `bike-article-${runId}`,
     title: 'Trail bike review',
     excerpt: 'A capable mountain bike for enduro riders',
     body: 'We tested suspension kinematics on rocky singletrack with multiple mtb builds.',
@@ -20,64 +23,61 @@ function bikeArticle(overrides: Partial<Article> = {}): Article {
     searchTags: ['mtb', 'mountain bike', 'cycling', 'trail'],
     readTimeMinutes: 4,
     publishedAt: '2026-06-01T12:00:00.000Z',
-    url: 'https://example.com/bike-review',
+    url: `https://example.com/bike-review-${runId}`,
     ...overrides,
   };
 }
 
-test('searchArticles finds matches across title, body, and search tags via FTS', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'dailyfold-db-search-'));
-  const previousPath = process.env.DATABASE_PATH;
-  process.env.DATABASE_PATH = path.join(dir, 'test.db');
+async function cleanup(ids: string[]) {
+  const sql = getSql();
+  await sql`DELETE FROM articles WHERE id = ANY(${ids}::text[])`;
+}
+
+test('searchArticles finds matches across title, body, and search tags via FTS', { skip: !hasDatabaseUrl }, async () => {
+  const otherId = `other-${runId}`;
+  const ids = [`bike-article-${runId}`, otherId];
 
   try {
-    resetDbConnectionForTests();
-    upsertArticle(bikeArticle());
-    upsertArticle(
+    await upsertArticle(bikeArticle());
+    await upsertArticle(
       bikeArticle({
-        id: 'other',
+        id: otherId,
         title: 'Market wrap',
         excerpt: 'Stocks moved higher',
         body: 'Equities rallied after earnings.',
         topics: ['business'],
         sportTags: undefined,
         searchTags: ['finance', 'stocks'],
-        url: 'https://example.com/market',
+        url: `https://example.com/market-${runId}`,
       }),
     );
 
-    const mtbResults = searchArticles('MTB');
-    assert.equal(mtbResults.length, 1);
-    assert.equal(mtbResults[0]?.id, 'bike-article');
+    const mtbResults = await searchArticles('MTB');
+    assert.ok(mtbResults.some((a) => a.id === `bike-article-${runId}`));
+    assert.ok(!mtbResults.some((a) => a.id === otherId));
 
-    const bodyResults = searchArticles('singletrack');
-    assert.equal(bodyResults.length, 1);
-    assert.equal(bodyResults[0]?.id, 'bike-article');
+    const bodyResults = await searchArticles('singletrack');
+    assert.ok(bodyResults.some((a) => a.id === `bike-article-${runId}`));
   } finally {
-    resetDbConnectionForTests();
-    if (previousPath === undefined) delete process.env.DATABASE_PATH;
-    else process.env.DATABASE_PATH = previousPath;
-    rmSync(dir, { recursive: true, force: true });
+    await cleanup(ids);
   }
 });
 
-test('upsertArticle generates search tags when missing', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'dailyfold-db-tags-'));
-  const previousPath = process.env.DATABASE_PATH;
-  process.env.DATABASE_PATH = path.join(dir, 'test.db');
+test('upsertArticle generates search tags when missing', { skip: !hasDatabaseUrl }, async () => {
+  const id = `bike-article-tags-${runId}`;
 
   try {
-    resetDbConnectionForTests();
-    const { searchTags: _ignored, ...withoutTags } = bikeArticle();
-    upsertArticle(withoutTags);
+    const { searchTags: _ignored, ...withoutTags } = bikeArticle({
+      id,
+      url: `https://example.com/bike-review-tags-${runId}`,
+    });
+    await upsertArticle(withoutTags);
 
-    const results = searchArticles('mountain bike');
-    assert.equal(results.length, 1);
-    assert.ok((results[0]?.searchTags?.length ?? 0) > 0);
+    const results = await searchArticles('mountain bike');
+    const match = results.find((a) => a.id === id);
+    assert.ok(match);
+    assert.ok((match?.searchTags?.length ?? 0) > 0);
   } finally {
-    resetDbConnectionForTests();
-    if (previousPath === undefined) delete process.env.DATABASE_PATH;
-    else process.env.DATABASE_PATH = previousPath;
-    rmSync(dir, { recursive: true, force: true });
+    await cleanup([id]);
   }
 });

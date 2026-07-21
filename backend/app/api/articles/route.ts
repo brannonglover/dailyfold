@@ -34,12 +34,12 @@ export async function GET(request: NextRequest) {
     const freshness = await ensureFreshArticles({ force });
     scheduleGuardianHeroRepair();
 
-    const page = listArticles({
+    const page = await listArticles({
       limit: Number.isFinite(limit) ? limit : 200,
       sources: sourceNames.length > 0 ? sourceNames : undefined,
       cursor,
     });
-    const status = getIngestStatus();
+    const status = await getIngestStatus();
 
     return jsonResponse(
       {

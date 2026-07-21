@@ -2,6 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Platform, StyleSheet, View } from 'react-native';
 
 import {
+  FEED_SCROLL_PEEK_PX,
   FEED_SCROLL_PERSISTENT_GRADIENT_HEIGHT,
   FEED_SCROLL_PERSISTENT_GRADIENT_OPACITY,
 } from '@/constants/Layout';
@@ -15,12 +16,14 @@ function withAlpha(hex: string, alpha: number) {
   return `${hex}${alphaHex}`;
 }
 
+/** Softens the next-card peek so it reads as a hint, not a bright strip. */
 export function FeedBottomVignette() {
   const { colors } = useTheme();
 
   const gradientColors = [
     withAlpha(colors.background, 0),
-    withAlpha(colors.background, FEED_SCROLL_PERSISTENT_GRADIENT_OPACITY * 0.45),
+    withAlpha(colors.background, FEED_SCROLL_PERSISTENT_GRADIENT_OPACITY * 0.35),
+    withAlpha(colors.background, FEED_SCROLL_PERSISTENT_GRADIENT_OPACITY * 0.75),
     withAlpha(colors.background, FEED_SCROLL_PERSISTENT_GRADIENT_OPACITY),
   ] as const;
 
@@ -31,7 +34,7 @@ export function FeedBottomVignette() {
       collapsable={false}>
       <LinearGradient
         colors={gradientColors}
-        locations={[0, 0.5, 1]}
+        locations={[0, 0.35, 0.7, 1]}
         style={styles.gradient}
       />
     </View>
@@ -51,6 +54,7 @@ const styles = StyleSheet.create({
   },
   gradient: {
     width: '100%',
-    height: FEED_SCROLL_PERSISTENT_GRADIENT_HEIGHT,
+    // Cover the peek plus a soft fade into the active card.
+    height: Math.max(FEED_SCROLL_PERSISTENT_GRADIENT_HEIGHT, FEED_SCROLL_PEEK_PX + 48),
   },
 });

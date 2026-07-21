@@ -1,13 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useRouter } from 'expo-router';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ArticleImage } from '@/components/ArticleImage';
 import { useTheme } from '@/hooks/useTheme';
-import { rememberOpenArticle } from '@/services/articleSession';
-import { prefetchArticleReaderContent } from '@/services/articleContent';
 import { Article } from '@/types';
+import { openFeedArticle, warmArticleOpen } from '@/utils/openFeedArticle';
 
 interface LikedArticleRowProps {
   article: Article;
@@ -28,14 +26,9 @@ export function LikedArticleRow({
   onLongPress,
 }: LikedArticleRowProps) {
   const { colors } = useTheme();
-  const router = useRouter();
 
   function openArticle() {
-    rememberOpenArticle(article);
-    router.push(`/article/${article.id}`);
-    queueMicrotask(() => {
-      prefetchArticleReaderContent(article.id, article);
-    });
+    void openFeedArticle(article);
   }
 
   async function handleLongPress() {
@@ -48,11 +41,12 @@ export function LikedArticleRow({
 
   return (
     <Pressable
+      onPressIn={() => warmArticleOpen(article)}
       onPress={openArticle}
       onLongPress={onLongPress ? () => void handleLongPress() : undefined}
       delayLongPress={400}
       accessibilityRole="button"
-      accessibilityLabel={`Read ${article.title}`}
+      accessibilityLabel={`Open ${article.title}`}
       accessibilityHint={
         onLongPress ? 'Long press to add this article to folders' : undefined
       }

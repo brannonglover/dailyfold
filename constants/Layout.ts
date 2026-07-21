@@ -7,7 +7,10 @@ export const TAB_BAR_PADDING_BOTTOM = 28;
 /** Matches tabBarStyle.paddingTop in app/(tabs)/_layout.tsx */
 export const TAB_BAR_PADDING_TOP = 8;
 
-/** Peek fraction of feed viewport to reveal the next card edge */
+/** Peek of the next card visible below the active snap page (logical px). */
+export const FEED_SCROLL_PEEK_PX = 20;
+
+/** @deprecated Prefer FEED_SCROLL_PEEK_PX — kept for any residual ratio-based callers. */
 export const FEED_SCROLL_PEEK_RATIO = 0.03;
 
 /** Feed article separator thickness (1 logical px; see ArticleFeed FeedArticleSeparator). */
@@ -22,11 +25,17 @@ export const NEWSPAPER_COMPACT_CARD_HEIGHT = 220;
 /** Newspaper trial: full-width featured/trending story cards below the hero */
 export const NEWSPAPER_FEATURED_CARD_HEIGHT = 280;
 
-/** Height of the persistent bottom vignette on feed cards */
-export const FEED_SCROLL_PERSISTENT_GRADIENT_HEIGHT = 64;
+/** Clean list feed: lead story image aspect (width / height) */
+export const STORY_CARD_LEAD_IMAGE_ASPECT = 16 / 10;
+
+/** Clean list feed: standard story image aspect (width / height) */
+export const STORY_CARD_IMAGE_ASPECT = 16 / 9;
+
+/** Height of the persistent bottom vignette covering the next-card peek */
+export const FEED_SCROLL_PERSISTENT_GRADIENT_HEIGHT = 72;
 
 /** Max opacity of the persistent bottom vignette (0–1) */
-export const FEED_SCROLL_PERSISTENT_GRADIENT_OPACITY = 0.6;
+export const FEED_SCROLL_PERSISTENT_GRADIENT_OPACITY = 0.92;
 
 /** ArticleCard hero image: vignette overlay band height as a fraction of image height */
 export const ARTICLE_CARD_HERO_VIGNETTE_HEIGHT_RATIO = 0.2;
@@ -48,3 +57,12 @@ export function tabBarModalBottomOffset(tabBarHeight: number, safeAreaBottom: nu
 
 /** World Cup group standings card in the bracket section (two columns on phone). */
 export const WORLD_CUP_GROUP_CARD_MIN_HEIGHT = 168;
+
+/** Fold feed: 2-up grid tile image aspect (width / height). */
+export const FOLD_GRID_IMAGE_ASPECT = 4 / 3;
+
+/** Fold feed: square thumbnail size for image-left list rows. */
+export const FOLD_ROW_IMAGE_SIZE = 92;
+
+/** Fold feed: horizontal gap between the two grid-pair tiles. */
+export const FOLD_GRID_GAP = 14;

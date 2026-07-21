@@ -22,7 +22,7 @@ export async function GET(
   try {
     await ensureFreshArticles();
 
-    let article = getArticleById(id);
+    let article = await getArticleById(id);
     if (!article) {
       return jsonResponse({ error: 'Article not found' }, origin, 404);
     }
@@ -30,7 +30,7 @@ export async function GET(
     if (articleNeedsHeroEnrichment(article.imageUrl)) {
       const heroUrl = await fetchPageOgImageUrl(article.url);
       if (heroUrl) {
-        updateArticleImageUrl(id, heroUrl);
+        await updateArticleImageUrl(id, heroUrl);
         article = { ...article, imageUrl: heroUrl };
       }
     }

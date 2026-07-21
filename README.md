@@ -18,9 +18,11 @@ You need **two terminals**: the API backend and the Expo app.
 
 ```bash
 cd backend
+cp .env.example .env   # add DATABASE_URL (Supabase pooled connection string) first
 npm install
-npm run ingest    # fetch RSS feeds into SQLite (first time)
-npm run dev       # API at http://localhost:3001 (listens on all interfaces for physical devices)
+npm run db:migrate   # create tables in Postgres (first time)
+npm run ingest        # fetch RSS feeds into Postgres (first time)
+npm run dev           # API at http://localhost:3001 (listens on all interfaces for physical devices)
 ```
 
 Or from the project root:
@@ -50,10 +52,10 @@ Pull down on a feed tab to refresh articles from the API.
 
 ## How ingestion works
 
-SQLite here is a **rolling cache**, not a fixed article list. New stories are fetched from RSS continuously; old ones are pruned after 30 days.
+Postgres (Supabase) here is a **rolling cache**, not a fixed article list. New stories are fetched from RSS continuously; old ones are pruned after 30 days. Storage is a real persistent database, so the cache survives across serverless instances — unlike a local SQLite file, which would be wiped on every cold start on Vercel.
 
 ```
-RSS feeds ──► ingest worker ──► SQLite cache ──► GET /api/articles ──► app
+RSS feeds ──► ingest worker ──► Postgres cache ──► GET /api/articles ──► app
                     ▲
      cron / app open / pull-to-refresh / every 30 min
 ```
@@ -88,7 +90,8 @@ app/                 Expo Router screens
 backend/             Next.js API + RSS ingestion
   lib/feeds.ts       Source configuration
   lib/ingest.ts      RSS fetch + normalize
-  data/dailyfold.db    SQLite (local, gitignored)
+  lib/db.ts          Postgres (Supabase) queries
+  lib/schema.sql     Postgres schema — apply via `npm run db:migrate`
 catalog/             Shared sources, sports tags, HTML decode (app + API)
 components/          UI
 services/            API client, recommendations
@@ -218,13 +221,14 @@ Repo-root `.vercelignore` is only for legacy CLI deploys before Root Directory w
 
 3. In the Vercel project → **Settings → Environment Variables** (Production and Preview), set:
 
+   - `DATABASE_URL` (Supabase pooled/Transaction-mode connection string, port 6543 — same value as local `.env`)
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `CRON_SECRET` (must match what Vercel Cron sends as `Authorization: Bearer …`)
 
 4. After deploy, set `EXPO_PUBLIC_API_URL` in EAS to your production API URL (e.g. `https://your-project.vercel.app`).
 
-SQLite (`better-sqlite3`) is configured for Vercel via `serverExternalPackages` in `backend/next.config.ts`; the DB file is ephemeral under `/tmp` on serverless unless you set `DATABASE_PATH`.
+Articles are stored in Supabase Postgres via `DATABASE_URL`, so the cache is shared and persistent across every serverless instance — no per-instance cold-start re-ingest.
 
 ## Next steps
 

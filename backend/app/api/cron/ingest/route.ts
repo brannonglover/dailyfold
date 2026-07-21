@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     return jsonResponse(
       {
         ...result,
-        ...getIngestStatus(),
+        ...(await getIngestStatus()),
       },
       null,
     );

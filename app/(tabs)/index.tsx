@@ -514,7 +514,7 @@ function LatestScreenContent() {
       pendingRefreshHint="tap to show"
       onDismissPending={dismissPendingArticles}
       headerExtra={<FeedTopicFilterBar />}
-      layout="newspaper"
+      layout="fold"
       onFeedClick={recordFeedClick}
     />
   );

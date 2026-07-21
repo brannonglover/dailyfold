@@ -282,7 +282,7 @@ export default function ForYouInterestFeedScreen() {
         loadMoreCursor={articles.length}
         loadMoreEpoch={paginationRevision}
         onFeedClick={recordFeedClick}
-        layout="newspaper"
+        layout="snap"
       />
     </>
   );

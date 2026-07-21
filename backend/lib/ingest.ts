@@ -10,7 +10,7 @@ import {
   pruneOldArticles,
   setLastIngestAt,
   updateArticleImageUrl,
-  upsertArticle,
+  upsertArticles,
 } from './db';
 import {
   augmentFeedItemMediaFromXml,
@@ -208,7 +208,7 @@ export function scheduleGuardianHeroRepair(): void {
 async function repairStoredGuardianHeroImages(
   log: (message: string) => void = () => {},
 ): Promise<number> {
-  const stored = listGuardianArticlesNeedingHeroRepair();
+  const stored = await listGuardianArticlesNeedingHeroRepair();
   if (stored.length === 0) {
     log('Guardian hero repair: none needed');
     return 0;
@@ -238,14 +238,14 @@ async function repairStoredGuardianHeroImages(
     if (!original) continue;
 
     if (article.imageUrl !== original.imageUrl) {
-      updateArticleImageUrl(article.id, article.imageUrl);
+      await updateArticleImageUrl(article.id, article.imageUrl);
       repaired += 1;
       continue;
     }
 
     const fallback = repairBrokenGuardianImageUrl(original.imageUrl);
     if (fallback !== original.imageUrl) {
-      updateArticleImageUrl(article.id, fallback);
+      await updateArticleImageUrl(article.id, fallback);
       repaired += 1;
     }
   }
@@ -365,22 +365,13 @@ export async function ingestFeeds(options: IngestOptions = {}): Promise<IngestRe
   }
 
   const upsertStarted = Date.now();
-  const upsertLogInterval = Math.max(25, Math.floor(pending.length / 10));
-  for (let i = 0; i < pending.length; i += 1) {
-    const entry = pending[i]!;
+  for (const entry of pending) {
     applyGuardianHeroFallback(entry.article);
-
-    const action = upsertArticle(entry.article, {
-      feedPublishedAt: entry.feedPublishedAt,
-    });
-    if (action === 'inserted') result.itemsInserted += 1;
-    else result.itemsUpdated += 1;
-
-    const done = i + 1;
-    if (verbose && (done % upsertLogInterval === 0 || done === pending.length)) {
-      log(`Upserting articles: ${done}/${pending.length}`);
-    }
   }
+
+  const { inserted, updated } = await upsertArticles(pending);
+  result.itemsInserted = inserted;
+  result.itemsUpdated = updated;
   log(
     `Upserted ${pending.length} articles (${result.itemsInserted} new, ${result.itemsUpdated} updated) in ${Date.now() - upsertStarted}ms`,
   );
@@ -394,18 +385,18 @@ export async function ingestFeeds(options: IngestOptions = {}): Promise<IngestRe
     );
   }
 
-  result.itemsPruned = pruneOldArticles(MAX_ARTICLE_AGE_DAYS);
+  result.itemsPruned = await pruneOldArticles(MAX_ARTICLE_AGE_DAYS);
   if (result.itemsPruned > 0) {
     log(`Pruned ${result.itemsPruned} articles older than ${MAX_ARTICLE_AGE_DAYS} days`);
   }
-  setLastIngestAt(result.completedAt);
+  await setLastIngestAt(result.completedAt);
 
   log(`Done in ${Date.now() - ingestStarted}ms`);
   return result;
 }
 
-export function isIngestStale(intervalMs: number): boolean {
-  const last = getLastIngestAt();
+export async function isIngestStale(intervalMs: number): Promise<boolean> {
+  const last = await getLastIngestAt();
   if (!last) return true;
   return Date.now() - last.getTime() > intervalMs;
 }

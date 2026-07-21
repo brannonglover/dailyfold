@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const articles = searchArticles(query, {
+    const articles = await searchArticles(query, {
       limit: Number.isFinite(limit) ? limit : 25,
     });
     return jsonResponse({ articles }, origin);

@@ -83,6 +83,21 @@ test('articleNeedsHeroEnrichment is true for broken Guardian signed URLs', () =>
   );
 });
 
+test('articleNeedsHeroEnrichment is true for tiny signed Guardian thumbnails', () => {
+  assert.equal(
+    articleNeedsHeroEnrichment(
+      'https://i.guim.co.uk/img/media/abc/0_0_1200_800/master/1200.jpg?width=140&quality=85&auto=format&fit=max&s=small',
+    ),
+    true,
+  );
+  assert.equal(
+    articleNeedsHeroEnrichment(
+      'https://i.guim.co.uk/img/media/abc/0_0_1200_800/master/1200.jpg?w=460&q=55&auto=format&fit=max&s=small',
+    ),
+    true,
+  );
+});
+
 test('isEspnFeedUrl matches ESPN feed hosts', () => {
   assert.equal(isEspnFeedUrl('https://www.espn.co.uk/espn/rss/football/news'), true);
   assert.equal(isEspnFeedUrl('https://www.espn.com/espn/rss/soccer/news'), true);

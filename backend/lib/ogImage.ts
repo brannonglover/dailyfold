@@ -1,6 +1,6 @@
 import { URL } from 'node:url';
 
-import { isBrokenGuardianImageUrl } from '../../catalog/guardianImageUrl';
+import { isBrokenGuardianImageUrl, isUndersizedGuardianImageUrl } from '../../catalog/guardianImageUrl';
 import { isArticlePlaceholderImageUrl } from '../../catalog/imagePlaceholders';
 
 import {
@@ -162,11 +162,11 @@ export async function fetchPageOgImageUrl(
 
 const DEFAULT_OG_IMAGE_CONCURRENCY = 10;
 
-/** True when RSS left no usable hero (empty, placeholder, or broken Guardian signature). */
+/** True when RSS left no usable hero (empty, placeholder, broken, or tiny Guardian thumbnail). */
 export function articleNeedsHeroEnrichment(imageUrl: string | null | undefined): boolean {
   if (!imageUrl?.trim()) return true;
   if (isArticlePlaceholderImageUrl(imageUrl)) return true;
-  return isBrokenGuardianImageUrl(imageUrl);
+  return isBrokenGuardianImageUrl(imageUrl) || isUndersizedGuardianImageUrl(imageUrl);
 }
 
 export interface HeroEnrichmentOptions {
@@ -220,7 +220,13 @@ export async function enrichArticlesMissingHeroImages<
 
       const article = targets[slot]!;
       const heroUrl = await fetchPageOgImageUrl(article.url, timeoutMs, { onTimeout: onFetchTimeout });
-      if (heroUrl) {
+      if (
+        heroUrl &&
+        !isArticlePlaceholderImageUrl(heroUrl) &&
+        !isBrokenGuardianImageUrl(heroUrl) &&
+        // Don't replace a tiny RSS thumb with another undersized signed URL.
+        !(isUndersizedGuardianImageUrl(article.imageUrl) && isUndersizedGuardianImageUrl(heroUrl))
+      ) {
         article.imageUrl = heroUrl;
         enriched += 1;
       }

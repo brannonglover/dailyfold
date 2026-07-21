@@ -52,20 +52,47 @@ function resolveImageUrl(src: string, baseUrl: string): string | null {
   }
 }
 
+/** One `srcset` entry parsed into its URL and relative quality (width or density x100). */
+function parseSrcsetCandidates(srcset: string): { url: string; width: number }[] {
+  return srcset
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [url, descriptor] = entry.split(/\s+/, 2);
+      if (!url) return null;
+      const widthMatch = descriptor?.match(/^(\d+)w$/);
+      const densityMatch = descriptor?.match(/^(\d+(?:\.\d+)?)x$/);
+      const width = widthMatch
+        ? Number(widthMatch[1])
+        : densityMatch
+          ? Number(densityMatch[1]) * 100
+          : 0;
+      return { url, width };
+    })
+    .filter((candidate): candidate is { url: string; width: number } => candidate !== null);
+}
+
+/** Highest-resolution URL in a `srcset`/`data-srcset` list (entries aren't guaranteed ordering). */
+function bestSrcsetUrl(srcset: string): string | null {
+  const candidates = parseSrcsetCandidates(srcset);
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, next) => (next.width > best.width ? next : best)).url;
+}
+
 function resolveImgSrc(img: Element, baseUrl: string): string | null {
+  const srcset = img.getAttribute('srcset') ?? img.getAttribute('data-srcset');
+
   const candidates = [
+    // Prefer srcset's highest-resolution entry — plain `src` is often a low-res
+    // fallback for browsers that don't support srcset, which reads as blurry here.
+    srcset ? bestSrcsetUrl(srcset) : null,
     img.getAttribute('src'),
     img.getAttribute('data-src'),
     img.getAttribute('data-lazy-src'),
     img.getAttribute('data-original'),
     img.getAttribute('data-lazy'),
   ];
-
-  const srcset = img.getAttribute('srcset') ?? img.getAttribute('data-srcset');
-  if (srcset) {
-    const first = srcset.split(',')[0]?.trim().split(/\s+/)[0];
-    if (first) candidates.push(first);
-  }
 
   for (const candidate of candidates) {
     if (!candidate?.trim()) continue;
@@ -74,6 +101,26 @@ function resolveImgSrc(img: Element, baseUrl: string): string | null {
   }
 
   return null;
+}
+
+/** Highest-resolution candidate across a `<picture>`'s `<source>` variants, falling back to its `<img>`. */
+function resolvePictureSrc(picture: Element, baseUrl: string): string | null {
+  let best: { url: string; width: number } | null = null;
+
+  for (const source of picture.querySelectorAll('source')) {
+    const srcset = source.getAttribute('srcset') ?? source.getAttribute('data-srcset');
+    if (!srcset) continue;
+    for (const candidate of parseSrcsetCandidates(srcset)) {
+      const resolved = resolveImageUrl(candidate.url, baseUrl);
+      if (!resolved || isArticlePlaceholderImageUrl(resolved)) continue;
+      if (!best || candidate.width > best.width) best = { url: resolved, width: candidate.width };
+    }
+  }
+
+  if (best) return best.url;
+
+  const img = picture.querySelector('img');
+  return img ? resolveImgSrc(img, baseUrl) : null;
 }
 
 function isLikelyContentImage(img: Element, resolvedSrc?: string | null): boolean {
@@ -180,7 +227,10 @@ function walkArticleNode(node: Element, blocks: ReaderBlock[], baseUrl: string) 
 
   if (tag === 'picture') {
     const img = node.querySelector('img');
-    if (img) pushImage(blocks, img, baseUrl);
+    const url = resolvePictureSrc(node, baseUrl);
+    if (url && (!img || isLikelyContentImage(img, url))) {
+      pushImageUrl(blocks, url, undefined, img?.getAttribute('alt')?.trim() || undefined);
+    }
     return;
   }
 
@@ -227,9 +277,14 @@ function walkArticleNode(node: Element, blocks: ReaderBlock[], baseUrl: string) 
     const text = node.textContent?.replace(/\s+/g, ' ').trim() ?? '';
     if (img) {
       const url = resolveImgSrc(img, baseUrl);
-      if (url && isLikelyContentImage(img, url) && text.length < 40) {
+      if (url && isLikelyContentImage(img, url)) {
+        // Short text alongside the image reads as a caption, not body copy — image only.
+        if (text.length < 40) {
+          pushImageUrl(blocks, url);
+          return;
+        }
+        // Otherwise keep both: the image was previously dropped silently here.
         pushImageUrl(blocks, url);
-        return;
       }
     }
     pushParagraph(blocks, text);
@@ -248,12 +303,19 @@ function walkArticleNode(node: Element, blocks: ReaderBlock[], baseUrl: string) 
     return;
   }
 
+  if (node.children.length === 0) {
+    // Leaf container (e.g. a bare <div>/<li> paragraph with no <p> wrapper) — its own
+    // text is otherwise never visited, since recursion below only walks element children.
+    pushParagraph(blocks, node.textContent ?? '');
+    return;
+  }
+
   for (const child of node.children) {
     walkArticleNode(child, blocks, baseUrl);
   }
 }
 
-function blocksFromHtml(html: string, baseUrl: string): ReaderBlock[] {
+export function blocksFromHtml(html: string, baseUrl: string): ReaderBlock[] {
   const { document } = parseHTML(`<article>${html}</article>`);
   const root = document.querySelector('article');
   if (!root) return [];
