@@ -69,6 +69,18 @@ export function isFilterExpansion(prevKey: string, nextKey: string): boolean {
   }
 }
 
+/**
+ * Slice a fully-ranked order down to the rows a chip filter allows, keeping their
+ * relative order. Returns null if `ordered` doesn't cover every allowed row (e.g. it
+ * predates a pagination append) so the caller can fall back to a full re-rank.
+ */
+export function sliceOrderedArticles(ordered: Article[], allowed: Article[]): Article[] | null {
+  if (allowed.length === 0) return [];
+  const allowedIds = new Set(allowed.map((article) => article.id));
+  const sliced = ordered.filter((article) => allowedIds.has(article.id));
+  return sliced.length === allowedIds.size ? sliced : null;
+}
+
 /** Refresh article fields without changing which rows are visible or their order. */
 export function updateDisplayArticlesInPlace(
   prev: Article[],

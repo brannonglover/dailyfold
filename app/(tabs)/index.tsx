@@ -21,6 +21,7 @@ import { Article } from '@/types';
 import {
   insertDisplayNewcomersAtSourceOrder,
   mergePaginatedDisplayFeed,
+  sliceOrderedArticles,
   updateDisplayArticlesInPlace,
 } from '@/utils/mergeDisplayFeed';
 import { getFeedEmptyMessage } from '@/utils/feedEmptyMessage';
@@ -50,12 +51,24 @@ function LatestScreenContent() {
     applyPending,
     loadMore,
   } = useArticles();
-  const { preferences, filterFeedArticles, filterForYouFeedArticles, filterByEnabledSources, recordFeedClick } = usePreferences();
+  const {
+    preferences,
+    filterFeedArticles,
+    filterFeedArticlesBase,
+    filterForYouFeedArticles,
+    filterByEnabledSources,
+    recordFeedClick,
+  } = usePreferences();
   const [emptyMessage, setEmptyMessage] = useState<string | undefined>();
   const syncDisplayHandledRef = useRef(false);
   const wasFocusedOnTabPressRef = useRef(false);
   const [feedInteractionEpoch, setFeedInteractionEpoch] = useState(0);
   const isFocused = useIsFocused();
+  // Full "all chips" ranked order, recomputed only when the underlying article set or
+  // personalization changes. Chip-only toggles slice this instead of re-ranking from
+  // scratch, since a chip flip doesn't change the raw articles or their earned order.
+  const fullOrderRef = useRef<Article[]>([]);
+  const fullOrderRawLengthRef = useRef(-1);
 
   useEffect(() => subscribeFeedInteractionLock(() => setFeedInteractionEpoch((n) => n + 1)), []);
 
@@ -113,6 +126,15 @@ function LatestScreenContent() {
   const orderLatestPage = useCallback(
     (items: Article[]) =>
       getLatestFeed(items, orderOpts.prefs, { diversifyTopics: orderOpts.diversifyTopics }),
+    [orderOpts],
+  );
+
+  // Always diversified (as if all chips were on) so any single chip's order can be
+  // derived by slicing this — interleaveByPrimaryTopic interleaves per-topic queues
+  // that are themselves source-interleaved, so filtering it down to one topic yields
+  // the same order as ranking that topic's articles directly.
+  const orderFullLatest = useCallback(
+    (items: Article[]) => getLatestFeed(items, orderOpts.prefs, { diversifyTopics: true }),
     [orderOpts],
   );
 
@@ -209,7 +231,11 @@ function LatestScreenContent() {
     if (!isFocused || isLoading || isLoadingMore || !hasMore || !displayReady) return;
     const upstream = filterFeedArticles(articles);
     if (upstream.length >= MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION) return;
-    if (upstream.length <= displayArticles.length) return;
+    // Only skip once displayArticles has caught up with everything upstream has found —
+    // when both are 0 (a chip with no matches yet) this must NOT bail, or a narrow filter
+    // with zero current matches never triggers the fetch that could find more.
+    if (upstream.length > 0 && upstream.length <= displayArticles.length) return;
+    console.log('[chipDebug] auto-top-up loadMore firing', { upstreamLen: upstream.length, displayLen: displayArticles.length });
     void loadMore();
   }, [
     isFocused,
@@ -264,7 +290,15 @@ function LatestScreenContent() {
   useDeferAfterFocus(
     isFocused,
     () => {
-      if (isFeedInteractionLocked()) return;
+      console.log('[chipDebug] effect fired', {
+        filterKey,
+        locked: isFeedInteractionLocked(),
+        articlesLen: articles.length,
+      });
+      if (isFeedInteractionLocked()) {
+        console.log('[chipDebug] bail: interaction locked');
+        return;
+      }
       const handledSyncPagination = syncDisplayHandledRef.current;
       syncDisplayHandledRef.current = false;
       if (articles.length === 0) {
@@ -295,13 +329,16 @@ function LatestScreenContent() {
         return;
       }
 
+      console.log('[chipDebug] isCacheFresh?', isCacheFresh(feedGeneration, articles.length, filterKey));
       if (isCacheFresh(feedGeneration, articles.length, filterKey)) {
         const filteredArticles = filterFeedArticles(articles);
         const visibleCount =
           displayArticles.length > 0
             ? displayArticles.length
             : (readTabDisplayCache('latest')?.displayArticles.length ?? 0);
-        if (!isDisplayFeedUnderstocked(visibleCount, filteredArticles.length)) {
+        const understocked = isDisplayFeedUnderstocked(visibleCount, filteredArticles.length);
+        console.log('[chipDebug] cache-fresh branch', { visibleCount, filteredLen: filteredArticles.length, understocked });
+        if (!understocked) {
           prevRawLengthRef.current = articles.length;
           prevFeedGenerationRef.current = feedGeneration;
           prevFilterKeyRef.current = filterKey;
@@ -312,11 +349,13 @@ function LatestScreenContent() {
             }
             setDisplayReady(true);
           });
+          console.log('[chipDebug] bail: cache-fresh, not understocked');
           return;
         }
       }
 
       const filteredArticles = filterFeedArticles(articles);
+      console.log('[chipDebug] filteredArticles computed', { count: filteredArticles.length });
       const generationChanged = feedGeneration !== prevFeedGenerationRef.current;
       const listShrunk = articles.length < prevRawLengthRef.current;
       const filtersChanged = filterKey !== prevFilterKeyRef.current;
@@ -328,26 +367,70 @@ function LatestScreenContent() {
         filtersChanged ||
         personalizationChanged ||
         prevRawLengthRef.current === 0;
+      console.log('[chipDebug] rebuild decision', {
+        needsFullRebuild,
+        generationChanged,
+        listShrunk,
+        filtersChanged,
+        personalizationChanged,
+      });
 
       const applyDisplay = (updater: () => void) => {
         startTransition(updater);
       };
 
+      // A chip-only toggle doesn't change the raw articles, personalization, or their
+      // earned order — slice the last full ranking instead of re-ranking from scratch.
+      const canSliceFullOrder =
+        filtersChanged &&
+        !generationChanged &&
+        !listShrunk &&
+        !personalizationChanged &&
+        articles.length === fullOrderRawLengthRef.current;
+      console.log('[chipDebug] canSliceFullOrder', {
+        canSliceFullOrder,
+        articlesLen: articles.length,
+        fullOrderRawLen: fullOrderRawLengthRef.current,
+      });
+
+      const rankFilteredArticles = () => {
+        if (canSliceFullOrder) {
+          const sliced = sliceOrderedArticles(fullOrderRef.current, filteredArticles);
+          if (sliced) {
+            console.log('[chipDebug] fast slice path used', { count: sliced.length });
+            return sliced;
+          }
+          console.log('[chipDebug] slice returned null, falling back to full rank');
+        }
+        const start = Date.now();
+        const baseArticles = filterFeedArticlesBase(articles);
+        fullOrderRef.current = orderFullLatest(baseArticles);
+        fullOrderRawLengthRef.current = articles.length;
+        const result = sliceOrderedArticles(fullOrderRef.current, filteredArticles) ?? orderLatest(filteredArticles);
+        console.log('[chipDebug] full rank path used', { ms: Date.now() - start, count: result.length });
+        return result;
+      };
+
       if (needsFullRebuild) {
         syncDisplayHandledRef.current = true;
+        console.log('[chipDebug] entering needsFullRebuild, shouldAllowFullRebuild=', shouldAllowFullRebuild(filtersChanged, prevFilterKeyRef.current, filterKey));
         applyDisplay(() => {
           if (shouldAllowFullRebuild(filtersChanged, prevFilterKeyRef.current, filterKey)) {
-            setDisplayArticles(orderLatest(filteredArticles));
+            const ranked = rankFilteredArticles();
+            console.log('[chipDebug] setDisplayArticles (full rebuild)', { count: ranked.length });
+            setDisplayArticles(ranked);
             markInitialDisplay();
             prevFeedGenerationRef.current = feedGeneration;
             prevFilterKeyRef.current = filterKey;
             prevPersonalizationKeyRef.current = personalizationKey;
           } else {
+            console.log('[chipDebug] shouldAllowFullRebuild=false, using updateDisplayArticlesInPlace (no new rows added)');
             setDisplayArticles((prev) => updateDisplayArticlesInPlace(prev, filteredArticles));
           }
           setDisplayReady(true);
         });
       } else if (!handledSyncPagination && articles.length > prevRawLengthRef.current) {
+        console.log('[chipDebug] taking append/pagination branch instead of rebuild');
         syncDisplayHandledRef.current = true;
         applyDisplay(() => {
           setDisplayArticles((prev) => {
@@ -390,9 +473,11 @@ function LatestScreenContent() {
       displayReady,
       feedGeneration,
       filterFeedArticles,
+      filterFeedArticlesBase,
       filterKey,
       isCacheFresh,
       orderLatest,
+      orderFullLatest,
       orderLatestPage,
       personalizationKey,
       markInitialDisplay,
@@ -485,13 +570,6 @@ function LatestScreenContent() {
     filterByEnabledSources,
   ]);
 
-  const isBuildingFeed =
-    isFocused &&
-    !isLoading &&
-    articles.length > 0 &&
-    filtered.length === 0 &&
-    !hasShowableTabDisplayCache('latest');
-
   return (
     <ArticleFeedScreen
       ref={feedRef}
@@ -499,7 +577,7 @@ function LatestScreenContent() {
       title="Latest"
       titleTrailing={<BrandLogo />}
       emptyMessage={emptyMessage}
-      isLoading={isLoading || isBuildingFeed}
+      isLoading={isLoading}
       isRefreshing={isRefreshing}
       error={error}
       notice={notice}

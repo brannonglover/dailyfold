@@ -42,7 +42,7 @@ import {
 import { MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION } from '@/utils/feedLoadMoreGate';
 import { fetchFeedUntilStocked } from '@/utils/feedInitialStock';
 import { shouldBumpPaginationRevision } from '@/utils/paginationRevision';
-import { isFilteredFeedStocked } from '@/utils/feedVisibleStock';
+import { countFilteredFeedArticles, isFilteredFeedStocked } from '@/utils/feedVisibleStock';
 
 interface UseArticlesResult {
   articles: Article[];
@@ -421,6 +421,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
               return;
             }
 
+            console.log('[chipDebug] fetch result', { mode, dataLen: data.length, hasMore: meta?.hasMore, nextCursor: meta?.nextCursor });
             applyFetchResult(mode, data, meta, generation);
             return;
           } catch (e) {
@@ -645,12 +646,21 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   }, [applyPendingArticles, load, runWithRefreshIndicator]);
 
   const loadMore = useCallback(async () => {
-    if (!hasMore || loadMoreInFlightRef.current) return;
+    console.log('[chipDebug] loadMore() called', { hasMore, inFlight: loadMoreInFlightRef.current });
+    if (!hasMore || loadMoreInFlightRef.current) {
+      console.log('[chipDebug] loadMore() bailed', { hasMore, inFlight: loadMoreInFlightRef.current });
+      return;
+    }
     const cursor = resolveLoadMoreCursor(articlesRef.current);
-    if (!cursor) return;
+    if (!cursor) {
+      console.log('[chipDebug] loadMore() bailed: no cursor');
+      return;
+    }
     loadMoreInFlightRef.current = true;
+    const start = Date.now();
     try {
       await load('append', false, cursor);
+      console.log('[chipDebug] loadMore() finished', { ms: Date.now() - start });
     } finally {
       loadMoreInFlightRef.current = false;
     }
@@ -683,6 +693,9 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!feedReady || isLoading || isRefreshing || isLoadingMore || !hasMore) return;
     if (isFilteredFeedStocked(articlesRef.current, preferences, sources)) return;
+    console.log('[chipDebug] context-level auto-top-up firing', {
+      count: countFilteredFeedArticles(articlesRef.current, preferences, sources),
+    });
     void loadMore();
   }, [
     articles,

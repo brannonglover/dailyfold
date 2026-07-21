@@ -1,11 +1,9 @@
 /**
- * TEMPORARY — World Cup 2026 tab. Remove this file, `app/(tabs)/world-cup.tsx`,
- * `services/worldCupFeed.ts`, `services/worldCupMatchNotifications.ts`,
- * `services/worldCupNotificationScheduler.ts`, `services/worldCupNotificationPrefs.ts`,
- * `hooks/useWorldCupMatchNotifications.ts`, and the tab entry in `app/(tabs)/_layout.tsx`
- * after the tournament ends (~July 2026).
+ * World Cup tab feature flag. Set to `true` to show the tab in `app/(tabs)/_layout.tsx`.
+ * Keep feed, notification, and UI code in place between tournaments — flip this back on
+ * when the next World Cup (or similar event) needs a dedicated tab.
  */
-export const WORLD_CUP_TAB_ENABLED = true;
+export const WORLD_CUP_TAB_ENABLED = false;
 
 export const WORLD_CUP_SCOREBOARD_URL =
   'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard';

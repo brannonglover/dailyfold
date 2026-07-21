@@ -9,6 +9,7 @@ import {
   insertDisplayNewcomersAtSourceOrder,
   isFilterExpansion,
   mergePaginatedDisplayFeed,
+  sliceOrderedArticles,
   updateDisplayArticlesInPlace,
 } from '@/utils/mergeDisplayFeed';
 
@@ -179,4 +180,26 @@ test('mergePaginatedDisplayFeed spreads prepended batches against the feed head'
   assert.notEqual(articleSpreadBucket(merged[0]!), articleSpreadBucket(merged[1]!));
   assert.ok(merged.some((item) => item.id === 'n1'));
   assert.ok(merged.some((item) => item.id === 'a'));
+});
+
+test('sliceOrderedArticles keeps allowed rows in their ranked order', () => {
+  const ordered = [article('a'), article('b'), article('c'), article('d')];
+  const allowed = [article('c'), article('a')];
+
+  const sliced = sliceOrderedArticles(ordered, allowed);
+
+  assert.deepEqual(sliced?.map((item) => item.id), ['a', 'c']);
+});
+
+test('sliceOrderedArticles returns null when the ranked order is missing an allowed row', () => {
+  const ordered = [article('a'), article('b')];
+  const allowed = [article('a'), article('z')];
+
+  assert.equal(sliceOrderedArticles(ordered, allowed), null);
+});
+
+test('sliceOrderedArticles returns an empty list when nothing is allowed', () => {
+  const ordered = [article('a'), article('b')];
+
+  assert.deepEqual(sliceOrderedArticles(ordered, []), []);
 });

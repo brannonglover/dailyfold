@@ -1,17 +1,21 @@
 import { router } from 'expo-router';
 
-import { prefetchArticleReaderContent } from '@/services/articleContent';
 import { rememberOpenArticle } from '@/services/articleSession';
 import { Article } from '@/types';
 import { articlePath } from '@/utils/notificationArticleLink';
+import {
+  hasOpenablePublisherUrl,
+  openPublisherArticle,
+} from '@/utils/openPublisherBrowser';
 
-/** Prefetch reader content so the first story tap feels instant. */
+/** Warm session memory so deep links / retries resolve instantly. */
 export function warmArticleOpen(article: Article): void {
-  prefetchArticleReaderContent(article.id, article);
+  rememberOpenArticle(article);
 }
 
 /**
- * Opens the article in the in-app reader.
+ * Opens the article in the in-app publisher browser.
+ * Falls back to the native reader only when there is no openable URL.
  * Optionally records a feed curiosity click before opening.
  */
 export async function openFeedArticle(
@@ -20,6 +24,14 @@ export async function openFeedArticle(
 ): Promise<void> {
   options?.onFeedClick?.(article);
   rememberOpenArticle(article);
-  prefetchArticleReaderContent(article.id, article);
+
+  if (hasOpenablePublisherUrl(article.url)) {
+    await openPublisherArticle(article.url, {
+      title: article.title,
+      source: article.source,
+    });
+    return;
+  }
+
   router.push(articlePath(article.id));
 }

@@ -223,6 +223,7 @@ function StoryCard({
             recyclingKey={article.id}
             source={article.source}
             sourceLogo={article.sourceLogo}
+            showBrandLogo
             style={[styles.storyImageWrap, { aspectRatio: STORY_CARD_LEAD_IMAGE_ASPECT }]}
           />
         ) : (

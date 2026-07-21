@@ -133,17 +133,57 @@ function PublisherLink({
   );
 }
 
+function ContinueReadingButton({
+  source,
+  onPress,
+  isOpening,
+  colors,
+}: {
+  source: string;
+  onPress: () => void;
+  isOpening: boolean;
+  colors: ReturnType<typeof useTheme>['colors'];
+}) {
+  const label = `Continue reading on ${source}`;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={isOpening}
+      style={({ pressed }) => [
+        styles.continueButton,
+        {
+          backgroundColor: colors.text,
+          opacity: pressed || isOpening ? 0.85 : 1,
+        },
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ busy: isOpening }}>
+      {isOpening ? (
+        <ActivityIndicator size="small" color={colors.background} />
+      ) : (
+        <Ionicons name="book-outline" size={18} color={colors.background} />
+      )}
+      <Text style={[styles.continueButtonText, { color: colors.background }]}>
+        {isOpening ? 'Opening…' : label}
+      </Text>
+    </Pressable>
+  );
+}
+
 export function ArticleReader({ article }: ArticleReaderProps) {
   const { colors } = useTheme();
   const { recordArticleOpen } = usePreferences();
   const insets = useSafeAreaInsets();
   const requiresSubscription = article.requiresSubscription === true;
   const { open: openOnPublisher, isOpening: isOpeningPublisher, canOpen: canOpenOnPublisher } =
-    useOpenPublisherArticle(article.url);
+    useOpenPublisherArticle(article.url, {
+      title: article.title,
+      source: article.source,
+    });
   const [readerContent, setReaderContent] = useState<ArticleReaderContent | null>(
     () => resolveReaderContentForArticle(article),
   );
-  const [contentError, setContentError] = useState(false);
   const [isLoadingContent, setIsLoadingContent] = useState(
     () => resolveReaderContentForArticle(article) == null,
   );
@@ -169,11 +209,9 @@ export function ArticleReader({ article }: ArticleReaderProps) {
     const cached = getCachedReaderContent(contentArticleId) ?? preview;
     if (cached) {
       setReaderContent(cached);
-      setContentError(false);
       setIsLoadingContent(false);
     } else {
       setIsLoadingContent(true);
-      setContentError(false);
       setReaderContent(null);
     }
 
@@ -183,8 +221,7 @@ export function ArticleReader({ article }: ArticleReaderProps) {
         setReaderContent(content);
       })
       .catch(() => {
-        if (cancelled || activeContentArticleIdRef.current !== contentArticleId) return;
-        setContentError(true);
+        // Keep any feed preview; Continue reading CTA covers the gap.
       })
       .finally(() => {
         if (cancelled || activeContentArticleIdRef.current !== contentArticleId) return;
@@ -208,7 +245,9 @@ export function ArticleReader({ article }: ArticleReaderProps) {
   const hasReadableBody = bodyBlocks.length > 0;
   const showLoadingBody = isLoadingContent && !hasReadableBody;
   const showExtractionInProgress = isLoadingContent && hasReadableBody;
-  const showLoadMoreError = contentError && !isLoadingContent && !hasReadableBody;
+  const hasExtractedBody = !isLoadingContent && extractedBlocks != null && extractedBlocks.length > 0;
+  /** Feed-only, empty, or failed extraction — full piece lives on the publisher site. */
+  const needsPublisherContinuation = canOpenOnPublisher && !isLoadingContent && !hasExtractedBody;
 
   return (
     <SourceMenuHost>
@@ -256,7 +295,7 @@ export function ArticleReader({ article }: ArticleReaderProps) {
             ))}
           </View>
 
-          {canOpenOnPublisher ? (
+          {hasExtractedBody && canOpenOnPublisher ? (
             <PublisherLink
               label={`Open on ${article.source}`}
               style={styles.publisherLinkTop}
@@ -310,13 +349,23 @@ export function ArticleReader({ article }: ArticleReaderProps) {
             </View>
           ) : null}
 
-          {showLoadMoreError ? (
-            <Text style={[styles.errorText, { color: colors.textSecondary }]}>
-              We couldn't load more of this article in the app.
-            </Text>
+          {needsPublisherContinuation ? (
+            <View style={styles.continueSection}>
+              <Text style={[styles.continueHint, { color: colors.textSecondary }]}>
+                {hasReadableBody
+                  ? `The full article is available on ${article.source}.`
+                  : `Read the full piece on ${article.source}.`}
+              </Text>
+              <ContinueReadingButton
+                source={article.source}
+                onPress={openOnPublisher}
+                isOpening={isOpeningPublisher}
+                colors={colors}
+              />
+            </View>
           ) : null}
 
-          {canOpenOnPublisher ? (
+          {hasExtractedBody && canOpenOnPublisher ? (
             <PublisherLink
               label={`View full article on ${article.source}`}
               style={styles.publisherLink}
@@ -450,11 +499,29 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter',
     fontSize: 14,
   },
-  errorText: {
+  continueSection: {
+    marginTop: 8,
+    marginBottom: 8,
+    gap: 14,
+  },
+  continueHint: {
     fontFamily: 'Inter',
     fontSize: 15,
     lineHeight: 22,
-    marginBottom: 20,
+  },
+  continueButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+  },
+  continueButtonText: {
+    fontFamily: 'InterSemiBold',
+    fontSize: 15,
+    letterSpacing: -0.2,
   },
   paragraph: {
     fontFamily: 'Inter',

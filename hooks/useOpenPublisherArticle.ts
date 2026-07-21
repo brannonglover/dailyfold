@@ -4,9 +4,14 @@ import { Platform } from 'react-native';
 
 import { hasOpenablePublisherUrl, openPublisherArticle } from '@/utils/openPublisherBrowser';
 
-export function useOpenPublisherArticle(url: string | undefined) {
+export function useOpenPublisherArticle(
+  url: string | undefined,
+  options?: { title?: string; source?: string },
+) {
   const [isOpening, setIsOpening] = useState(false);
   const canOpen = hasOpenablePublisherUrl(url);
+  const title = options?.title;
+  const source = options?.source;
 
   const open = useCallback(() => {
     if (!url || !canOpen || isOpening) return;
@@ -16,10 +21,10 @@ export function useOpenPublisherArticle(url: string | undefined) {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
 
-    void openPublisherArticle(url).finally(() => {
+    void openPublisherArticle(url, { title, source }).finally(() => {
       setIsOpening(false);
     });
-  }, [url, canOpen, isOpening]);
+  }, [url, canOpen, isOpening, title, source]);
 
   return { open, isOpening, canOpen };
 }

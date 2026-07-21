@@ -598,7 +598,9 @@ function UpdateRow({ update }: { update: WorldCupUpdate }) {
 
   return (
     <Pressable
-      onPress={() => openPublisherArticle(update.url)}
+      onPress={() =>
+        openPublisherArticle(update.url, { title: update.title, source: update.source })
+      }
       accessibilityRole="button"
       accessibilityLabel={update.title}
       accessibilityHint={`Opens article from ${update.source}`}

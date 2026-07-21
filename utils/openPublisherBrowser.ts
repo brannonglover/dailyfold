@@ -1,5 +1,10 @@
-import * as WebBrowser from 'expo-web-browser';
+import { router } from 'expo-router';
 import { Platform } from 'react-native';
+
+export type OpenPublisherOptions = {
+  title?: string;
+  source?: string;
+};
 
 /** True when the article has an http(s) permalink suitable for "Open on …". */
 export function hasOpenablePublisherUrl(url: string | undefined): boolean {
@@ -7,30 +12,33 @@ export function hasOpenablePublisherUrl(url: string | undefined): boolean {
   return Boolean(trimmed && /^https?:\/\//i.test(trimmed));
 }
 
-let warmUpPromise: Promise<void> | null = null;
-
-/** Preload the in-app browser so the first "View full article" tap feels instant. */
-export function warmUpPublisherBrowser(): void {
-  if (Platform.OS === 'web') return;
-  warmUpPromise ??= WebBrowser.warmUpAsync()
-    .then(() => undefined)
-    .catch(() => undefined);
+/** Build the in-app publisher browser path with encoded query params. */
+export function publisherBrowserHref(
+  url: string,
+  options?: OpenPublisherOptions,
+): `/browser?${string}` {
+  const params = new URLSearchParams({ url });
+  const title = options?.title?.trim();
+  const source = options?.source?.trim();
+  if (title) params.set('title', title);
+  if (source) params.set('source', source);
+  return `/browser?${params.toString()}` as `/browser?${string}`;
 }
 
-/** Opens the publisher site in an in-app browser with a close (X) control on iOS. */
-export async function openPublisherArticle(url: string): Promise<void> {
+/**
+ * Opens the publisher site in the Dailyfold in-app browser.
+ * On web, opens a new tab instead.
+ */
+export async function openPublisherArticle(
+  url: string,
+  options?: OpenPublisherOptions,
+): Promise<void> {
   if (!hasOpenablePublisherUrl(url)) return;
+
   if (Platform.OS === 'web') {
     window.open(url, '_blank', 'noopener,noreferrer');
     return;
   }
 
-  warmUpPublisherBrowser();
-
-  await WebBrowser.openBrowserAsync(url, {
-    dismissButtonStyle: 'close',
-    presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
-    enableBarCollapsing: true,
-    showTitle: true,
-  });
+  router.push(publisherBrowserHref(url, options));
 }

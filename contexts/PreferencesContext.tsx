@@ -36,7 +36,11 @@ import {
   disableSourceInPreferences,
   findSourceIdForArticle,
 } from '@/services/blockPreferences';
-import { applyFeedFilters, filterForYouFeedArticles as filterForYouCandidates } from '@/services/feedFilters';
+import {
+  applyFeedFilters,
+  applyFeedFiltersIgnoringTopics,
+  filterForYouFeedArticles as filterForYouCandidates,
+} from '@/services/feedFilters';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import { fetchArticleById } from '@/services/articles';
 import {
@@ -92,6 +96,8 @@ interface PreferencesContextValue {
   filterByEnabledTopics: (articles: Article[]) => Article[];
   filterByEnabledSportTags: (articles: Article[]) => Article[];
   filterFeedArticles: (articles: Article[]) => Article[];
+  /** Same as filterFeedArticles but bypasses topic/sport chips — a stable base to re-rank once and slice per chip. */
+  filterFeedArticlesBase: (articles: Article[]) => Article[];
   filterForYouFeedArticles: (articles: Article[]) => Article[];
   toggleTopic: (topic: Topic) => Promise<void>;
   selectAllTopics: () => Promise<void>;
@@ -163,10 +169,13 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       if (!user) return;
       const normalized = normalizeFeedPreferences(next);
       const previous = preferencesRef.current;
+      console.log('[chipDebug] persist: setPreferences (sync state update)');
       setPreferences(normalized);
       preferencesRef.current = normalized;
       try {
+        const start = Date.now();
         await savePreferences(user.id, normalized);
+        console.log('[chipDebug] persist: savePreferences done', { ms: Date.now() - start });
       } catch {
         if (preferencesRef.current === normalized) {
           preferencesRef.current = previous;
@@ -490,6 +499,11 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     [preferences, sources],
   );
 
+  const filterFeedArticlesBase = useCallback(
+    (articles: Article[]) => applyFeedFiltersIgnoringTopics(articles, preferences, sources),
+    [preferences, sources],
+  );
+
   const filterForYouFeedArticles = useCallback(
     (items: Article[]) => filterForYouCandidates(items, preferences, sources),
     [preferences, sources],
@@ -579,6 +593,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
 
   const toggleTopic = useCallback(
     async (topic: Topic) => {
+      console.log('[chipDebug] toggleTopic called', { topic, hasUser: !!user, hasPrefs: !!preferences });
       if (!user || !preferences) return;
 
       let nextTopics: Topic[];
@@ -598,11 +613,13 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
           ? preferences.enabledSportTags
           : [];
 
+      console.log('[chipDebug] toggleTopic persisting', { nextTopics, nextSportTags });
       await persist({
         ...preferences,
         enabledTopics: nextTopics,
         enabledSportTags: nextSportTags,
       });
+      console.log('[chipDebug] toggleTopic persisted');
     },
     [user, preferences, persist],
   );
@@ -739,6 +756,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       filterByEnabledTopics,
       filterByEnabledSportTags,
       filterFeedArticles,
+      filterFeedArticlesBase,
       filterForYouFeedArticles,
       toggleTopic,
       selectAllTopics,
@@ -783,6 +801,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       filterByEnabledTopics,
       filterByEnabledSportTags,
       filterFeedArticles,
+      filterFeedArticlesBase,
       filterForYouFeedArticles,
       toggleTopic,
       selectAllTopics,

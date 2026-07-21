@@ -14,7 +14,6 @@ import { AppThemeProvider } from '@/contexts/ThemeContext';
 import { useAppFonts } from '@/constants/Fonts';
 import { useNotificationNavigation } from '@/hooks/useNotificationNavigation';
 import { useTrendingNotificationBackground } from '@/hooks/useTrendingNotificationBackground';
-import { warmUpPublisherBrowser } from '@/utils/openPublisherBrowser';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -84,10 +83,6 @@ const RootLayoutNav = memo(function RootLayoutNav() {
   useNotificationNavigation();
   useTrendingNotificationBackground();
 
-  useEffect(() => {
-    warmUpPublisherBrowser();
-  }, []);
-
   return (
     <ThemeProvider value={DarkNavTheme}>
       <AuthGate>
@@ -109,6 +104,17 @@ const RootLayoutNav = memo(function RootLayoutNav() {
             name="article/[id]"
             options={{
               headerShown: true,
+              presentation: 'card',
+              gestureEnabled: true,
+              fullScreenGestureEnabled: false,
+              animationMatchesGesture: true,
+              animation: 'slide_from_right',
+            }}
+          />
+          <Stack.Screen
+            name="browser"
+            options={{
+              headerShown: false,
               presentation: 'card',
               gestureEnabled: true,
               fullScreenGestureEnabled: false,

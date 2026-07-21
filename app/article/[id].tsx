@@ -1,14 +1,19 @@
-import { Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { ArticleReader } from '@/components/ArticleReader';
+import { usePreferences } from '@/contexts/PreferencesContext';
 import { useTheme } from '@/hooks/useTheme';
 import { lookupArticleById, rememberOpenArticle } from '@/services/articleSession';
 import { patchFeedArticle } from '@/services/articleFeedPatch';
 import { fetchArticleById } from '@/services/articles';
 import { Article } from '@/types';
 import { isValidArticleRouteId } from '@/utils/notificationArticleLink';
+import {
+  hasOpenablePublisherUrl,
+  publisherBrowserHref,
+} from '@/utils/openPublisherBrowser';
 import { resolveDisplayArticle } from '@/utils/resolveDisplayArticle';
 
 function resolveArticleId(id: string | string[] | undefined): string | undefined {
@@ -19,7 +24,10 @@ function resolveArticleId(id: string | string[] | undefined): string | undefined
 export default function ArticleScreen() {
   const { id } = useLocalSearchParams<{ id: string | string[] }>();
   const articleId = resolveArticleId(id);
+  const router = useRouter();
   const { colors } = useTheme();
+  const { recordArticleOpen } = usePreferences();
+  const redirectedRef = useRef<string | null>(null);
   const [article, setArticle] = useState<Article | undefined>(() => {
     if (!articleId) return undefined;
     return lookupArticleById(articleId);
@@ -67,6 +75,23 @@ export default function ArticleScreen() {
     };
   }, [articleId]);
 
+  // Deep links / notifications land here — send them straight to the publisher browser.
+  useEffect(() => {
+    if (!displayArticle) return;
+    if (!hasOpenablePublisherUrl(displayArticle.url)) return;
+    if (redirectedRef.current === displayArticle.id) return;
+
+    redirectedRef.current = displayArticle.id;
+    rememberOpenArticle(displayArticle);
+    recordArticleOpen(displayArticle);
+    router.replace(
+      publisherBrowserHref(displayArticle.url, {
+        title: displayArticle.title,
+        source: displayArticle.source,
+      }),
+    );
+  }, [displayArticle, recordArticleOpen, router]);
+
   if (!displayArticle) {
     if (isLoading) {
       return (
@@ -95,6 +120,26 @@ export default function ArticleScreen() {
           <Text style={[styles.notFoundText, { color: colors.textSecondary }]}>
             This article could not be found.
           </Text>
+        </View>
+      </>
+    );
+  }
+
+  if (hasOpenablePublisherUrl(displayArticle.url)) {
+    return (
+      <>
+        <Stack.Screen
+          options={{
+            title: '',
+            headerStyle: { backgroundColor: colors.background },
+            headerShadowVisible: false,
+            headerTintColor: colors.text,
+            headerBackTitle: 'Back',
+            contentStyle: { backgroundColor: colors.background },
+          }}
+        />
+        <View style={[styles.centered, { backgroundColor: colors.background }]}>
+          <ActivityIndicator color={colors.text} />
         </View>
       </>
     );

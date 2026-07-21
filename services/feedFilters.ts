@@ -48,6 +48,29 @@ export function applyFeedFilters(
 }
 
 /**
+ * Same pipeline as {@link applyFeedFilters} but bypasses the topic/sport chips.
+ * Lets callers compute a single stable base ordering once and derive each chip's
+ * filtered view by slicing it, instead of re-ranking on every chip toggle.
+ */
+export function applyFeedFiltersIgnoringTopics(
+  articles: Article[],
+  preferences: UserPreferences | null | undefined,
+  sources: FeedSource[],
+): Article[] {
+  let result = applyArticleStoryFallbacks(articles);
+
+  if (preferences) {
+    const prefs = normalizeFeedPreferences(preferences);
+    const catalogSources = sources.length > 0 ? sources : FALLBACK_SOURCES;
+
+    result = filterArticlesBySources(result, catalogSources, prefs.enabledSourceIds);
+    result = filterArticlesByBlocks(result, prefs);
+  }
+
+  return filterArticlesWithRealHeroImage(result);
+}
+
+/**
  * For You candidate pool — source toggles and blocks apply, but profile topic/sport
  * chips do not. Interest tiles drive what stories qualify, not Latest category filters.
  */

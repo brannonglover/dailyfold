@@ -1,3 +1,4 @@
+import { Image } from 'expo-image';
 import { useState } from 'react';
 import { LayoutChangeEvent, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 
@@ -5,11 +6,15 @@ import { ArticleImage } from '@/components/ArticleImage';
 import { FoldTicks } from '@/components/FoldTicks';
 import { useTheme } from '@/hooks/useTheme';
 
+const brandIconSource = require('@/assets/images/logo-icon.png');
+
 interface FoldedImageProps {
   uri: string;
   recyclingKey?: string;
   source?: string;
   sourceLogo?: string;
+  /** Overlays the DailyFold icon in the upper-left (lead heroes). */
+  showBrandLogo?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -26,7 +31,14 @@ const MAX_SCALE = 1;
  * ArticleImage with parallelogram fold-ticks overlaying the bottom edge —
  * echoes the fold-lines in the dailyfold wordmark.
  */
-export function FoldedImage({ uri, recyclingKey, source, sourceLogo, style }: FoldedImageProps) {
+export function FoldedImage({
+  uri,
+  recyclingKey,
+  source,
+  sourceLogo,
+  showBrandLogo = false,
+  style,
+}: FoldedImageProps) {
   const { colors } = useTheme();
   const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -46,6 +58,16 @@ export function FoldedImage({ uri, recyclingKey, source, sourceLogo, style }: Fo
         sourceLogo={sourceLogo}
         style={styles.image}
       />
+      {showBrandLogo ? (
+        <View style={styles.brandMark} pointerEvents="none">
+          <Image
+            source={brandIconSource}
+            style={styles.brandLogo}
+            contentFit="contain"
+            accessibilityLabel="DailyFold"
+          />
+        </View>
+      ) : null}
       {size.width > 0 && scale > 0 ? (
         <View style={styles.ticksWrap} pointerEvents="none">
           <FoldTicks
@@ -68,6 +90,17 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+  },
+  brandMark: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    paddingTop: 14,
+    paddingLeft: 14,
+  },
+  brandLogo: {
+    height: 64,
+    width: 48,
   },
   ticksWrap: {
     position: 'absolute',
