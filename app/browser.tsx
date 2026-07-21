@@ -367,54 +367,53 @@ export default function PublisherBrowserScreen() {
           </View>
         ) : (
           <View style={styles.webviewStack}>
-            <WebView
-              ref={webRef}
-              source={{ uri: initialUrl }}
-              // Keep the publisher page mounted for quick toggle-back, but park it
-              // off-screen. opacity:0 alone is unreliable on iOS WKWebView and was
-              // leaving a black band that clipped Reader content.
-              style={readerMode ? styles.parkedWebview : styles.webview}
-              pointerEvents={readerMode ? 'none' : 'auto'}
-              onNavigationStateChange={handleNavChange}
-              onLoadProgress={({ nativeEvent }) => setProgress(nativeEvent.progress)}
-              onLoadStart={() => {
-                setIsLoading(true);
-                setHasError(false);
-                // Fresh navigation — drop any Reader snapshot from the previous page.
-                setReaderArticle(null);
-                setIsConvertingReader(false);
-              }}
-              onLoadEnd={() => {
-                setIsLoading(false);
-                setProgress(1);
-              }}
-              onError={() => {
-                setIsLoading(false);
-                setHasError(true);
-              }}
-              onHttpError={(event) => {
-                if (event.nativeEvent.statusCode >= 500) {
-                  setHasError(true);
+            {!readerMode ? (
+              <WebView
+                ref={webRef}
+                // currentUrl (not initialUrl) so unmount/remount on Reader exit resumes
+                // wherever the user had navigated to, not back at the start.
+                source={{ uri: currentUrl || initialUrl }}
+                // Unmounted (not just hidden) while Reader is showing — a hidden-but-mounted
+                // WKWebView, even at 1x1px off-screen, can still composite its native layer
+                // on top of siblings on iOS and was leaving a black band over Reader content.
+                style={styles.webview}
+                onNavigationStateChange={handleNavChange}
+                onLoadProgress={({ nativeEvent }) => setProgress(nativeEvent.progress)}
+                onLoadStart={() => {
+                  setIsLoading(true);
+                  setHasError(false);
+                  // Fresh navigation — drop any Reader snapshot from the previous page.
+                  setReaderArticle(null);
+                  setIsConvertingReader(false);
+                }}
+                onLoadEnd={() => {
                   setIsLoading(false);
-                }
-              }}
-              onMessage={handleWebMessage}
-              allowsBackForwardNavigationGestures={!readerMode}
-              startInLoadingState
-              renderLoading={() =>
-                readerMode ? (
-                  <View />
-                ) : (
+                  setProgress(1);
+                }}
+                onError={() => {
+                  setIsLoading(false);
+                  setHasError(true);
+                }}
+                onHttpError={(event) => {
+                  if (event.nativeEvent.statusCode >= 500) {
+                    setHasError(true);
+                    setIsLoading(false);
+                  }
+                }}
+                onMessage={handleWebMessage}
+                allowsBackForwardNavigationGestures
+                startInLoadingState
+                renderLoading={() => (
                   <View style={[styles.loadingOverlay, { backgroundColor: colors.background }]}>
                     <ActivityIndicator color={colors.textSecondary} />
                   </View>
-                )
-              }
-              setSupportMultipleWindows={false}
-              allowsInlineMediaPlayback
-              mediaPlaybackRequiresUserAction={false}
-              decelerationRate="normal"
-            />
+                )}
+                setSupportMultipleWindows={false}
+                allowsInlineMediaPlayback
+                mediaPlaybackRequiresUserAction={false}
+                decelerationRate="normal"
+              />
+            ) : null}
 
             {readerMode && readerHtml ? (
               <WebView
@@ -498,15 +497,6 @@ const styles = StyleSheet.create({
   webview: {
     flex: 1,
     backgroundColor: 'transparent',
-  },
-  /** Keep publisher WebView mounted without occupying layout or covering Reader. */
-  parkedWebview: {
-    position: 'absolute',
-    width: 1,
-    height: 1,
-    left: -10000,
-    top: 0,
-    opacity: 0,
   },
   readerWebview: {
     flex: 1,
