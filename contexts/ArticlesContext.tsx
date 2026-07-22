@@ -18,11 +18,13 @@ import { registerFeedArticles } from '@/services/articleSession';
 import { loadFeedSnapshot, MAX_FEED_SNAPSHOT_ARTICLES, saveFeedSnapshot } from '@/services/feedPersistence';
 import { applyFeedFilters, applyTrendingNotificationFilters } from '@/services/feedFilters';
 import { getEnabledSourceIds, isAllSourcesEnabled } from '@/services/sourcePreferences';
+import { isAllSportTagsEnabled, isSportsTopicActive } from '@/services/sportPreferences';
 import { processHotTrendingNotifications } from '@/services/trendingNotifications';
 import { Article } from '@/types';
 import { setArticleFeedPatcher } from '@/services/articleFeedPatch';
 import { ingestNoticeForFetch } from '@/utils/ingestNotice';
 import { shouldShowArticleFeedLoading } from '@/utils/feedLoadingState';
+import { sportTagSourceIds } from '@/utils/forYouInterestSources';
 import {
   mergeArticleFeed,
   newcomersFromFeedMerge,
@@ -374,13 +376,54 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
                 isFilteredFeedStocked(items, preferences, sources),
             };
             const shouldStockFeed = (mode === 'initial' || mode === 'refresh') && !cursor;
+            // A narrow sport-tag chip (e.g. MTB) is a thin slice of the overall catalog —
+            // the generic date-ordered stocking loop below can burn through its whole page
+            // cap (10 pages, real-world measured ~35s) without ever reaching the stocked
+            // minimum. Skip straight to the sources that carry this tag instead.
+            const narrowSportTagActive =
+              !!preferences &&
+              isSportsTopicActive(preferences.enabledTopics) &&
+              !isAllSportTagsEnabled(preferences.enabledSportTags);
             let data: Article[];
             let meta: FetchArticlesResult['meta'];
-            if (shouldStockFeed) {
+            if (shouldStockFeed && narrowSportTagActive) {
+              ({ articles: data, meta } = await requestArticles(mode, forceRefresh, cursor));
+              if (!stockOptions.isStocked(data)) {
+                const scopedSourceIds = sportTagSourceIds(preferences!.enabledSportTags);
+                if (scopedSourceIds.length > 0) {
+                  try {
+                    const boosted = await fetchArticles({ sourceIds: scopedSourceIds, limit: 50 });
+                    if (boosted.articles.length > 0) {
+                      data = appendUniqueArticles(data, boosted.articles);
+                    }
+                  } catch {
+                    // Best-effort — fall back to whatever the generic page already found.
+                  }
+                }
+              }
+            } else if (shouldStockFeed) {
               ({ articles: data, meta } = await fetchFeedUntilStocked(
                 (pageCursor) => requestArticles(mode, forceRefresh, pageCursor),
                 stockOptions,
               ));
+            } else if (mode === 'append' && narrowSportTagActive) {
+              const first = await requestArticles(mode, forceRefresh, cursor);
+              data = appendUniqueArticles(articlesRef.current, first.articles);
+              meta = first.meta;
+              if (!stockOptions.isStocked(data)) {
+                const scopedSourceIds = sportTagSourceIds(preferences!.enabledSportTags);
+                if (scopedSourceIds.length > 0) {
+                  try {
+                    const boosted = await fetchArticles({ sourceIds: scopedSourceIds, limit: 50 });
+                    if (boosted.articles.length > 0) {
+                      data = appendUniqueArticles(data, boosted.articles);
+                    }
+                  } catch {
+                    // Best-effort — fall back to whatever the generic page already found.
+                  }
+                }
+              }
+              data = data.slice(articlesRef.current.length);
             } else if (mode === 'append') {
               const first = await requestArticles(mode, forceRefresh, cursor);
               ({ articles: data, meta } = await fetchFeedUntilStocked(

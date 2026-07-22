@@ -11,7 +11,8 @@ function cyclingSourceIds(): string[] {
   ).map((entry) => entry.id);
 }
 
-function topicSourceIds(topics: Topic[]): string[] {
+/** Publisher feeds whose primary topic is any of the given topics. */
+export function topicSourceIds(topics: Topic[]): string[] {
   const selected = new Set(topics);
   if (selected.size === 0) return [];
   return SOURCE_CATALOG.filter((entry) => selected.has(entry.primaryTopic)).map(
@@ -19,7 +20,8 @@ function topicSourceIds(topics: Topic[]): string[] {
   );
 }
 
-function sportTagSourceIds(tags: SportTag[]): string[] {
+/** Publisher feeds tagged with any of the given sport tags — e.g. all dedicated MTB feeds for ['mtb']. */
+export function sportTagSourceIds(tags: SportTag[]): string[] {
   const selected = new Set(tags);
   if (selected.size === 0) return [];
   return SOURCE_CATALOG.filter((entry) =>

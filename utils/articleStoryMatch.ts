@@ -70,7 +70,17 @@ export function pickBestStoryRepresentative(candidates: Article[]): Article | nu
   return pickBestHeroImageAlternate(withImage);
 }
 
-/** Cluster feed rows that describe the same story (union of pairwise matches). */
+/**
+ * Cluster feed rows that describe the same story (union of pairwise matches).
+ *
+ * `articlesAreSameStory` requires an exact same-day match before ever comparing titles,
+ * and `storyTitlesMatch` re-normalizes both titles (several regex passes each, including
+ * Unicode-aware character classes) on every call. Calling it directly for every pair made
+ * this O(n²) in comparisons *and* redundantly re-normalized the same title O(n) times —
+ * with real feed sizes (hundreds to low thousands of articles) that compounds into
+ * multi-second stalls. Normalizing once per article and bucketing by day first (pairs
+ * across days can never match anyway) produces identical clustering with far less work.
+ */
 export function clusterStoryArticleIndices(articles: Article[]): number[][] {
   const n = articles.length;
   if (n === 0) return [];
@@ -90,10 +100,46 @@ export function clusterStoryArticleIndices(articles: Article[]): number[][] {
     if (rootA !== rootB) parent[rootB] = rootA;
   }
 
+  const dates = articles.map((article) => article.publishedAt.slice(0, 10));
+  const normalizedTitles = articles.map((article) => normalizeStoryTitle(article.title));
+  const tokenLists = normalizedTitles.map((title) =>
+    title.split(' ').filter((word) => word.length > 2),
+  );
+  const tokenSets = tokenLists.map((tokens) => new Set(tokens));
+
+  function sameStory(i: number, j: number): boolean {
+    const left = normalizedTitles[i]!;
+    const right = normalizedTitles[j]!;
+    if (!left || !right) return false;
+    if (left === right) return true;
+    if (left.includes(right) || right.includes(left)) return true;
+
+    const wordsLeft = tokenLists[i]!;
+    const wordsRight = tokenSets[j]!;
+    if (wordsLeft.length === 0 || wordsRight.size === 0) return false;
+
+    let overlap = 0;
+    for (const word of wordsLeft) {
+      if (wordsRight.has(word)) overlap += 1;
+    }
+
+    const minSize = Math.min(wordsLeft.length, wordsRight.size);
+    return overlap >= MIN_SHARED_STORY_TOKENS && overlap / minSize >= MIN_STORY_TITLE_OVERLAP_RATIO;
+  }
+
+  const byDate = new Map<string, number[]>();
   for (let i = 0; i < n; i += 1) {
-    for (let j = i + 1; j < n; j += 1) {
-      if (articlesAreSameStory(articles[i]!, articles[j]!)) {
-        union(i, j);
+    const bucket = byDate.get(dates[i]!);
+    if (bucket) bucket.push(i);
+    else byDate.set(dates[i]!, [i]);
+  }
+
+  for (const indices of byDate.values()) {
+    for (let a = 0; a < indices.length; a += 1) {
+      for (let b = a + 1; b < indices.length; b += 1) {
+        const i = indices[a]!;
+        const j = indices[b]!;
+        if (sameStory(i, j)) union(i, j);
       }
     }
   }

@@ -31,7 +31,20 @@ test('inferSportTags does not tag Lindsey Vonn downhill skiing as MTB from mtb s
   const text = 'Lindsey Vonn returns to downhill skiing after injury comeback';
   assert.ok(!inferSportTags(text, []).includes('mtb'));
   assert.ok(!inferSportTags(text, ['mtb']).includes('mtb'));
-  assert.ok(!inferSportTags('Why Lindsey Vonn still loves downhill', ['mtb']).includes('mtb'));
+});
+
+test('inferSportTags tags bare "downhill" as MTB from dedicated MTB feed defaults', () => {
+  // Dedicated MTB-only feeds (Pinkbike, NSMB, MBR, etc.) never publish alpine skiing
+  // content, so a bare "downhill" mention there is real MTB racing coverage, not ambiguous.
+  const tags = inferSportTags('Loris Vergier wins Lenzerheide Downhill World Cup', ['mtb']);
+  assert.ok(tags.includes('mtb'));
+});
+
+test('inferSportTags does not tag bare "downhill" as MTB from generic source defaults', () => {
+  // Without a dedicated MTB source, a bare "downhill" mention is ambiguous (could be
+  // alpine skiing), so content-based inference stays conservative.
+  const tags = inferSportTags('Why Lindsey Vonn still loves downhill', []);
+  assert.ok(!tags.includes('mtb'));
 });
 
 test('inferSportTags still tags downhill mountain bike content as MTB', () => {

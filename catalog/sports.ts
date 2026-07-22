@@ -66,9 +66,16 @@ const LEAGUE_TAGS: SportTag[] = [
   'champions-league',
 ];
 
-/** Outdoor/winter terms that should not infer MTB without explicit bike context. */
-const MTB_DISQUALIFIERS =
-  /\b(ski\b|skis\b|skiing|skier|skiers|nordic|everest|mountaineer|mountaineering|alpinist|alpine ski|downhill ski|downhill\b(?! mountain bike)(?! mtb)|super-?g\b|giant slalom|slalom|biathlon|snowboard|avalanche|summit bid|survival story|winter olympics|ski racing|alpine world cup)\b/i;
+/** Unambiguous skiing/mountaineering terms — never mountain biking, regardless of source. */
+const MTB_SKI_DISQUALIFIERS =
+  /\b(ski\b|skis\b|skiing|skier|skiers|nordic|everest|mountaineer|mountaineering|alpinist|alpine ski|downhill ski|super-?g\b|giant slalom|slalom|biathlon|snowboard|avalanche|summit bid|survival story|winter olympics|ski racing|alpine world cup)\b/i;
+
+/**
+ * A bare "downhill" mention (no explicit bike phrase nearby) is ambiguous on its own —
+ * it could be alpine skiing or MTB downhill racing. Only used to guard content-based
+ * inference on generic/multi-sport sources; see {@link inheritsMtbFromSource}.
+ */
+const MTB_BARE_DOWNHILL = /\bdownhill\b(?! mountain bike)(?! mtb)/i;
 
 const MTB_EXPLICIT_BIKE =
   /\b(mountain bikes?|mountain biking|mountain biker|\bmtb\b|enduro bike|trail bike|singletrack|dual suspension|full suspension|downhill mountain bike|downhill mtb|enduro mtb)\b/i;
@@ -79,8 +86,14 @@ function patternForTag(tag: SportTag): RegExp | undefined {
   return SPORT_INFERENCE_RULES.find(([t]) => t === tag)?.[1];
 }
 
+function hasMtbSkiDisqualifyingContent(text: string): boolean {
+  return MTB_SKI_DISQUALIFIERS.test(text) && !MTB_EXPLICIT_BIKE.test(text);
+}
+
+/** Stricter check for generic/multi-sport sources: a bare "downhill" mention also disqualifies. */
 function hasMtbDisqualifyingContent(text: string): boolean {
-  return MTB_DISQUALIFIERS.test(text) && !MTB_EXPLICIT_BIKE.test(text);
+  if (hasMtbSkiDisqualifyingContent(text)) return true;
+  return MTB_BARE_DOWNHILL.test(text) && !MTB_EXPLICIT_BIKE.test(text);
 }
 
 function matchesMtbTag(text: string): boolean {
@@ -91,8 +104,12 @@ function matchesMtbTag(text: string): boolean {
 
 /** Dedicated MTB feeds inherit mtb unless content is clearly another sport (e.g. alpine skiing). */
 function inheritsMtbFromSource(text: string, baseTags: SportTag[]): boolean {
+  if (baseTags.length === 1 && baseTags[0] === 'mtb') {
+    // Single-purpose MTB feeds never publish alpine skiing content, so a bare "downhill"
+    // mention (e.g. "Downhill World Cup") is real MTB racing coverage, not ambiguous.
+    return !hasMtbSkiDisqualifyingContent(text);
+  }
   if (hasMtbDisqualifyingContent(text)) return false;
-  if (baseTags.length === 1 && baseTags[0] === 'mtb') return true;
   return matchesMtbTag(text);
 }
 

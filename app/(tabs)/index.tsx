@@ -16,6 +16,7 @@ import { useTabDisplayState } from '@/hooks/useTabDisplayState';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import { getLatestFeed, buildLatestPersonalizationKey } from '@/services/recommendations';
 import { isAllSourcesEnabled } from '@/services/sourcePreferences';
+import { isAllSportTagsEnabled, isSportsTopicActive } from '@/services/sportPreferences';
 import { isAllTopicsEnabled } from '@/services/topicPreferences';
 import { Article } from '@/types';
 import {
@@ -27,6 +28,7 @@ import {
 import { getFeedEmptyMessage } from '@/utils/feedEmptyMessage';
 import { isFeedInteractionLocked, subscribeFeedInteractionLock } from '@/utils/feedInteractionLock';
 import { MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION } from '@/utils/feedLoadMoreGate';
+import { sportTagSourceIds, topicSourceIds } from '@/utils/forYouInterestSources';
 import { prewarmForYouDisplayCache } from '@/utils/forYouPrewarm';
 import { readTabDisplayCache, resolveTabDisplayFeed, hasShowableTabDisplayCache, isDisplayFeedUnderstocked } from '@/utils/tabDisplayCache';
 
@@ -50,6 +52,7 @@ function LatestScreenContent() {
     refresh,
     applyPending,
     loadMore,
+    boostArticlesForInterests,
   } = useArticles();
   const {
     preferences,
@@ -62,6 +65,7 @@ function LatestScreenContent() {
   const [emptyMessage, setEmptyMessage] = useState<string | undefined>();
   const syncDisplayHandledRef = useRef(false);
   const wasFocusedOnTabPressRef = useRef(false);
+  const chipBoostKeyRef = useRef('');
   const [feedInteractionEpoch, setFeedInteractionEpoch] = useState(0);
   const isFocused = useIsFocused();
   // Full "all chips" ranked order, recomputed only when the underlying article set or
@@ -248,6 +252,36 @@ function LatestScreenContent() {
     filterFeedArticles,
     loadMore,
   ]);
+
+  // Selecting a chip (topic or sport tag) should feel like a deliberate pull for that
+  // content, not something the reader has to manually pull-to-refresh into. A narrow
+  // selection can be a thin slice of the overall feed — generic date-ordered pagination
+  // can take many pages to surface enough matches — so fetch directly from the sources
+  // for the current selection every time it changes, rather than waiting on an
+  // understock check that only fires when the existing pool already looks thin.
+  useEffect(() => {
+    if (!isFocused || !preferences || isLoading) return;
+    const { enabledTopics, enabledSportTags } = preferences;
+
+    const narrowSportTagActive =
+      isSportsTopicActive(enabledTopics) && !isAllSportTagsEnabled(enabledSportTags);
+
+    const sourceIds = narrowSportTagActive
+      ? sportTagSourceIds(enabledSportTags)
+      : !isAllTopicsEnabled(enabledTopics)
+        ? topicSourceIds(enabledTopics)
+        : [];
+    if (sourceIds.length === 0) return;
+
+    // Keyed on the selection + feedGeneration (bumped by every initial/refresh load), not
+    // articles.length — a pull-to-refresh replaces the article list wholesale (services/
+    // articles.ts) and can coincidentally land on the same length, which would wrongly
+    // look like "already pulled for this selection".
+    const boostKey = `chip\0${enabledTopics.join(',')}\0${enabledSportTags.join(',')}\0${feedGeneration}`;
+    if (chipBoostKeyRef.current === boostKey) return;
+    chipBoostKeyRef.current = boostKey;
+    void boostArticlesForInterests(sourceIds, boostKey);
+  }, [isFocused, preferences, isLoading, feedGeneration, boostArticlesForInterests]);
 
   useFocusEffect(
     useCallback(() => {
