@@ -1,6 +1,7 @@
 import { Article } from '@/types';
 import { articleFeedCardFieldsEqual } from '@/utils/mergeDisplayFeed';
 import { spreadArticlesBySource, spreadAgainstFeedHead } from '@/utils/feedOrdering';
+import { mostTrendingArticle } from '@/utils/trendingArticles';
 
 /** Articles in `incoming` that are not already in `prev`. */
 export function newcomersFromFeedMerge(prev: Article[], incoming: Article[]): Article[] {
@@ -24,7 +25,10 @@ export function updateExistingFeedArticles(prev: Article[], incoming: Article[])
   return changed ? next : prev;
 }
 
-/** Preserve scroll position: keep existing order, prepend only new items. */
+/**
+ * Preserve scroll position: keep existing order, prepend only new items — led by the
+ * batch's most trending story so an applied batch always surfaces its own hero.
+ */
 export function mergeArticleFeed(prev: Article[], incoming: Article[]): Article[] {
   if (prev.length === 0) return incoming;
 
@@ -38,9 +42,14 @@ export function mergeArticleFeed(prev: Article[], incoming: Article[]): Article[
     seen.add(item.id);
   }
 
-  const newcomers = spreadArticlesBySource(incoming.filter((a) => !seen.has(a.id)));
+  const newArticles = incoming.filter((a) => !seen.has(a.id));
+  if (newArticles.length === 0) return merged;
 
-  return newcomers.length > 0 ? spreadAgainstFeedHead(newcomers, merged) : merged;
+  const hero = mostTrendingArticle(newArticles);
+  const rest = hero ? newArticles.filter((a) => a.id !== hero.id) : newArticles;
+  const spread = spreadAgainstFeedHead(spreadArticlesBySource(rest), merged);
+
+  return hero ? [hero, ...spread] : spread;
 }
 
 export function articleFeedOrderUnchanged(prev: Article[], next: Article[]): boolean {

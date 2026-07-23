@@ -67,6 +67,11 @@ export function findHotTrendingCandidates(
   return candidates;
 }
 
+/** Most trending story in a batch (highest outlet burst, then most recent) — promoted to the feed hero slot when a pending batch is applied. */
+export function mostTrendingArticle(articles: Article[], nowMs: number = Date.now()): Article | null {
+  return findHotTrendingCandidates(articles, nowMs)[0]?.article ?? null;
+}
+
 /** Article ids in the feed trending window (6h) — used for badges and hero styling, not sort order. */
 export function buildFeedTrendingArticleIds(
   articles: Article[],

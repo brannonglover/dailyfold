@@ -1,5 +1,6 @@
 import type { ColorScheme } from '@/constants/Colors';
 import Colors from '@/constants/Colors';
+import { stripGuardianRegistrationModalHtml } from '@/catalog/guardianLiveBlogSidebar';
 
 export type WebViewReaderArticle = {
   title: string;
@@ -28,6 +29,7 @@ export function buildWebViewReaderHtml(
   const siteName = article.siteName?.trim() ? escapeHtml(article.siteName.trim()) : '';
   const meta = [siteName, byline].filter(Boolean).join(' · ');
   const baseHref = article.baseUrl?.trim();
+  const content = stripGuardianRegistrationModalHtml(article.content);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -129,7 +131,7 @@ export function buildWebViewReaderHtml(
 <body>
   ${meta ? `<p class="meta">${meta}</p>` : ''}
   <h1>${title}</h1>
-  <article>${article.content}</article>
+  <article>${content}</article>
 </body>
 </html>`;
 }

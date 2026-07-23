@@ -31,6 +31,7 @@ import { MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION } from '@/utils/feedLoadMoreG
 import { sportTagSourceIds, topicSourceIds } from '@/utils/forYouInterestSources';
 import { prewarmForYouDisplayCache } from '@/utils/forYouPrewarm';
 import { readTabDisplayCache, resolveTabDisplayFeed, hasShowableTabDisplayCache, isDisplayFeedUnderstocked } from '@/utils/tabDisplayCache';
+import { MIN_PENDING_ARTICLES_FOR_BANNER } from '@/utils/pendingFeedArticles';
 
 function LatestScreenContent() {
   const navigation = useNavigation<BottomTabNavigationProp<ParamListBase>>();
@@ -554,7 +555,8 @@ function LatestScreenContent() {
 
   const visiblePendingCount = useMemo(() => {
     if (isLoading || filtered.length === 0) return 0;
-    return pendingCountForFeed(filtered);
+    const count = pendingCountForFeed(filtered);
+    return count >= MIN_PENDING_ARTICLES_FOR_BANNER ? count : 0;
   }, [isLoading, filtered, pendingCountForFeed]);
 
   useEffect(() => {

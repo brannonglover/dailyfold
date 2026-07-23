@@ -1,6 +1,9 @@
 import { articlesAreSameStory } from '@/utils/articleStoryMatch';
 import { Article } from '@/types';
 
+/** Minimum actionable pending stories before the "new stories ready" banner appears. */
+export const MIN_PENDING_ARTICLES_FOR_BANNER = 10;
+
 /**
  * True when a candidate is already covered by the feed — either the exact row (by id)
  * or a cross-source duplicate of the same story. Same-story matches happen a lot: two

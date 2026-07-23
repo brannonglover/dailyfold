@@ -3,10 +3,14 @@ import assert from 'node:assert/strict';
 import {
   filterGuardianLiveBlogArtifacts,
   filterGuardianProTipParagraphs,
+  filterGuardianRegistrationModalParagraphs,
   filterLeadingGuardianKeyEventsSidebar,
   isGuardianKeyEventsMegaParagraph,
   isGuardianKeyEventsSidebarParagraph,
   isGuardianProTipParagraph,
+  isGuardianRegistrationModalParagraph,
+  isGuardianRegistrationModalStart,
+  stripGuardianRegistrationModalHtml,
 } from './guardianLiveBlogSidebar';
 
 function run(label: string, fn: () => void) {
@@ -132,6 +136,93 @@ run('filterGuardianProTipParagraphs removes standalone pro-tip paragraph', () =>
   assert.equal(filtered[0]?.text, 'That is it from me today, I will be back with you on Monday.');
 });
 
+const registrationBlocks = [
+  {
+    type: 'paragraph',
+    text: '...businesses deemed not to make a positive contribution to communities, such as vape shops.',
+  },
+  { type: 'paragraph', text: 'This is not a paywall' },
+  {
+    type: 'paragraph',
+    text: 'Enter your email to keep reading - for free. It takes just 30 seconds',
+  },
+  {
+    type: 'paragraph',
+    text: 'We’re committed to keeping our quality reporting open. By registering and providing us with insight into your preferences, you’re helping us to engage with you more deeply, and that allows us to keep our journalism free for all.',
+  },
+  { type: 'paragraph', text: 'or' },
+  {
+    type: 'paragraph',
+    text: 'By proceeding, you agree to our terms and conditions. For information about how we use your data, including the generation of random identifiers based on your email address for advertising and marketing, visit our privacy policy.',
+  },
+  { type: 'paragraph', text: 'Not signed in...?' },
+];
+
+run('isGuardianRegistrationModalStart detects modal heading', () => {
+  assert.equal(isGuardianRegistrationModalStart('This is not a paywall'), true);
+  assert.equal(isGuardianRegistrationModalStart('This is not a paywall for readers'), false);
+});
+
+run('isGuardianRegistrationModalParagraph detects modal cluster lines', () => {
+  assert.equal(isGuardianRegistrationModalParagraph('or'), true);
+  assert.equal(isGuardianRegistrationModalParagraph('Not signed in...?'), true);
+  assert.equal(
+    isGuardianRegistrationModalParagraph(
+      'Enter your email to keep reading - for free. It takes just 30 seconds',
+    ),
+    true,
+  );
+  assert.equal(
+    isGuardianRegistrationModalParagraph(
+      'The government said this is not a paywall for local services.',
+    ),
+    false,
+  );
+});
+
+run('filterGuardianRegistrationModalParagraphs removes soft-registration cluster', () => {
+  const filtered = filterGuardianRegistrationModalParagraphs(registrationBlocks);
+
+  assert.equal(filtered.length, 1);
+  assert.match(filtered[0]?.text ?? '', /vape shops/);
+});
+
+run('filterGuardianRegistrationModalParagraphs keeps bare or outside a cluster', () => {
+  const blocks = [
+    { type: 'paragraph', text: 'Choose red or blue.' },
+    { type: 'paragraph', text: 'or' },
+    { type: 'paragraph', text: 'Keep reading the analysis.' },
+  ];
+
+  assert.deepEqual(filterGuardianRegistrationModalParagraphs(blocks), blocks);
+});
+
+run('stripGuardianRegistrationModalHtml removes trailing modal and brand heading', () => {
+  const html = [
+    '<p>...businesses deemed not to make a positive contribution to communities, such as vape shops.</p>',
+    '<h2>The Guardian</h2>',
+    '<h2>This is not a paywall</h2>',
+    '<p>Enter your email to keep reading - for free. It takes just 30 seconds</p>',
+    '<p>We’re committed to keeping our quality reporting open.</p>',
+    '<p>or</p>',
+    '<p>By proceeding, you agree to our terms and conditions.</p>',
+    '<p>Not signed in...?</p>',
+  ].join('');
+
+  const cleaned = stripGuardianRegistrationModalHtml(html);
+
+  assert.match(cleaned, /vape shops/);
+  assert.doesNotMatch(cleaned, /This is not a paywall/i);
+  assert.doesNotMatch(cleaned, /Not signed in/i);
+  assert.doesNotMatch(cleaned, /Enter your email to keep reading/i);
+  assert.doesNotMatch(cleaned, /The Guardian/);
+});
+
+run('stripGuardianRegistrationModalHtml leaves unrelated html unchanged', () => {
+  const html = '<p>Ordinary Guardian reporting without a registration prompt.</p>';
+  assert.equal(stripGuardianRegistrationModalHtml(html), html);
+});
+
 run('filterGuardianLiveBlogArtifacts removes key events sidebar and pro-tip paragraphs', () => {
   const blocks = [
     { type: 'paragraph', text: megaParagraph },
@@ -152,4 +243,11 @@ run('filterGuardianLiveBlogArtifacts removes key events sidebar and pro-tip para
 
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0]?.text, 'That is it from me today, I will be back with you on Monday.');
+});
+
+run('filterGuardianLiveBlogArtifacts also removes registration modal paragraphs', () => {
+  const filtered = filterGuardianLiveBlogArtifacts(registrationBlocks);
+
+  assert.equal(filtered.length, 1);
+  assert.match(filtered[0]?.text ?? '', /vape shops/);
 });

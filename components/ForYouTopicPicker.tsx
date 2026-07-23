@@ -14,7 +14,7 @@ import {
 
 import { ArticleImage } from '@/components/ArticleImage';
 import { SPORT_TAG_LABELS } from '@/catalog/sports';
-import { CURIOSITY_LABELS } from '@/constants/curiosities';
+import { CURIOSITY_LABELS, CURIOSITY_ORDER } from '@/constants/curiosities';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useArticles } from '@/hooks/useArticles';
 import { useTheme } from '@/hooks/useTheme';
@@ -210,6 +210,11 @@ export function ForYouTopicPicker({ articles }: ForYouTopicPickerProps) {
   const selectedSportTags = preferences?.forYouSportTags ?? [];
   const tileWidth = (width - GRID_PADDING * 2 - GRID_GAP) / 2;
 
+  const browsableTopics = useMemo(() => {
+    const selected = new Set(selectedTopics);
+    return CURIOSITY_ORDER.filter((topic) => !selected.has(topic));
+  }, [selectedTopics]);
+
   const searchResults = useMemo(() => {
     return searchForYouInterests(query, {
       articles: searchPool,
@@ -306,8 +311,34 @@ export function ForYouTopicPicker({ articles }: ForYouTopicPickerProps) {
     <View style={[styles.container, { borderBottomColor: colors.border }]}>
       <Text style={[styles.heading, { color: colors.text }]}>Your interests</Text>
       <Text style={[styles.hint, { color: colors.textSecondary }]}>
-        Search for stories, keywords, or topics. Tap a tile to open its feed.
+        Tap a topic to follow it, or search for stories, keywords, or people. Tap a tile to open
+        its feed.
       </Text>
+
+      {browsableTopics.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}>
+          {browsableTopics.map((topic) => (
+            <Pressable
+              key={topic}
+              onPress={() => void addForYouTopic(topic)}
+              accessibilityRole="button"
+              accessibilityLabel={`Follow ${CURIOSITY_LABELS[topic]}`}
+              style={({ pressed }) => [
+                styles.chip,
+                { borderColor: colors.border, backgroundColor: colors.surface },
+                pressed && styles.pressed,
+              ]}>
+              <Ionicons name="add" size={14} color={colors.accent} />
+              <Text style={[styles.chipLabel, { color: colors.text }]}>
+                {CURIOSITY_LABELS[topic]}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      ) : null}
 
       <View
         style={[
@@ -465,6 +496,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     paddingHorizontal: GRID_PADDING,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: GRID_PADDING,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  chipLabel: {
+    fontFamily: 'InterMedium',
+    fontSize: 13,
   },
   searchField: {
     marginHorizontal: GRID_PADDING,

@@ -17,7 +17,6 @@ import {
   countEnabledSources,
   filterArticlesBySources,
   isAllSourcesEnabled,
-  isSportsOnlySourceSelection,
 } from '@/services/sourcePreferences';
 import {
   filterArticlesBySportTags,
@@ -232,17 +231,6 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       likedBackfillInFlightRef.current = false;
     };
   }, [user, preferences?.likedArticleIds, persist]);
-
-  /** All topics + sports-only outlets leaves a sports-only feed and API fetch. */
-  useEffect(() => {
-    if (!user || !preferences || sources.length === 0 || isLoading) return;
-
-    const normalized = normalizeFeedPreferences(preferences);
-    if (!isAllTopicsEnabled(normalized.enabledTopics)) return;
-    if (!isSportsOnlySourceSelection(sources, normalized.enabledSourceIds)) return;
-
-    void persist({ ...normalized, enabledSourceIds: [] });
-  }, [user, preferences, sources, isLoading, persist]);
 
   const isLiked = useCallback(
     (articleId: string) => preferences?.likedArticleIds.includes(articleId) ?? false,
@@ -514,11 +502,15 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     const prev = preferencesRef.current;
     if (!prev) return;
 
+    // Keep enabledSourceIds — "All" topics must not re-enable disabled outlets.
+    if (prev.enabledTopics.length === 0 && prev.enabledSportTags.length === 0) {
+      return;
+    }
+
     await persist({
       ...prev,
       enabledTopics: [],
       enabledSportTags: [],
-      enabledSourceIds: [],
     });
   }, [user, persist]);
 

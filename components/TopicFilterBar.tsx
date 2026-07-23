@@ -44,8 +44,9 @@ export function TopicFilterBar({ enabledTopics, onSelectAll, onToggleTopic }: To
 
   const handleSelectAll = useCallback(() => {
     centerChip('all');
+    if (allSelected) return;
     onSelectAll();
-  }, [centerChip, onSelectAll]);
+  }, [allSelected, centerChip, onSelectAll]);
 
   const handleToggleTopic = useCallback(
     (topic: Topic) => {

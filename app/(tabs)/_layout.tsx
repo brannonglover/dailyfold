@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
+import { View } from 'react-native';
 
 import Colors from '@/constants/Colors';
 import { TAB_BAR_HEIGHT, TAB_BAR_PADDING_BOTTOM, TAB_BAR_PADDING_TOP } from '@/constants/Layout';
+import { TOUR_DE_FRANCE_TAB_ENABLED } from '@/constants/tourDeFrance';
 import { WORLD_CUP_TAB_ENABLED } from '@/constants/worldCup';
 export default function TabLayout() {
   const colors = Colors.dark;
@@ -36,6 +38,33 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Ionicons name="newspaper-outline" size={24} color={color} />,
         }}
       />
+      {TOUR_DE_FRANCE_TAB_ENABLED ? (
+        <Tabs.Screen
+          name="tour-de-france"
+          options={{
+            title: 'Tour',
+            lazy: false,
+            tabBarIcon: ({ color, focused }) =>
+              focused ? (
+                <View
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: 12,
+                    backgroundColor: colors.accent,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                  <Ionicons name="bicycle" size={14} color="#FFFFFF" />
+                </View>
+              ) : (
+                <Ionicons name="bicycle-outline" size={24} color={color} />
+              ),
+          }}
+        />
+      ) : (
+        <Tabs.Screen name="tour-de-france" options={{ href: null }} />
+      )}
       {WORLD_CUP_TAB_ENABLED ? (
         <Tabs.Screen
           name="world-cup"
