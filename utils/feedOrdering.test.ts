@@ -183,6 +183,46 @@ test('interleaveByPrimaryTopic spreads within a dominant topic bucket', () => {
   assert.ok(sportsRun <= 2, `expected short sports outlet runs, got ${sportsRun}`);
 });
 
+test('interleaveByPrimaryTopic caps a sports burst instead of dumping the remainder back-to-back', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+
+  const sports = Array.from({ length: 30 }, (_, i) =>
+    article(`sport-${i}`, 'sports', recent(i * 1000)),
+  );
+  const world = Array.from({ length: 3 }, (_, i) =>
+    article(`world-${i}`, 'world', recent(40_000 + i * 1000)),
+  );
+  const tech = Array.from({ length: 2 }, (_, i) =>
+    article(`tech-${i}`, 'technology', recent(50_000 + i * 1000)),
+  );
+
+  const ordered = interleaveByPrimaryTopic([...sports, ...world, ...tech]);
+  const sportsShown = ordered.filter((item) => item.topics[0] === 'sports').length;
+
+  // 5 non-sports articles combined — sports is capped to 2x that (10), not all 30.
+  assert.ok(sportsShown <= 10, `expected sports burst to be capped, got ${sportsShown} shown`);
+  // Every non-sports article should still make it in (nothing but the dominant topic is trimmed).
+  assert.equal(ordered.filter((item) => item.topics[0] !== 'sports').length, 5);
+  // The trailing same-topic run is bounded by the cap (10 sports minus the 5 minority
+  // spacers that interleave with them) instead of the uncapped 30 - 5 = 25-long wall.
+  const topicRun = maxConsecutiveSameBucket(ordered.map((item) => ({ ...item, source: item.topics[0] })));
+  assert.ok(topicRun <= 5, `expected a short capped tail run, got ${topicRun}`);
+});
+
+test('interleaveByPrimaryTopic never caps when it is the only topic present', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+
+  const sports = Array.from({ length: 30 }, (_, i) =>
+    article(`sport-${i}`, 'sports', recent(i * 1000)),
+  );
+
+  const ordered = interleaveByPrimaryTopic(sports);
+
+  assert.equal(ordered.length, 30, 'a single-topic feed should never be trimmed');
+});
+
 test('orderLatestFeed diversifyTopics surfaces non-sports in the first cards', () => {
   const now = Date.now();
   const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();

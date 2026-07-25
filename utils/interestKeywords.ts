@@ -247,6 +247,21 @@ export function isNotForMeKeywordOption(keyword: string): boolean {
   return INTEREST_VOCABULARY.has(keyword) || KNOWN_INTEREST_PHRASES.has(keyword);
 }
 
+/**
+ * Whether a user-typed multi-word phrase is substantial enough to add as its own
+ * search-box interest. Unlike isSpecificInterestKeyword, this isn't restricted to a
+ * curated phrase allowlist — the user explicitly typed and chose to add this exact
+ * phrase, so noise control matters less than it does for auto-extraction from article text.
+ */
+export function isAddableSearchPhrase(phrase: string): boolean {
+  const words = phrase.split(' ').filter(Boolean);
+  if (words.length < 2) return false;
+  return (
+    words.every((word) => word.length >= 2) &&
+    words.some((word) => word.length >= 3 && !STOP_WORDS.has(word))
+  );
+}
+
 /** Whether a profile keyword is specific enough to drive For You matching. */
 export function isSpecificInterestKeyword(keyword: string): boolean {
   if (INTEREST_VOCABULARY.has(keyword) || KNOWN_INTEREST_PHRASES.has(keyword)) return true;

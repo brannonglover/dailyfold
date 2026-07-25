@@ -15,7 +15,11 @@ import {
 import { CURIOSITY_LABELS, CURIOSITY_ORDER } from '@/constants/curiosities';
 import { articleInterestKeywords } from '@/services/interestSignals';
 import { articleSportTags } from '@/services/sportPreferences';
-import { formatInterestLabel, isSpecificInterestKeyword } from '@/utils/interestKeywords';
+import {
+  formatInterestLabel,
+  isAddableSearchPhrase,
+  isSpecificInterestKeyword,
+} from '@/utils/interestKeywords';
 import { Article, SportTag, Topic, UserPreferences } from '@/types';
 
 export function hasForYouTopicSelection(
@@ -127,24 +131,43 @@ function contentConfirmedBikeSportTags(article: Article): SportTag[] {
   return inferSportTags(headText, []).filter((tag) => BIKE_FOR_YOU_SPORT_TAGS.includes(tag));
 }
 
+/** Every word from the recognized bike/cycling/mtb vocabulary — used to spot modifier words. */
+const BIKE_VOCAB_WORDS = new Set(BIKE_SEARCH_TERMS.flatMap((term) => term.split(' ')));
+
+/**
+ * Words in a bike-flavored query beyond the recognized bike vocabulary (e.g. "repair" in
+ * "bike repair"). A compound interest like this shouldn't collapse into generic bike/cycling
+ * matching — the extra word must also appear in the article for a match.
+ */
+function bikeQueryModifierWords(normalizedKeyword: string): string[] {
+  return normalizedKeyword
+    .split(' ')
+    .filter((word) => word.length >= 3 && !BIKE_VOCAB_WORDS.has(word));
+}
+
 function articleMatchesBikeForYouKeyword(article: Article, keyword: string): boolean {
   const headText = `${article.title} ${article.excerpt}`;
   const discipline = resolveBikeDiscipline(keyword);
   const terms = expandForYouKeywordMatchTerms(keyword);
   const articleKeywords = new Set(articleInterestKeywords(article));
+  const modifiers = bikeQueryModifierWords(normalizeForYouKeyword(keyword));
 
   if (discipline === 'cycling' || discipline === 'mtb') {
     if (articleConflictsWithBikeDiscipline(article, discipline)) return false;
   }
 
-  if (terms.some((term) => articleKeywords.has(term))) return true;
-  if (textMatchesBikeTermsStrict(terms, headText)) return true;
+  const hasBikeContext =
+    terms.some((term) => articleKeywords.has(term)) ||
+    textMatchesBikeTermsStrict(terms, headText) ||
+    (discipline === 'cycling' || discipline === 'mtb'
+      ? articleConfirmsBikeDiscipline(article, discipline)
+      : contentConfirmedBikeSportTags(article).length > 0);
 
-  if (discipline === 'cycling' || discipline === 'mtb') {
-    return articleConfirmsBikeDiscipline(article, discipline);
-  }
+  if (!hasBikeContext) return false;
+  if (modifiers.length === 0) return true;
 
-  return contentConfirmedBikeSportTags(article).length > 0;
+  const fullText = `${headText} ${article.body ?? ''}`.toLowerCase();
+  return modifiers.every((word) => fullText.includes(word));
 }
 
 export function articleMatchesForYouKeywords(article: Article, keywords: string[]): boolean {
@@ -361,7 +384,10 @@ function collectKeywordSuggestions(
     results.push(normalized);
   };
 
-  if (normalizedQuery.length >= 3 && isSpecificInterestKeyword(normalizedQuery)) {
+  if (
+    normalizedQuery.length >= 3 &&
+    (isSpecificInterestKeyword(normalizedQuery) || isAddableSearchPhrase(normalizedQuery))
+  ) {
     add(normalizedQuery);
   }
 

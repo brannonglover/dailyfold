@@ -61,6 +61,32 @@ function drainQueuesGreedy(
   return result;
 }
 
+/** A capped topic is still allowed at least this many articles even if others are scarce. */
+const MIN_TOPIC_BUCKET_ALLOWANCE = 10;
+/** A topic can show at most this many times the combined size of every other topic. */
+const MAX_TOPIC_DOMINANCE_RATIO = 2;
+
+/**
+ * Once one topic's article count dwarfs every other topic combined (e.g. a burst
+ * of sports recaps), the round-robin below eventually runs out of other topics to
+ * alternate with and has no choice but to dump the remainder back-to-back. Cap the
+ * bucket up front instead so that excess waits for the next refresh/page — it's
+ * still fully reachable by selecting that topic's chip, since chip filtering reads
+ * the raw article list directly rather than this ranked order.
+ */
+function capDominantTopicBucket(
+  items: Article[],
+  otherTopicsCount: number,
+  compareWithinSource: (a: Article, b: Article) => number,
+  preserveInputOrder?: boolean,
+): Article[] {
+  const cap = Math.max(otherTopicsCount * MAX_TOPIC_DOMINANCE_RATIO, MIN_TOPIC_BUCKET_ALLOWANCE);
+  if (items.length <= cap) return items;
+
+  const ordered = preserveInputOrder ? items : [...items].sort(compareWithinSource);
+  return ordered.slice(0, cap);
+}
+
 /**
  * Round-robin across primary topics so a burst of sports headlines does not
  * dominate the first screen when every topic chip is off (All).
@@ -80,12 +106,19 @@ export function interleaveByPrimaryTopic(
     else byTopic.set(topic, [article]);
   }
 
-  const queues = [...byTopic.values()].map((items) =>
-    interleaveBySource(items, {
+  const compareWithinSource = options?.compareWithinSource ?? compareNewestFirst;
+  const total = articles.length;
+
+  const queues = [...byTopic.values()].map((items) => {
+    const capped =
+      byTopic.size > 1
+        ? capDominantTopicBucket(items, total - items.length, compareWithinSource, options?.preserveInputOrder)
+        : items;
+    return interleaveBySource(capped, {
       preserveInputOrder: options?.preserveInputOrder,
       compareWithinSource: options?.compareWithinSource,
-    }),
-  );
+    });
+  });
 
   queues.sort(compareTopicQueues);
 

@@ -27,6 +27,7 @@ import {
 } from 'react-native';
 import Animated, {
   Easing,
+  FadeIn,
   runOnJS,
   scrollTo,
   SharedValue,
@@ -238,7 +239,7 @@ const FeedCardItem = memo(function FeedCardItem({
   }, [isLast]);
 
   return (
-    <Animated.View style={stretchStyle}>
+    <Animated.View style={stretchStyle} entering={FadeIn.duration(280)}>
       <ArticleCard
         article={article}
         height={height}
@@ -635,7 +636,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
   const renderListItem = useCallback(
     ({ item, index }: ListRenderItemInfo<Article>) => (
-      <View style={styles.listStoryRow}>
+      <Animated.View style={styles.listStoryRow} entering={FadeIn.duration(280)}>
         {index > 0 ? <FeedArticleSeparator color={colors.feedDivider} /> : null}
         <ArticleCard
           article={item}
@@ -643,7 +644,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
           matchReasons={matchReasonsByArticleId?.get(item.id)}
           onFeedClick={onFeedClick}
         />
-      </View>
+      </Animated.View>
     ),
     [colors.feedDivider, matchReasonsByArticleId, onFeedClick],
   );
@@ -657,9 +658,9 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
       if (slot.kind === 'lead') {
         return (
-          <View style={styles.listStoryRow}>
+          <Animated.View style={styles.listStoryRow} entering={FadeIn.duration(280)}>
             <ArticleCard article={item} variant="storyLead" onFeedClick={onFeedClick} />
-          </View>
+          </Animated.View>
         );
       }
 
@@ -671,29 +672,29 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         const rightItem = articles[index + 1];
         if (!rightItem) {
           return (
-            <View style={styles.listStoryRow}>
+            <Animated.View style={styles.listStoryRow} entering={FadeIn.duration(280)}>
               <FeedArticleSeparator color={colors.feedDivider} />
               <ArticleCard article={item} variant="storyRow" onFeedClick={onFeedClick} />
-            </View>
+            </Animated.View>
           );
         }
         return (
-          <View style={styles.listStoryRow}>
+          <Animated.View style={styles.listStoryRow} entering={FadeIn.duration(280)}>
             <FeedArticleSeparator color={colors.feedDivider} />
             <View style={styles.gridPairRow}>
               <ArticleCard article={item} variant="storyGrid" onFeedClick={onFeedClick} />
               <View style={styles.gridPairDivider} />
               <ArticleCard article={rightItem} variant="storyGrid" onFeedClick={onFeedClick} />
             </View>
-          </View>
+          </Animated.View>
         );
       }
 
       return (
-        <View style={styles.listStoryRow}>
+        <Animated.View style={styles.listStoryRow} entering={FadeIn.duration(280)}>
           <FeedArticleSeparator color={colors.feedDivider} />
           <ArticleCard article={item} variant="storyRow" onFeedClick={onFeedClick} />
-        </View>
+        </Animated.View>
       );
     },
     [foldSlots, articles, colors.feedDivider, onFeedClick],
@@ -711,14 +712,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
   const showLoadMoreFooter = !!onLoadMore && canLoadMore && !!isLoadingMore;
   const loadMoreListFooter = showLoadMoreFooter ? <FeedLoadMoreFooter /> : null;
-  const refreshOverlay =
-    isRefreshing && articles.length > 0 ? (
-      <View
-        style={[styles.refreshOverlay, { backgroundColor: colors.background }]}
-        pointerEvents="none">
-        <FeedRefreshIndicator />
-      </View>
-    ) : null;
 
   if (articles.length === 0) {
     return (
@@ -817,7 +810,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
               ListFooterComponent={loadMoreListFooter}
             />
           ) : null}
-          {refreshOverlay}
           {pendingBannerOverlay}
         </View>
       </View>
@@ -867,7 +859,6 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             onEndReachedThreshold={0.65}
           />
         )}
-        {refreshOverlay}
         {pageHeight > 0 && hasMoreBelow && <FeedBottomVignette />}
         {pageHeight > 0 && showLoadMoreFooter && (
           <View style={styles.loadMoreOverlay} pointerEvents="none">
@@ -1002,12 +993,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     letterSpacing: 0.2,
-  },
-  refreshOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   loadMoreOverlay: {
     position: 'absolute',

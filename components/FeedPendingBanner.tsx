@@ -19,10 +19,7 @@ export function FeedPendingBanner({
 
   if (count <= 0) return null;
 
-  const label =
-    count === 1
-      ? `1 new story ready — ${refreshHint}`
-      : `${count} new stories ready — ${refreshHint}`;
+  const label = `More stories available — ${refreshHint}`;
 
   return (
     <Pressable
