@@ -40,7 +40,7 @@ const FETCH_TIMEOUT_MS = 12_000;
 const INITIAL_FETCH_TIMEOUT_MS = 60_000;
 
 const EMPTY_FEED_MESSAGE =
-  'No articles in the feed yet. Run "npm run api:ingest" to fetch stories from your sources.';
+  'No stories are available yet. Pull to refresh, or try again in a moment.';
 
 async function fetchWithTimeout(
   url: string,

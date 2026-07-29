@@ -1,7 +1,8 @@
 import { forwardRef, memo } from 'react';
-import { ActivityIndicator, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { RefreshControl, StyleSheet, View } from 'react-native';
 
 import { ArticleFeed, ArticleFeedHandle, ArticleFeedLayout } from '@/components/ArticleFeed';
+import { ArticleFeedSkeleton } from '@/components/ArticleFeedSkeleton';
 import { FeedHeader } from '@/components/FeedHeader';
 import { SourceMenuHost } from '@/contexts/SourceMenuContext';
 import { useTheme } from '@/hooks/useTheme';
@@ -73,13 +74,9 @@ export const ArticleFeedScreen = memo(
         {!hideFeedHeader ? (
           <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
         ) : null}
-        {headerExtra}
-        <View style={styles.centered}>
-          <ActivityIndicator color={colors.text} />
-          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-            Grabbing the latest…
-          </Text>
-        </View>
+        {/* Keep chrome + fold placeholders in one composition; real topic chips
+            mount once stories arrive so cold open doesn't flash an empty chip row. */}
+        <ArticleFeedSkeleton showTopicChips={headerExtra != null} />
       </View>
     );
   }
@@ -131,17 +128,4 @@ export const ArticleFeedScreen = memo(
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  centered: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    paddingHorizontal: 32,
-  },
-  loadingText: {
-    fontFamily: 'Inter',
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: 'center',
-  },
 });

@@ -479,6 +479,10 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
               if (mode === 'silent') {
                 if (articlesRef.current.length === 0) {
                   setAwaitingBackgroundFeed(false);
+                  // Cold/empty feed: surface the failure instead of dropping into a
+                  // permanent "No articles yet." state with no error banner.
+                  setError(e instanceof Error ? e.message : 'Failed to load articles');
+                  setNotice(null);
                 } else {
                   scheduleGlobalSilentRefresh(0);
                 }

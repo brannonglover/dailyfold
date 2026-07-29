@@ -565,7 +565,12 @@ function LatestScreenContent() {
   }, [filtered, prunePendingInFeed]);
 
   useEffect(() => {
-    if (!isFocused || !displayReady) {
+    if (!isFocused) {
+      setEmptyMessage(undefined);
+      return;
+    }
+    // displayReady stays false on a truly empty raw feed; still show error-aware copy.
+    if (!displayReady && !error) {
       setEmptyMessage(undefined);
       return;
     }

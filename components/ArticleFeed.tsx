@@ -40,6 +40,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { ArticleCard } from '@/components/ArticleCard';
+import { ArticleFeedSkeleton } from '@/components/ArticleFeedSkeleton';
 import { FeedBottomVignette } from '@/components/FeedBottomVignette';
 import { FeedEndStretch } from '@/components/FeedEndStretch';
 import { FeedHeader } from '@/components/FeedHeader';
@@ -144,19 +145,6 @@ function FeedLoadMoreFooter() {
       <ActivityIndicator size="small" color={colors.textSecondary} />
       <Text style={[styles.loadMoreText, { color: colors.textSecondary }]}>
         Loading more stories...
-      </Text>
-    </View>
-  );
-}
-
-function FeedRefreshIndicator() {
-  const { colors } = useTheme();
-
-  return (
-    <View style={styles.refreshIndicator}>
-      <ActivityIndicator size="small" color={colors.textSecondary} />
-      <Text style={[styles.refreshText, { color: colors.textSecondary }]}>
-        Grabbing the latest…
       </Text>
     </View>
   );
@@ -727,7 +715,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
             style={styles.emptyBody}
             contentContainerStyle={
               isRefreshing
-                ? styles.emptyScrollContentCentered
+                ? styles.emptyScrollContentFill
                 : headerExtra
                   ? styles.emptyScrollContentAnchored
                   : styles.emptyScrollContentCentered
@@ -745,7 +733,9 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
               maybeDismissPendingAfterScroll(event.nativeEvent.contentOffset.y);
             }}>
             {isRefreshing ? (
-              <FeedRefreshIndicator />
+              // Native RefreshControl already shows the pull spinner — avoid a second
+              // "Grabbing the latest…" indicator stacked underneath it.
+              <ArticleFeedSkeleton showTopicChips={false} />
             ) : headerExtra ? (
               <View style={styles.emptyStateAnchored}>
                 <View style={[styles.emptyIconWrap, { backgroundColor: colors.surface }]}>
@@ -895,6 +885,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 32,
   },
+  emptyScrollContentFill: {
+    flexGrow: 1,
+  },
   emptyScrollContentAnchored: {
     flexGrow: 1,
     paddingHorizontal: 24,
@@ -976,19 +969,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   loadMoreText: {
-    fontFamily: 'Inter',
-    fontSize: 13,
-    lineHeight: 18,
-    letterSpacing: 0.2,
-  },
-  refreshIndicator: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 28,
-    paddingHorizontal: 24,
-  },
-  refreshText: {
     fontFamily: 'Inter',
     fontSize: 13,
     lineHeight: 18,
