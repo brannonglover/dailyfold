@@ -150,18 +150,25 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       return;
     }
 
-    setPreferences(null);
+    let cancelled = false;
     setIsLoading(true);
     getPreferences(user.id)
       .then(async (loaded) => {
+        if (cancelled) return;
         const normalized = normalizeFeedPreferences(loaded);
         setPreferences(normalized);
         if (normalized !== loaded) {
           await savePreferences(user.id, normalized);
         }
       })
-      .finally(() => setIsLoading(false));
-  }, [user]);
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const persist = useCallback(
     async (next: UserPreferences) => {

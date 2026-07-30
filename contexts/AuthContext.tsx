@@ -33,8 +33,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ? mapSupabaseUser(session.user) : null);
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        setUser(mapSupabaseUser(session.user));
+      } else if (event === 'SIGNED_OUT') {
+        // Ignore transient null sessions during token refresh / resume — clearing
+        // the user here wipes the in-memory Latest feed until pull-to-refresh.
+        setUser(null);
+      }
       setIsLoading(false);
     });
 

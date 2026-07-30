@@ -3,16 +3,25 @@ import test from 'node:test';
 
 import { Article } from '@/types';
 
-import { mergeArticleFeed } from './mergeArticleFeed';
+import {
+  mergeArticleFeed,
+  mergeArticlePreferringHero,
+  updateExistingFeedArticles,
+} from './mergeArticleFeed';
 
-function article(id: string, source: string, publishedAt: string): Article {
+function article(
+  id: string,
+  source: string,
+  publishedAt: string,
+  imageUrl = 'https://example.com/1.jpg',
+): Article {
   return {
     id,
     title: `Title ${id}`,
     excerpt: 'excerpt',
     body: 'body',
     source,
-    imageUrl: 'https://example.com/1.jpg',
+    imageUrl,
     topics: ['world'],
     readTimeMinutes: 3,
     publishedAt,
@@ -20,7 +29,7 @@ function article(id: string, source: string, publishedAt: string): Article {
   };
 }
 
-test('mergeArticleFeed leads with the batch\'s most trending story', () => {
+test("mergeArticleFeed leads with the batch's most trending story", () => {
   const now = Date.now();
   const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
 
@@ -38,15 +47,24 @@ test('mergeArticleFeed leads with the batch\'s most trending story', () => {
   assert.equal(merged[0]?.id, 'burst-1');
 });
 
-test('mergeArticleFeed falls back to normal spread when no newcomer is trending', () => {
-  const now = Date.now();
-  const old = new Date(now - 8 * 60 * 60 * 1000).toISOString();
+test('updateExistingFeedArticles keeps a real hero when silent refresh returns blank imageUrl', () => {
+  const prev = [article('a1', 'Wire', '2026-07-29T12:00:00.000Z', 'https://cdn.example.com/hero.jpg')];
+  const incoming = [
+    {
+      ...prev[0]!,
+      title: 'Updated title',
+      imageUrl: '',
+    },
+  ];
 
-  const prev = [article('old-1', 'Wire', old)];
-  const incoming = [...prev, article('new-1', 'Other', old)];
+  const next = updateExistingFeedArticles(prev, incoming);
+  assert.equal(next[0]?.title, 'Updated title');
+  assert.equal(next[0]?.imageUrl, 'https://cdn.example.com/hero.jpg');
+});
 
-  const merged = mergeArticleFeed(prev, incoming);
-
-  assert.equal(merged.length, 2);
-  assert.ok(merged.some((a) => a.id === 'new-1'));
+test('mergeArticlePreferringHero adopts a newly available hero', () => {
+  const existing = article('a1', 'Wire', '2026-07-29T12:00:00.000Z', '');
+  const incoming = article('a1', 'Wire', '2026-07-29T12:00:00.000Z', 'https://cdn.example.com/new.jpg');
+  const merged = mergeArticlePreferringHero(existing, incoming);
+  assert.equal(merged.imageUrl, 'https://cdn.example.com/new.jpg');
 });

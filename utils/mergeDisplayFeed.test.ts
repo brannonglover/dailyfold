@@ -157,6 +157,12 @@ test('updateDisplayArticlesInPlace refreshes fields without reordering', () => {
   assert.equal(next[0]?.title, 'updated-a');
 });
 
+test('updateDisplayArticlesInPlace keeps painted rows when filtered source briefly empties', () => {
+  const prev = [article('a'), article('b')];
+  const next = updateDisplayArticlesInPlace(prev, []);
+  assert.equal(next, prev);
+});
+
 test('isFilterExpansion detects preference widening', () => {
   const prev = JSON.stringify({ topics: [], sports: [], sources: ['espn'] });
   const next = JSON.stringify({ topics: [], sports: [], sources: [] });

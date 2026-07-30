@@ -86,6 +86,12 @@ export function updateDisplayArticlesInPlace(
   prev: Article[],
   sourceArticles: Article[],
 ): Article[] {
+  // An empty filtered source usually means a transient silent-refresh regression
+  // (e.g. heroes blanked server-side). Keep the painted feed instead of wiping it.
+  if (prev.length > 0 && sourceArticles.length === 0) {
+    return prev;
+  }
+
   const byId = new Map(sourceArticles.map((article) => [article.id, article]));
   let changed = false;
   const next = prev

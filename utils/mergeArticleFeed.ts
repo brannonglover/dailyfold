@@ -1,4 +1,5 @@
 import { Article } from '@/types';
+import { hasRealHeroImage } from '@/utils/articleStoryMatch';
 import { articleFeedCardFieldsEqual } from '@/utils/mergeDisplayFeed';
 import { spreadArticlesBySource, spreadAgainstFeedHead } from '@/utils/feedOrdering';
 import { mostTrendingArticle } from '@/utils/trendingArticles';
@@ -10,6 +11,20 @@ export function newcomersFromFeedMerge(prev: Article[], incoming: Article[]): Ar
   return incoming.filter((a) => !seen.has(a.id));
 }
 
+/**
+ * Prefer newer list fields, but never let a silent/list refresh blank out a hero
+ * we already painted — the Latest feed hard-filters rows without real images.
+ */
+export function mergeArticlePreferringHero(existing: Article, incoming: Article): Article {
+  if (existing === incoming || articleFeedCardFieldsEqual(existing, incoming)) {
+    return existing;
+  }
+  if (hasRealHeroImage(existing) && !hasRealHeroImage(incoming)) {
+    return { ...incoming, imageUrl: existing.imageUrl };
+  }
+  return incoming;
+}
+
 /** Update fields on articles already in the feed without adding or reordering. */
 export function updateExistingFeedArticles(prev: Article[], incoming: Article[]): Article[] {
   if (prev.length === 0) return prev;
@@ -18,9 +33,9 @@ export function updateExistingFeedArticles(prev: Article[], incoming: Article[])
   const next = prev.map((item) => {
     const updated = incomingById.get(item.id);
     if (!updated) return item;
-    if (updated === item || articleFeedCardFieldsEqual(item, updated)) return item;
-    changed = true;
-    return updated;
+    const merged = mergeArticlePreferringHero(item, updated);
+    if (merged !== item) changed = true;
+    return merged;
   });
   return changed ? next : prev;
 }
@@ -38,7 +53,7 @@ export function mergeArticleFeed(prev: Article[], incoming: Article[]): Article[
 
   for (const item of prev) {
     const updated = incomingById.get(item.id);
-    merged.push(updated ?? item);
+    merged.push(updated ? mergeArticlePreferringHero(item, updated) : item);
     seen.add(item.id);
   }
 
