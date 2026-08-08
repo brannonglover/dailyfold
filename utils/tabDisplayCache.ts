@@ -123,9 +123,9 @@ export function hasShowableTabDisplayCache(key: TabDisplayCacheKey): boolean {
   return (entry?.displayArticles.length ?? 0) > 0;
 }
 
-/** True when visible rows are a strict subset of the filtered upstream feed. */
+/** True when visible rows are missing filtered upstream matches (including empty display). */
 export function isDisplayFeedUnderstocked(displayCount: number, filteredCount: number): boolean {
-  return filteredCount > 0 && displayCount > 0 && displayCount < filteredCount;
+  return filteredCount > 0 && displayCount < filteredCount;
 }
 
 /** True when tab display state matches the current upstream feed snapshot. */

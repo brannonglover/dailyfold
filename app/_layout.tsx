@@ -13,6 +13,7 @@ import { PreferencesProvider } from '@/contexts/PreferencesContext';
 import { AppThemeProvider } from '@/contexts/ThemeContext';
 import { useAppFonts } from '@/constants/Fonts';
 import { useNotificationNavigation } from '@/hooks/useNotificationNavigation';
+import { usePushNotificationRegistration } from '@/hooks/usePushNotificationRegistration';
 import { useTrendingNotificationBackground } from '@/hooks/useTrendingNotificationBackground';
 
 export { ErrorBoundary } from 'expo-router';
@@ -82,6 +83,7 @@ export default function RootLayout() {
 const RootLayoutNav = memo(function RootLayoutNav() {
   useNotificationNavigation();
   useTrendingNotificationBackground();
+  usePushNotificationRegistration();
 
   return (
     <ThemeProvider value={DarkNavTheme}>

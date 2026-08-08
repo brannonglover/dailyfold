@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { shouldShowArticleFeedLoading } from './feedLoadingState';
+import { shouldShowArticleFeedLoading, shouldShowFilteredFeedLoading } from './feedLoadingState';
 
 test('shouldShowArticleFeedLoading stays true until hydration and fetch settle', () => {
   assert.equal(
@@ -65,6 +65,60 @@ test('shouldShowArticleFeedLoading is false when cached articles are available',
       isLoading: false,
       feedReady: false,
       persistedHydrated: false,
+    }),
+    false,
+  );
+});
+
+test('shouldShowFilteredFeedLoading keeps skeleton while display rebuilds over raw stock', () => {
+  assert.equal(
+    shouldShowFilteredFeedLoading({
+      contextLoading: false,
+      rawCount: 40,
+      filteredCount: 0,
+      displayReady: false,
+    }),
+    true,
+  );
+
+  assert.equal(
+    shouldShowFilteredFeedLoading({
+      contextLoading: false,
+      rawCount: 40,
+      filteredCount: 0,
+      displayReady: true,
+      isLoadingMore: true,
+    }),
+    true,
+  );
+
+  assert.equal(
+    shouldShowFilteredFeedLoading({
+      contextLoading: false,
+      rawCount: 40,
+      filteredCount: 0,
+      displayReady: true,
+      isRefreshing: true,
+    }),
+    true,
+  );
+
+  assert.equal(
+    shouldShowFilteredFeedLoading({
+      contextLoading: false,
+      rawCount: 40,
+      filteredCount: 0,
+      displayReady: true,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldShowFilteredFeedLoading({
+      contextLoading: false,
+      rawCount: 40,
+      filteredCount: 12,
+      displayReady: true,
     }),
     false,
   );

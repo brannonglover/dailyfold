@@ -54,3 +54,38 @@ CREATE TABLE IF NOT EXISTS article_reader_content (
   source TEXT NOT NULL,
   extracted_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- One row per registered device (Expo push token), not per user — a user can have
+-- multiple installs. Preference columns mirror the subset of client UserPreferences
+-- that server-side notification scoring actually consumes (see backend/lib/notify/).
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  expo_push_token TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  topic_scores JSONB NOT NULL DEFAULT '{}',
+  keyword_scores JSONB NOT NULL DEFAULT '{}',
+  sport_tag_scores JSONB NOT NULL DEFAULT '{}',
+  enabled_topics TEXT[] NOT NULL DEFAULT '{}',
+  enabled_source_ids TEXT[] NOT NULL DEFAULT '{}',
+  enabled_sport_tags TEXT[] NOT NULL DEFAULT '{}',
+  blocked_topics TEXT[] NOT NULL DEFAULT '{}',
+  blocked_sport_tags TEXT[] NOT NULL DEFAULT '{}',
+  blocked_keywords TEXT[] NOT NULL DEFAULT '{}',
+  trending_notifications_enabled BOOLEAN NOT NULL DEFAULT true,
+  notified_article_ids TEXT[] NOT NULL DEFAULT '{}',
+  last_notified_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions (user_id);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_enabled
+  ON push_subscriptions (trending_notifications_enabled)
+  WHERE trending_notifications_enabled = true;
+
+-- Scratch table for polling Expo push receipts (delivery status) a few minutes
+-- after sending; rows are deleted once a receipt is processed.
+CREATE TABLE IF NOT EXISTS push_receipts (
+  ticket_id TEXT PRIMARY KEY,
+  expo_push_token TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

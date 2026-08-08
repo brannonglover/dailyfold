@@ -8,6 +8,7 @@ import { repairBrokenGuardianImageUrl } from '../../catalog/guardianImageUrl';
 import { getSql, resetSqlConnectionForTests } from './postgres';
 import type { ReaderBlock } from './extract';
 import { articleNeedsHeroEnrichment } from './ogImage';
+import type { PushPreferences } from './notify/types';
 
 import { Article, Topic } from './types';
 
@@ -439,4 +440,171 @@ export async function saveReaderContent(
       source = excluded.source,
       extracted_at = now()
   `;
+}
+
+/** Articles published since `sinceIso`, newest first. Not `listArticles` — that caps at 100,
+ * too low for a full trending window across ~20 sources on a busy day. */
+export async function listArticlesSince(sinceIso: string, limit = 500): Promise<Article[]> {
+  const sql = getSql();
+  const rows = await sql<ArticleRow[]>`
+    SELECT * FROM articles
+    WHERE published_at >= ${sinceIso}::timestamptz
+    ORDER BY published_at DESC
+    LIMIT ${limit}
+  `;
+  return rows.map(rowToArticle);
+}
+
+export interface PushSubscription {
+  expoPushToken: string;
+  userId: string;
+  notifiedArticleIds: string[];
+  lastNotifiedAt: Date | null;
+  prefs: PushPreferences;
+}
+
+interface PushSubscriptionRow {
+  expo_push_token: string;
+  user_id: string;
+  topic_scores: Record<string, number>;
+  keyword_scores: Record<string, number>;
+  sport_tag_scores: Record<string, number>;
+  enabled_topics: string[];
+  enabled_source_ids: string[];
+  enabled_sport_tags: string[];
+  blocked_topics: string[];
+  blocked_sport_tags: string[];
+  blocked_keywords: string[];
+  trending_notifications_enabled: boolean;
+  notified_article_ids: string[];
+  last_notified_at: Date | null;
+}
+
+function rowToPushSubscription(row: PushSubscriptionRow): PushSubscription {
+  return {
+    expoPushToken: row.expo_push_token,
+    userId: row.user_id,
+    notifiedArticleIds: row.notified_article_ids ?? [],
+    lastNotifiedAt: row.last_notified_at,
+    prefs: {
+      topicScores: (row.topic_scores ?? {}) as PushPreferences['topicScores'],
+      keywordScores: row.keyword_scores ?? {},
+      sportTagScores: row.sport_tag_scores ?? {},
+      enabledTopics: (row.enabled_topics ?? []) as PushPreferences['enabledTopics'],
+      enabledSourceIds: row.enabled_source_ids ?? [],
+      enabledSportTags: (row.enabled_sport_tags ?? []) as PushPreferences['enabledSportTags'],
+      blockedTopics: (row.blocked_topics ?? []) as PushPreferences['blockedTopics'],
+      blockedSportTags: (row.blocked_sport_tags ?? []) as PushPreferences['blockedSportTags'],
+      blockedKeywords: row.blocked_keywords ?? [],
+      trendingNotificationsEnabled: row.trending_notifications_enabled === true,
+    },
+  };
+}
+
+/** Upsert by push token. Deliberately does not touch notified_article_ids/last_notified_at
+ * so a preferences re-sync never resets a subscriber's cooldown/dedup state. */
+export async function upsertPushSubscription(input: {
+  expoPushToken: string;
+  userId: string;
+  prefs: PushPreferences;
+}): Promise<void> {
+  const sql = getSql();
+  const { expoPushToken, userId, prefs } = input;
+  await sql`
+    INSERT INTO push_subscriptions (
+      expo_push_token, user_id, topic_scores, keyword_scores, sport_tag_scores,
+      enabled_topics, enabled_source_ids, enabled_sport_tags,
+      blocked_topics, blocked_sport_tags, blocked_keywords,
+      trending_notifications_enabled
+    ) VALUES (
+      ${expoPushToken}, ${userId},
+      ${sql.json(prefs.topicScores)}, ${sql.json(prefs.keywordScores)}, ${sql.json(prefs.sportTagScores)},
+      ${prefs.enabledTopics}::text[], ${prefs.enabledSourceIds}::text[], ${prefs.enabledSportTags}::text[],
+      ${prefs.blockedTopics}::text[], ${prefs.blockedSportTags}::text[], ${prefs.blockedKeywords}::text[],
+      ${prefs.trendingNotificationsEnabled}
+    )
+    ON CONFLICT (expo_push_token) DO UPDATE SET
+      user_id = excluded.user_id,
+      topic_scores = excluded.topic_scores,
+      keyword_scores = excluded.keyword_scores,
+      sport_tag_scores = excluded.sport_tag_scores,
+      enabled_topics = excluded.enabled_topics,
+      enabled_source_ids = excluded.enabled_source_ids,
+      enabled_sport_tags = excluded.enabled_sport_tags,
+      blocked_topics = excluded.blocked_topics,
+      blocked_sport_tags = excluded.blocked_sport_tags,
+      blocked_keywords = excluded.blocked_keywords,
+      trending_notifications_enabled = excluded.trending_notifications_enabled,
+      updated_at = now()
+  `;
+}
+
+export async function deletePushSubscription(expoPushToken: string): Promise<void> {
+  const sql = getSql();
+  await sql`DELETE FROM push_subscriptions WHERE expo_push_token = ${expoPushToken}`;
+}
+
+export async function deletePushSubscriptionsByUser(userId: string): Promise<void> {
+  const sql = getSql();
+  await sql`DELETE FROM push_subscriptions WHERE user_id = ${userId}`;
+}
+
+export async function getPushSubscriptionByToken(
+  expoPushToken: string,
+): Promise<PushSubscription | undefined> {
+  const sql = getSql();
+  const rows = await sql<PushSubscriptionRow[]>`
+    SELECT * FROM push_subscriptions WHERE expo_push_token = ${expoPushToken}
+  `;
+  return rows[0] ? rowToPushSubscription(rows[0]) : undefined;
+}
+
+export async function listActivePushSubscriptions(): Promise<PushSubscription[]> {
+  const sql = getSql();
+  const rows = await sql<PushSubscriptionRow[]>`
+    SELECT * FROM push_subscriptions WHERE trending_notifications_enabled = true
+  `;
+  return rows.map(rowToPushSubscription);
+}
+
+export async function updatePushSubscriptionNotifyState(
+  expoPushToken: string,
+  notifiedArticleIds: string[],
+  sentAtMs: number,
+): Promise<void> {
+  const sql = getSql();
+  await sql`
+    UPDATE push_subscriptions
+    SET notified_article_ids = ${notifiedArticleIds}::text[], last_notified_at = ${new Date(sentAtMs).toISOString()}::timestamptz
+    WHERE expo_push_token = ${expoPushToken}
+  `;
+}
+
+export async function insertPushReceiptTickets(
+  entries: { ticketId: string; expoPushToken: string }[],
+): Promise<void> {
+  if (entries.length === 0) return;
+  const sql = getSql();
+  for (const entry of entries) {
+    await sql`
+      INSERT INTO push_receipts (ticket_id, expo_push_token) VALUES (${entry.ticketId}, ${entry.expoPushToken})
+      ON CONFLICT (ticket_id) DO NOTHING
+    `;
+  }
+}
+
+export async function listPendingPushReceipts(
+  limit = 500,
+): Promise<{ ticketId: string; expoPushToken: string }[]> {
+  const sql = getSql();
+  const rows = await sql<{ ticket_id: string; expo_push_token: string }[]>`
+    SELECT ticket_id, expo_push_token FROM push_receipts ORDER BY created_at ASC LIMIT ${limit}
+  `;
+  return rows.map((row) => ({ ticketId: row.ticket_id, expoPushToken: row.expo_push_token }));
+}
+
+export async function deletePushReceipts(ticketIds: string[]): Promise<void> {
+  if (ticketIds.length === 0) return;
+  const sql = getSql();
+  await sql`DELETE FROM push_receipts WHERE ticket_id = ANY(${ticketIds}::text[])`;
 }

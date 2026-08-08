@@ -86,9 +86,14 @@ export function updateDisplayArticlesInPlace(
   prev: Article[],
   sourceArticles: Article[],
 ): Article[] {
+  // Empty display with a stocked filtered source must seed — order lock callers
+  // that fall through here should not leave the heart empty after resume.
+  if (prev.length === 0) {
+    return sourceArticles;
+  }
   // An empty filtered source usually means a transient silent-refresh regression
   // (e.g. heroes blanked server-side). Keep the painted feed instead of wiping it.
-  if (prev.length > 0 && sourceArticles.length === 0) {
+  if (sourceArticles.length === 0) {
     return prev;
   }
 

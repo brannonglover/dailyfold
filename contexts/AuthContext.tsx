@@ -9,6 +9,7 @@ import {
   mapSupabaseUser,
   registerUser,
 } from '@/services/auth';
+import { getCachedPushToken, unregisterPushToken } from '@/services/pushNotifications';
 import { User } from '@/types';
 
 interface AuthContextValue {
@@ -58,9 +59,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    // Unregister while the session is still valid — the DELETE route requires a Bearer token.
+    if (user) {
+      const cachedToken = await getCachedPushToken(user.id);
+      if (cachedToken) {
+        await unregisterPushToken(user.id, cachedToken);
+      }
+    }
     await logoutUser();
     setUser(null);
-  }, []);
+  }, [user]);
 
   const deleteAccount = useCallback(
     async (password: string) => {

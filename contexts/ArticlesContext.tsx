@@ -78,6 +78,8 @@ type LoadMode = 'initial' | 'refresh' | 'silent' | 'append';
 
 const BACKGROUND_INGEST_REFETCH_MS = 4_000;
 const INITIAL_RETRY_DELAYS_MS = [2_000, 4_000, 8_000] as const;
+/** After this long away, resume fetches a fresh page instead of only queuing pending. */
+const RESUME_REFRESH_AFTER_MS = 60_000;
 
 const silentRefreshListeners = new Set<() => void>();
 let backgroundIngestRefetchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -137,6 +139,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   const [hadPersistedFeed, setHadPersistedFeed] = useState(false);
   const [awaitingBackgroundFeed, setAwaitingBackgroundFeed] = useState(false);
   const appState = useRef(AppState.currentState);
+  const backgroundedAtRef = useRef<number | null>(null);
   const refreshInFlightRef = useRef(0);
   const loadMoreInFlightRef = useRef(false);
   const interestBoostInFlightRef = useRef(false);
@@ -610,9 +613,23 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     silentRefreshListeners.add(onSilentRefresh);
 
     const onAppStateChange = (nextState: AppStateStatus) => {
-      if (appState.current.match(/inactive|background/) && nextState === 'active') {
+      if (appState.current === 'active' && nextState.match(/inactive|background/)) {
+        backgroundedAtRef.current = Date.now();
+      } else if (appState.current.match(/inactive|background/) && nextState === 'active') {
+        const awayMs = backgroundedAtRef.current
+          ? Date.now() - backgroundedAtRef.current
+          : 0;
+        backgroundedAtRef.current = null;
+        // Allow chip/interest boosts to run again for the restored selection.
+        interestBoostKeyRef.current = '';
         InteractionManager.runAfterInteractions(() => {
-          void loadRef.current?.('silent', false);
+          if (awayMs >= RESUME_REFRESH_AFTER_MS) {
+            // Land on a fresh feed after sitting idle — silent mode only queues
+            // newcomers behind the pending banner and leaves a thin chip empty.
+            void loadRef.current?.('refresh', true);
+          } else {
+            void loadRef.current?.('silent', false);
+          }
         });
       }
       appState.current = nextState;
@@ -649,6 +666,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       }
       return merged;
     });
+    setFeedGeneration((g) => g + 1);
     setPendingArticles([]);
     return true;
   }, [user, sourceIdsKey]);

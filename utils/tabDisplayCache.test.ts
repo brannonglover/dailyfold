@@ -303,7 +303,8 @@ test('resolveTabDisplayFeed ignores stale cache after load completes', () => {
 test('isDisplayFeedUnderstocked detects truncated visible feeds', () => {
   assert.equal(isDisplayFeedUnderstocked(4, 20), true);
   assert.equal(isDisplayFeedUnderstocked(20, 20), false);
-  assert.equal(isDisplayFeedUnderstocked(0, 20), false);
+  assert.equal(isDisplayFeedUnderstocked(0, 20), true);
+  assert.equal(isDisplayFeedUnderstocked(0, 0), false);
 });
 
 test('hydrateTabDisplayState seeds in-memory state from a fresh cache snapshot', () => {

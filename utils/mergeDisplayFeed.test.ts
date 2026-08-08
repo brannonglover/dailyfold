@@ -163,6 +163,15 @@ test('updateDisplayArticlesInPlace keeps painted rows when filtered source brief
   assert.equal(next, prev);
 });
 
+test('updateDisplayArticlesInPlace seeds an empty display from the filtered source', () => {
+  const source = [article('a'), article('b')];
+  const next = updateDisplayArticlesInPlace([], source);
+  assert.deepEqual(
+    next.map((item) => item.id),
+    ['a', 'b'],
+  );
+});
+
 test('isFilterExpansion detects preference widening', () => {
   const prev = JSON.stringify({ topics: [], sports: [], sources: ['espn'] });
   const next = JSON.stringify({ topics: [], sports: [], sources: [] });

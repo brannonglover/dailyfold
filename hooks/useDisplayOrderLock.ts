@@ -40,13 +40,23 @@ export function useDisplayOrderLock(isRefreshing: boolean, tabKey?: TabDisplayCa
   }, []);
 
   const shouldAllowFullRebuild = useCallback(
-    (filtersChanged: boolean, prevFilterKey: string, filterKey: string) => {
+    (
+      filtersChanged: boolean,
+      prevFilterKey: string,
+      filterKey: string,
+      options?: { displayEmpty?: boolean; generationChanged?: boolean },
+    ) => {
       if (userRebuildRef.current) {
         userRebuildRef.current = false;
         lockedRef.current = true;
         persistLock(true);
         return true;
       }
+      // Empty display must always be allowed to seed — order lock preserves an
+      // already-painted list, not a blank heart after resume/cache loss.
+      if (options?.displayEmpty) return true;
+      // Generation bumps (refresh / apply-pending) replace the feed; re-rank.
+      if (options?.generationChanged) return true;
       if (filtersChanged && !isFilterExpansion(prevFilterKey, filterKey)) return true;
       return !lockedRef.current;
     },

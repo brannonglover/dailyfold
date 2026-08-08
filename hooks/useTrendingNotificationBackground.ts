@@ -1,18 +1,20 @@
-import { useEffect, useRef } from 'react';
-import { AppState, AppStateStatus, Platform } from 'react-native';
+import { useEffect } from 'react';
+import { Platform } from 'react-native';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
-import {
-  runTrendingNotificationCheck,
-  syncTrendingNotificationBackgroundTask,
-} from '@/services/trendingNotificationTask';
+import { syncTrendingNotificationBackgroundTask } from '@/services/trendingNotificationTask';
 
-/** Registers periodic background checks and runs one when the app backgrounds. */
+/**
+ * Registers the periodic `expo-background-task` check as a best-effort fallback
+ * alongside server-side push (backend/app/api/cron/notify). The AppState-triggered
+ * instant check that used to run here on backgrounding was removed — iOS suspends
+ * the app within seconds of backgrounding, not enough time for the auth check + 2
+ * network fetches + notification scheduling it required, so it never reliably fired.
+ */
 export function useTrendingNotificationBackground() {
   const { user } = useAuth();
   const { trendingNotificationsEnabled } = usePreferences();
-  const appState = useRef(AppState.currentState);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -23,19 +25,5 @@ export function useTrendingNotificationBackground() {
     }
 
     void syncTrendingNotificationBackgroundTask(trendingNotificationsEnabled);
-  }, [user, trendingNotificationsEnabled]);
-
-  useEffect(() => {
-    if (Platform.OS === 'web' || !user || !trendingNotificationsEnabled) return;
-
-    const onAppStateChange = (nextState: AppStateStatus) => {
-      if (appState.current === 'active' && nextState.match(/inactive|background/)) {
-        void runTrendingNotificationCheck();
-      }
-      appState.current = nextState;
-    };
-
-    const subscription = AppState.addEventListener('change', onAppStateChange);
-    return () => subscription.remove();
   }, [user, trendingNotificationsEnabled]);
 }

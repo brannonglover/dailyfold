@@ -3,7 +3,7 @@ import type { ParamListBase } from '@react-navigation/native';
 import { useIsFocused } from '@react-navigation/native';
 import { useFocusEffect, useNavigation } from 'expo-router';
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from 'react';
-import { InteractionManager } from 'react-native';
+import { AppState, AppStateStatus, InteractionManager } from 'react-native';
 import { ArticleFeedHandle } from '@/components/ArticleFeed';
 import { ArticleFeedScreen } from '@/components/ArticleFeedScreen';
 import { BrandLogo } from '@/components/BrandLogo';
@@ -26,12 +26,16 @@ import {
   updateDisplayArticlesInPlace,
 } from '@/utils/mergeDisplayFeed';
 import { getFeedEmptyMessage } from '@/utils/feedEmptyMessage';
+import { shouldShowFilteredFeedLoading } from '@/utils/feedLoadingState';
 import { isFeedInteractionLocked, subscribeFeedInteractionLock } from '@/utils/feedInteractionLock';
 import { MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION } from '@/utils/feedLoadMoreGate';
 import { sportTagSourceIds, topicSourceIds } from '@/utils/forYouInterestSources';
 import { prewarmForYouDisplayCache } from '@/utils/forYouPrewarm';
 import { readTabDisplayCache, resolveTabDisplayFeed, hasShowableTabDisplayCache, isDisplayFeedUnderstocked } from '@/utils/tabDisplayCache';
 import { MIN_PENDING_ARTICLES_FOR_BANNER } from '@/utils/pendingFeedArticles';
+
+/** After this long in the background, resume should land on a refreshed feed. */
+const RESUME_REFRESH_AFTER_MS = 60_000;
 
 function LatestScreenContent() {
   const navigation = useNavigation<BottomTabNavigationProp<ParamListBase>>();
@@ -67,6 +71,9 @@ function LatestScreenContent() {
   const syncDisplayHandledRef = useRef(false);
   const wasFocusedOnTabPressRef = useRef(false);
   const chipBoostKeyRef = useRef('');
+  const appStateRef = useRef(AppState.currentState);
+  const backgroundedAtRef = useRef<number | null>(null);
+  const pendingResumeRefreshRef = useRef(false);
   const [feedInteractionEpoch, setFeedInteractionEpoch] = useState(0);
   const isFocused = useIsFocused();
   // Full "all chips" ranked order, recomputed only when the underlying article set or
@@ -233,7 +240,10 @@ function LatestScreenContent() {
   ]);
 
   useEffect(() => {
-    if (!isFocused || isLoading || isLoadingMore || !hasMore || !displayReady) return;
+    if (!isFocused || isLoading || isLoadingMore || !hasMore) return;
+    // Allow top-up while display is still catching up when the painted list is empty
+    // (resume / chip restore) — gating on displayReady alone left the heart stuck.
+    if (!displayReady && displayArticles.length > 0) return;
     const upstream = filterFeedArticles(articles);
     if (upstream.length >= MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION) return;
     // Only skip once displayArticles has caught up with everything upstream has found —
@@ -284,13 +294,24 @@ function LatestScreenContent() {
     void boostArticlesForInterests(sourceIds, boostKey);
   }, [isFocused, preferences, isLoading, feedGeneration, boostArticlesForInterests]);
 
+  const runResumeRefresh = useCallback(() => {
+    // Re-allow chip source boost after a long absence — ArticlesContext clears its
+    // boost key on resume, and this clears the Latest-side gate keyed the same way.
+    chipBoostKeyRef.current = '';
+    markUserRebuild();
+  }, [markUserRebuild]);
+
   useFocusEffect(
     useCallback(() => {
       wasFocusedOnTabPressRef.current = true;
+      if (pendingResumeRefreshRef.current) {
+        pendingResumeRefreshRef.current = false;
+        runResumeRefresh();
+      }
       return () => {
         wasFocusedOnTabPressRef.current = false;
       };
-    }, []),
+    }, [runResumeRefresh]),
   );
 
   useFocusEffect(
@@ -306,6 +327,36 @@ function LatestScreenContent() {
       return unsubscribe;
     }, [navigation, handleRefresh]),
   );
+
+  // After sitting in the background, unlock display order so the context refresh
+  // can rebuild the filtered list (including the active chip) instead of leaving
+  // an empty heart from an order-locked in-place update.
+  useEffect(() => {
+    const onAppStateChange = (nextState: AppStateStatus) => {
+      if (appStateRef.current === 'active' && nextState.match(/inactive|background/)) {
+        backgroundedAtRef.current = Date.now();
+      } else if (
+        appStateRef.current.match(/inactive|background/) &&
+        nextState === 'active'
+      ) {
+        const awayMs = backgroundedAtRef.current
+          ? Date.now() - backgroundedAtRef.current
+          : 0;
+        backgroundedAtRef.current = null;
+        if (awayMs >= RESUME_REFRESH_AFTER_MS) {
+          if (isFocused) {
+            runResumeRefresh();
+          } else {
+            pendingResumeRefreshRef.current = true;
+          }
+        }
+      }
+      appStateRef.current = nextState;
+    };
+
+    const subscription = AppState.addEventListener('change', onAppStateChange);
+    return () => subscription.remove();
+  }, [isFocused, runResumeRefresh]);
 
   useEffect(() => {
     if (!isFocused || !preferences || articles.length === 0) return;
@@ -448,9 +499,18 @@ function LatestScreenContent() {
 
       if (needsFullRebuild) {
         syncDisplayHandledRef.current = true;
-        console.log('[chipDebug] entering needsFullRebuild, shouldAllowFullRebuild=', shouldAllowFullRebuild(filtersChanged, prevFilterKeyRef.current, filterKey));
+        const allowRebuild = shouldAllowFullRebuild(
+          filtersChanged,
+          prevFilterKeyRef.current,
+          filterKey,
+          {
+            displayEmpty: displayArticles.length === 0,
+            generationChanged,
+          },
+        );
+        console.log('[chipDebug] entering needsFullRebuild, shouldAllowFullRebuild=', allowRebuild);
         applyDisplay(() => {
-          if (shouldAllowFullRebuild(filtersChanged, prevFilterKeyRef.current, filterKey)) {
+          if (allowRebuild) {
             const ranked = rankFilteredArticles();
             console.log('[chipDebug] setDisplayArticles (full rebuild)', { count: ranked.length });
             setDisplayArticles(ranked);
@@ -460,7 +520,12 @@ function LatestScreenContent() {
             prevPersonalizationKeyRef.current = personalizationKey;
           } else {
             console.log('[chipDebug] shouldAllowFullRebuild=false, using updateDisplayArticlesInPlace (no new rows added)');
-            setDisplayArticles((prev) => updateDisplayArticlesInPlace(prev, filteredArticles));
+            setDisplayArticles((prev) => {
+              if (prev.length === 0 && filteredArticles.length > 0) {
+                return orderLatest(filteredArticles);
+              }
+              return updateDisplayArticlesInPlace(prev, filteredArticles);
+            });
           }
           setDisplayReady(true);
         });
@@ -611,6 +676,15 @@ function LatestScreenContent() {
     filterByEnabledSources,
   ]);
 
+  const showLoading = shouldShowFilteredFeedLoading({
+    contextLoading: isLoading,
+    rawCount: articles.length,
+    filteredCount: filtered.length,
+    displayReady,
+    isLoadingMore,
+    isRefreshing,
+  });
+
   return (
     <ArticleFeedScreen
       ref={feedRef}
@@ -618,7 +692,7 @@ function LatestScreenContent() {
       title="Latest"
       titleTrailing={<BrandLogo />}
       emptyMessage={emptyMessage}
-      isLoading={isLoading}
+      isLoading={showLoading}
       isRefreshing={isRefreshing}
       error={error}
       notice={notice}

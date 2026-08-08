@@ -53,6 +53,12 @@ import {
   removeLikedArticleSnapshot,
 } from '@/services/likedArticles';
 import { requestTrendingNotificationPermission } from '@/services/notificationSetup';
+import {
+  getCachedPushToken,
+  getExpoPushToken,
+  registerPushToken,
+  unregisterPushToken,
+} from '@/services/pushNotifications';
 import { warmArticleCache } from '@/services/articleCache';
 import { getPreferences, savePreferences } from '@/services/storage';
 import {
@@ -72,6 +78,10 @@ import { createFolderId } from '@/utils/folderId';
 import { isBikeRelatedInterest, normalizeForYouKeyword } from '@/utils/forYouTopics';
 
 export type TrendingNotificationsToggleResult = 'updated' | 'denied' | 'unavailable';
+
+/** Debounce for syncing notification-relevant preference scores to the backend —
+ * persist() fires on every like/click, so this avoids a request per interaction. */
+const PUSH_SYNC_DEBOUNCE_MS = 2_000;
 
 interface PreferencesContextValue {
   preferences: UserPreferences | null;
@@ -132,6 +142,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   const [isLoading, setIsLoading] = useState(true);
   const preferencesRef = useRef<UserPreferences | null>(null);
   const likedBackfillInFlightRef = useRef(false);
+  const pushSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   preferencesRef.current = preferences;
 
@@ -182,6 +193,19 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
         const start = Date.now();
         await savePreferences(user.id, normalized);
         console.log('[chipDebug] persist: savePreferences done', { ms: Date.now() - start });
+
+        if (normalized.trendingNotificationsEnabled) {
+          const userId = user.id;
+          if (pushSyncTimerRef.current) clearTimeout(pushSyncTimerRef.current);
+          pushSyncTimerRef.current = setTimeout(() => {
+            void (async () => {
+              const cachedToken = await getCachedPushToken(userId);
+              if (cachedToken) {
+                void registerPushToken(userId, cachedToken, normalized);
+              }
+            })();
+          }, PUSH_SYNC_DEBOUNCE_MS);
+        }
       } catch {
         if (preferencesRef.current === normalized) {
           preferencesRef.current = previous;
@@ -406,7 +430,9 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       if (!user || !preferences) return 'unavailable';
 
       if (!enabled) {
+        const cachedToken = await getCachedPushToken(user.id);
         await persist({ ...preferences, trendingNotificationsEnabled: false });
+        if (cachedToken) void unregisterPushToken(user.id, cachedToken);
         return 'updated';
       }
 
@@ -414,7 +440,10 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       if (permission === 'unavailable') return 'unavailable';
       if (permission === 'denied') return 'denied';
 
-      await persist({ ...preferences, trendingNotificationsEnabled: true });
+      const next = { ...preferences, trendingNotificationsEnabled: true };
+      await persist(next);
+      const token = await getExpoPushToken();
+      if (token) void registerPushToken(user.id, token, next);
       return 'updated';
     },
     [user, preferences, persist],

@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 
 import { deleteAuthUser, verifyAccessToken } from '@/lib/supabase';
 import { corsHeaders, jsonResponse } from '@/lib/cors';
+import { deletePushSubscriptionsByUser } from '@/lib/db';
 
 export async function OPTIONS(request: NextRequest) {
   return new Response(null, {
@@ -25,6 +26,7 @@ export async function DELETE(request: NextRequest) {
       return jsonResponse({ error: verifyError ?? 'Unauthorized.' }, origin, 401);
     }
 
+    await deletePushSubscriptionsByUser(user.id);
     await deleteAuthUser(user.id);
     return jsonResponse({ ok: true }, origin);
   } catch (error) {
