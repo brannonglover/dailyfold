@@ -28,6 +28,7 @@ import {
 import Animated, {
   Easing,
   FadeIn,
+  LinearTransition,
   runOnJS,
   scrollTo,
   SharedValue,
@@ -65,6 +66,9 @@ import { computeFoldLayout } from '@/utils/foldFeedLayout';
 import { FOLD_GRID_GAP } from '@/constants/Layout';
 
 const AnimatedFlatList = Animated.createAnimatedComponent(FlatList<Article>);
+
+/** Flipboard-like tile merge when pull applies a new feed order. */
+const FEED_ITEM_LAYOUT_TRANSITION = LinearTransition.duration(320);
 
 /** Let child pressables (e.g. Source menu) receive taps during scroll deceleration. */
 const FEED_SCROLL_PRESS_PROPS = {
@@ -770,7 +774,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         {headerExtra}
         <View style={styles.listWrap} onLayout={onListLayout}>
           {pageHeight > 0 ? (
-            <FlatList
+            <AnimatedFlatList
               ref={storyListRef}
               data={articles}
               keyExtractor={articleKeyExtractor}
@@ -780,6 +784,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
               windowSize={7}
               updateCellsBatchingPeriod={50}
               renderItem={renderItem}
+              itemLayoutAnimation={FEED_ITEM_LAYOUT_TRANSITION}
               style={[styles.list, { height: pageHeight }]}
               contentContainerStyle={styles.storyListContent}
               showsVerticalScrollIndicator={false}

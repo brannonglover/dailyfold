@@ -25,7 +25,7 @@ test('isIngestPendingMeta is true only for fire-and-forget ingest', () => {
   assert.equal(isIngestPendingMeta({ ingestTriggered: true, ingestAwaited: false }), true);
 });
 
-test('foreground poll is shorter than a half-hour idle gap', () => {
-  assert.ok(FOREGROUND_FEED_POLL_INTERVAL_MS < 30 * 60 * 1000);
-  assert.ok(RESUME_REFRESH_AFTER_MS < FOREGROUND_FEED_POLL_INTERVAL_MS);
+test('foreground poll is frequent enough to prewarm pull-to-refresh', () => {
+  assert.ok(FOREGROUND_FEED_POLL_INTERVAL_MS <= 60_000);
+  assert.equal(RESUME_REFRESH_AFTER_MS, 60_000);
 });

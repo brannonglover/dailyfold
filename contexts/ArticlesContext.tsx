@@ -25,7 +25,6 @@ import { setArticleFeedPatcher } from '@/services/articleFeedPatch';
 import { ingestNoticeForFetch } from '@/utils/ingestNotice';
 import {
   FOREGROUND_FEED_POLL_INTERVAL_MS,
-  INGEST_COMPLETION_POLL_DELAYS_MS,
   isIngestPendingMeta,
   nextIngestPollDelayMs,
   RESUME_REFRESH_AFTER_MS,
@@ -478,27 +477,6 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
               return;
             }
 
-            // Pull-to-refresh / long-resume: keep the spinner up and poll until the
-            // background ingest finishes so fresh stories land in one shot instead of
-            // requiring another wait after the refresh indicator clears.
-            if (mode === 'refresh' && isIngestPending(meta)) {
-              cancelScheduledSilentRefresh();
-              resetIngestPollAttempt();
-              for (const delayMs of INGEST_COMPLETION_POLL_DELAYS_MS) {
-                await sleep(delayMs);
-                if (generation !== fetchGenerationRef.current) return;
-                try {
-                  const polled = await requestArticles('silent', false);
-                  data = polled.articles;
-                  meta = polled.meta;
-                  if (!isIngestPending(meta)) break;
-                } catch {
-                  // Keep the first successful page; silent follow-ups will retry.
-                  break;
-                }
-              }
-            }
-
             console.log('[chipDebug] fetch result', { mode, dataLen: data.length, hasMore: meta?.hasMore, nextCursor: meta?.nextCursor });
             applyFetchResult(mode, data, meta, generation);
             return;
@@ -674,8 +652,8 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     };
   }, [sourceIdsKey]);
 
-  // While the app stays open, periodically re-fetch so cron/stale ingest results
-  // are already queued (pending banner) before the reader pulls.
+  // While the app stays open, re-fetch often enough that pull-to-refresh usually
+  // merges already-queued stories instead of waiting on a cold ingest.
   useEffect(() => {
     if (!feedReady) return;
 
@@ -745,17 +723,24 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     await runWithRefreshIndicator(applyPendingArticles);
-  }, [applyPendingArticles, runWithRefreshIndicator]);
+    // Refill the pending pipeline in the background for the next instant pull.
+    void load('silent', true);
+  }, [applyPendingArticles, load, runWithRefreshIndicator]);
 
   const refresh = useCallback(async () => {
+    // Flipboard-style: pull merges already-ready stories instantly. Never block the
+    // gesture on a full RSS ingest — that work stays in the background.
     if (hasActionablePending(pendingArticlesRef.current, articlesRef.current)) {
       await runWithRefreshIndicator(applyPendingArticles);
+      void load('silent', true);
       return;
     }
     if (pendingArticlesRef.current.length > 0) {
       setPendingArticles([]);
     }
     suppressSilentFeedMutationRef.current = false;
+    // Returns the current cache immediately (and may kick background ingest).
+    // Follow-up silent polls queue newcomers for the next pull.
     await load('refresh', true);
   }, [applyPendingArticles, load, runWithRefreshIndicator]);
 

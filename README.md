@@ -66,8 +66,8 @@ RSS feeds ──► ingest worker ──► Postgres cache ──► GET /api/ar
 |---------|----------|
 | API server starts | Background ingest if cache is empty or stale |
 | App opens `/api/articles` | Stale cache refreshes in background (15 min default) |
-| Pull-to-refresh | Forces ingest and waits for it to finish before clearing the spinner |
-| App foreground / 5 min timer | Re-fetches from API (queues new stories while you read) |
+| Pull-to-refresh | Instantly merges already-queued stories (Flipboard-style); kicks background ingest for next time |
+| App foreground / 1 min timer | Re-fetches from API so newcomers are ready before you pull |
 | Cron (production) | Every 15 minutes via Vercel |
 | `npm run api:watch` | Local poller, same interval |
 
