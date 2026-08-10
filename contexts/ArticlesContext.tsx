@@ -23,6 +23,13 @@ import { processHotTrendingNotifications } from '@/services/trendingNotification
 import { Article } from '@/types';
 import { setArticleFeedPatcher } from '@/services/articleFeedPatch';
 import { ingestNoticeForFetch } from '@/utils/ingestNotice';
+import {
+  FOREGROUND_FEED_POLL_INTERVAL_MS,
+  INGEST_COMPLETION_POLL_DELAYS_MS,
+  isIngestPendingMeta,
+  nextIngestPollDelayMs,
+  RESUME_REFRESH_AFTER_MS,
+} from '@/utils/ingestPoll';
 import { shouldShowArticleFeedLoading } from '@/utils/feedLoadingState';
 import { sportTagSourceIds } from '@/utils/forYouInterestSources';
 import {
@@ -76,24 +83,24 @@ interface UseArticlesResult {
 
 type LoadMode = 'initial' | 'refresh' | 'silent' | 'append';
 
-const BACKGROUND_INGEST_REFETCH_MS = 4_000;
 const INITIAL_RETRY_DELAYS_MS = [2_000, 4_000, 8_000] as const;
-/** After this long away, resume fetches a fresh page instead of only queuing pending. */
-const RESUME_REFRESH_AFTER_MS = 60_000;
 
 const silentRefreshListeners = new Set<() => void>();
 let backgroundIngestRefetchTimer: ReturnType<typeof setTimeout> | null = null;
+let ingestPollAttempt = 0;
 
-function scheduleGlobalSilentRefresh(delayMs = BACKGROUND_INGEST_REFETCH_MS) {
+function scheduleGlobalSilentRefresh(delayMs?: number) {
   if (backgroundIngestRefetchTimer) {
     clearTimeout(backgroundIngestRefetchTimer);
   }
+  const waitMs = delayMs ?? nextIngestPollDelayMs(ingestPollAttempt);
+  ingestPollAttempt += 1;
   backgroundIngestRefetchTimer = setTimeout(() => {
     backgroundIngestRefetchTimer = null;
     for (const listener of silentRefreshListeners) {
       listener();
     }
-  }, delayMs);
+  }, waitMs);
 }
 
 function cancelScheduledSilentRefresh() {
@@ -101,6 +108,10 @@ function cancelScheduledSilentRefresh() {
     clearTimeout(backgroundIngestRefetchTimer);
     backgroundIngestRefetchTimer = null;
   }
+}
+
+function resetIngestPollAttempt() {
+  ingestPollAttempt = 0;
 }
 
 function appendUniqueArticles(prev: Article[], incoming: Article[]): Article[] {
@@ -111,7 +122,7 @@ function appendUniqueArticles(prev: Article[], incoming: Article[]): Article[] {
 }
 
 function isIngestPending(meta?: FetchArticlesResult['meta']): boolean {
-  return !!meta?.ingestTriggered && !meta?.ingestAwaited;
+  return isIngestPendingMeta(meta);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -214,7 +225,9 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       }
 
       return fetchArticles({
-        forceRefresh: mode === 'refresh' ? forceRefresh : false,
+        // Silent can also force a background ingest (e.g. resume) without
+        // replacing the visible feed — newcomers land in the pending queue.
+        forceRefresh: forceRefresh && (mode === 'refresh' || mode === 'silent'),
         sourceIds: restrictSources && sourceIds.length > 0 ? sourceIds : undefined,
         cursor,
         limit: ARTICLE_PAGE_SIZE,
@@ -315,15 +328,13 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
 
       if (isIngestPending(meta)) {
         scheduleGlobalSilentRefresh();
+      } else {
+        resetIngestPollAttempt();
       }
 
       if (data.length > 0) {
         setError(null);
         setAwaitingBackgroundFeed(false);
-      }
-
-      if (meta?.ingestTriggered && !meta.ingestAwaited && data.length > 0) {
-        scheduleGlobalSilentRefresh();
       }
 
       if (user && preferences?.trendingNotificationsEnabled && mode !== 'append' && data.length > 0) {
@@ -465,6 +476,27 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
                 scheduleGlobalSilentRefresh(0);
               }
               return;
+            }
+
+            // Pull-to-refresh / long-resume: keep the spinner up and poll until the
+            // background ingest finishes so fresh stories land in one shot instead of
+            // requiring another wait after the refresh indicator clears.
+            if (mode === 'refresh' && isIngestPending(meta)) {
+              cancelScheduledSilentRefresh();
+              resetIngestPollAttempt();
+              for (const delayMs of INGEST_COMPLETION_POLL_DELAYS_MS) {
+                await sleep(delayMs);
+                if (generation !== fetchGenerationRef.current) return;
+                try {
+                  const polled = await requestArticles('silent', false);
+                  data = polled.articles;
+                  meta = polled.meta;
+                  if (!isIngestPending(meta)) break;
+                } catch {
+                  // Keep the first successful page; silent follow-ups will retry.
+                  break;
+                }
+              }
             }
 
             console.log('[chipDebug] fetch result', { mode, dataLen: data.length, hasMore: meta?.hasMore, nextCursor: meta?.nextCursor });
@@ -641,6 +673,23 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       subscription.remove();
     };
   }, [sourceIdsKey]);
+
+  // While the app stays open, periodically re-fetch so cron/stale ingest results
+  // are already queued (pending banner) before the reader pulls.
+  useEffect(() => {
+    if (!feedReady) return;
+
+    const poll = () => {
+      if (AppState.currentState !== 'active') return;
+      if (refreshInFlightRef.current > 0 || silentInFlightRef.current || loadMoreInFlightRef.current) {
+        return;
+      }
+      void loadRef.current?.('silent', false);
+    };
+
+    const intervalId = setInterval(poll, FOREGROUND_FEED_POLL_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [feedReady, sourceIdsKey]);
 
   const applyPendingArticles = useCallback(() => {
     const pending = pendingNotAlreadyInFeed(

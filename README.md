@@ -57,7 +57,7 @@ Postgres (Supabase) here is a **rolling cache**, not a fixed article list. New s
 ```
 RSS feeds ──► ingest worker ──► Postgres cache ──► GET /api/articles ──► app
                     ▲
-     cron / app open / pull-to-refresh / every 30 min
+     cron / app open / pull-to-refresh / every 15 min
 ```
 
 **When feeds refresh automatically:**
@@ -65,10 +65,10 @@ RSS feeds ──► ingest worker ──► Postgres cache ──► GET /api/ar
 | Trigger | Behavior |
 |---------|----------|
 | API server starts | Background ingest if cache is empty or stale |
-| App opens `/api/articles` | Stale cache refreshes in background (30 min default) |
-| Pull-to-refresh | Forces immediate ingest (`?refresh=true`) |
-| App foreground / 15 min timer | Re-fetches from API |
-| Cron (production) | Every 30 minutes via Vercel |
+| App opens `/api/articles` | Stale cache refreshes in background (15 min default) |
+| Pull-to-refresh | Forces ingest and waits for it to finish before clearing the spinner |
+| App foreground / 5 min timer | Re-fetches from API (queues new stories while you read) |
+| Cron (production) | Every 15 minutes via Vercel |
 | `npm run api:watch` | Local poller, same interval |
 
 Each ingest **upserts by URL** — new articles are inserted, existing ones updated. Articles older than 30 days are removed.
