@@ -33,9 +33,7 @@ import { sportTagSourceIds, topicSourceIds } from '@/utils/forYouInterestSources
 import { prewarmForYouDisplayCache } from '@/utils/forYouPrewarm';
 import { readTabDisplayCache, resolveTabDisplayFeed, hasShowableTabDisplayCache, isDisplayFeedUnderstocked, isDisplayFeedMatchingFilter } from '@/utils/tabDisplayCache';
 import { MIN_PENDING_ARTICLES_FOR_BANNER } from '@/utils/pendingFeedArticles';
-
-/** After this long in the background, resume should land on a refreshed feed. */
-const RESUME_REFRESH_AFTER_MS = 60_000;
+import { RESUME_REFRESH_AFTER_MS } from '@/utils/ingestPoll';
 
 function LatestScreenContent() {
   const navigation = useNavigation<BottomTabNavigationProp<ParamListBase>>();

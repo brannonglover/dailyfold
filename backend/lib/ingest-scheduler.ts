@@ -1,7 +1,7 @@
 import { articleCount } from './db';
 import { IngestResult, ingestFeeds, isIngestStale } from './ingest';
 
-const INGEST_INTERVAL_MS = Number(process.env.INGEST_INTERVAL_MS ?? 30 * 60 * 1000);
+const INGEST_INTERVAL_MS = Number(process.env.INGEST_INTERVAL_MS ?? 15 * 60 * 1000);
 
 let activeIngest: Promise<IngestResult> | null = null;
 
