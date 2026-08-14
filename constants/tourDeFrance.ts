@@ -2,7 +2,7 @@
  * Tour de France tab feature flag. Set to `false` to hide the tab after the race
  * while keeping feed, static data, and UI code in place for next year.
  */
-export const TOUR_DE_FRANCE_TAB_ENABLED = true;
+export const TOUR_DE_FRANCE_TAB_ENABLED = false;
 
 export const TOUR_DE_FRANCE_NEWS_FEEDS = [
   {

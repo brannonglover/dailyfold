@@ -1,4 +1,4 @@
-import { SPORT_TAG_ORDER } from '@/catalog/sports';
+import { expandSoccerFilterTags, SPORT_TAG_ORDER } from '@/catalog/sports';
 import { CURIOSITY_ORDER } from '@/constants/curiosities';
 import { SportTag, Topic, UserPreferences } from '@/types';
 
@@ -57,8 +57,10 @@ export function normalizeFeedPreferences(prefs: UserPreferences): UserPreference
   let enabledTopics = uniqueTopics(
     rawTopics.filter((topic): topic is Topic => VALID_TOPICS.has(topic as Topic)),
   );
-  let enabledSportTags = uniqueSportTags(
-    rawSportTags.filter((tag): tag is SportTag => VALID_SPORT_TAGS.has(tag as SportTag)),
+  let enabledSportTags = expandSoccerFilterTags(
+    uniqueSportTags(
+      rawSportTags.filter((tag): tag is SportTag => VALID_SPORT_TAGS.has(tag as SportTag)),
+    ),
   );
   const rawForYouTopics = Array.isArray(prefs.forYouTopics) ? prefs.forYouTopics : [];
   const forYouTopics = uniqueTopics(

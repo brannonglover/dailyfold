@@ -20,3 +20,19 @@ export function shouldAllowFeedLoadMore(
 export function shouldAutoTopUpFeed(visibleCount: number): boolean {
   return visibleCount > 0 && visibleCount < MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION;
 }
+
+/**
+ * Page the mixed catalog only while a chip filter is gaining matches. A College
+ * Football (or similar) chip with zero hits in the current pool must not keep
+ * calling loadMore — that toggles the loader forever without finding the sport.
+ */
+export function shouldRetryFilteredFeedTopUp(options: {
+  hasAttempted: boolean;
+  previousFilteredCount: number;
+  filteredCount: number;
+  isStocked: boolean;
+}): boolean {
+  if (options.isStocked) return false;
+  if (!options.hasAttempted) return true;
+  return options.filteredCount > options.previousFilteredCount;
+}

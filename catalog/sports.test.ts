@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { inferSportTags, notInterestedSportLabel, showLessSportTagLabel } from '@/catalog/sports';
+import { expandSoccerFilterTags, inferSportTags, notInterestedSportLabel, showLessSportTagLabel, SPORT_CHIP_TAGS, SPORT_TAG_LABELS, SOCCER_LEAGUE_TAGS } from '@/catalog/sports';
 import { filterArticlesBySportTags } from '@/services/sportPreferences';
 import { Article } from '@/types';
 
@@ -193,6 +193,10 @@ test('filterArticlesBySportTags excludes non-sports articles when a sport chip i
   assert.deepEqual(result.map((a) => a.id), ['mtb']);
 });
 
+test('SPORT_TAG_LABELS uses NFL for the football chip', () => {
+  assert.equal(SPORT_TAG_LABELS.football, 'NFL');
+});
+
 test('showLessSportTagLabel prefers NFL for football when NFL terms appear', () => {
   const text = 'NFL draft picks reshape the AFC';
   assert.equal(showLessSportTagLabel('football', text), 'NFL');
@@ -202,9 +206,15 @@ test('showLessSportTagLabel prefers NFL for football when NFL terms appear', () 
   );
 });
 
+test('showLessSportTagLabel and notInterestedSportLabel fall through to NFL for football', () => {
+  assert.equal(showLessSportTagLabel('football', 'Week 4 scores and standings'), 'NFL');
+  assert.equal(notInterestedSportLabel('football', 'Week 4 scores and standings'), 'NFL');
+});
+
 test('showLessSportTagLabel uses Soccer for association football', () => {
   assert.equal(showLessSportTagLabel('soccer', 'Premier League transfer news'), 'Soccer');
-  assert.equal(showLessSportTagLabel('soccer', 'MLS expansion teams announced'), 'MLS');
+  assert.equal(showLessSportTagLabel('mls', 'MLS expansion teams announced'), 'MLS');
+  assert.equal(showLessSportTagLabel('soccer', 'MLS expansion teams announced'), 'Soccer');
   assert.equal(showLessSportTagLabel('soccer', 'European football roundup'), 'Soccer');
 });
 
@@ -233,9 +243,79 @@ test('inferSportTags inherits college-football from dedicated feed defaults', ()
   assert.deepEqual(tags, ['college-football']);
 });
 
+test('inferSportTags keeps college-football for NCAA headlines that only say football', () => {
+  const fromSource = inferSportTags('Northwestern football receives $35M donation', [
+    'college-football',
+  ]);
+  assert.ok(fromSource.includes('college-football'));
+  assert.ok(!fromSource.includes('soccer'));
+
+  // Second pass used to drop college-football once soccer had been stored beside it.
+  const afterSoccerPollution = inferSportTags('Northwestern football receives $35M donation', [
+    'college-football',
+    'soccer',
+  ]);
+  assert.ok(afterSoccerPollution.includes('college-football'));
+  assert.ok(!afterSoccerPollution.includes('soccer'));
+});
+
+test('filterArticlesBySportTags keeps ESPN CFB football headlines on the College Football chip', () => {
+  const articles: Article[] = [
+    {
+      id: 'cfb-football-word',
+      title: 'Northwestern football receives $35M donation',
+      excerpt: 'The athletic department announced the gift',
+      body: '',
+      source: 'ESPN College Football',
+      imageUrl: 'https://example.com/cfb.jpg',
+      topics: ['sports'],
+      sportTags: ['college-football', 'soccer'],
+      readTimeMinutes: 3,
+      publishedAt: '2026-08-14T14:06:59Z',
+      url: 'https://example.com/cfb-football-word',
+    },
+    {
+      id: 'epl',
+      title: 'Premier League transfer news from Arsenal',
+      excerpt: 'Arsenal sign a striker before the window closes',
+      body: '',
+      source: 'BBC Sport',
+      imageUrl: 'https://example.com/epl.jpg',
+      topics: ['sports'],
+      sportTags: ['soccer', 'premier-league'],
+      readTimeMinutes: 3,
+      publishedAt: '2026-08-14T14:00:00Z',
+      url: 'https://example.com/epl',
+    },
+  ];
+
+  const result = filterArticlesBySportTags(articles, ['college-football'], ['sports']);
+  assert.deepEqual(
+    result.map((a) => a.id),
+    ['cfb-football-word'],
+  );
+});
+
+test('inferSportTags tags MLS distinctly from generic soccer', () => {
+  const mls = inferSportTags('Inter Miami wins MLS Cup in extra time', []);
+  assert.ok(mls.includes('mls'));
+  assert.ok(mls.includes('soccer'));
+
+  const epl = inferSportTags('Premier League transfer news from Arsenal', []);
+  assert.ok(epl.includes('premier-league'));
+  assert.ok(!epl.includes('mls'));
+});
+
+test('inferSportTags inherits mls from dedicated feed defaults', () => {
+  const tags = inferSportTags('Weekend roundup', ['mls']);
+  assert.ok(tags.includes('mls'));
+  assert.ok(tags.includes('soccer'));
+});
+
 test('notInterestedSportLabel uses USA-friendly soccer naming', () => {
   assert.equal(notInterestedSportLabel('soccer', 'Premier League transfer news'), 'Soccer');
-  assert.equal(notInterestedSportLabel('soccer', 'MLS expansion teams announced'), 'MLS');
+  assert.equal(notInterestedSportLabel('mls', 'MLS expansion teams announced'), 'MLS');
+  assert.equal(notInterestedSportLabel('soccer', 'MLS expansion teams announced'), 'Soccer');
   assert.equal(
     notInterestedSportLabel('football', 'NFL draft picks reshape the AFC'),
     'NFL',
@@ -248,4 +328,56 @@ test('notInterestedSportLabel uses USA-friendly soccer naming', () => {
     notInterestedSportLabel('college-basketball', 'March Madness bracket update'),
     'College Basketball',
   );
+});
+
+test('filterArticlesBySportTags keeps NFL and drops Premier League for NFL chip', () => {
+  const articles: Article[] = [
+    {
+      id: 'nfl',
+      title: 'NFL draft picks reshape the AFC quarterback room',
+      excerpt: 'Teams reshuffle after the first round',
+      body: '',
+      source: 'ESPN NFL',
+      imageUrl: 'https://example.com/nfl.jpg',
+      topics: ['sports'],
+      sportTags: ['football'],
+      readTimeMinutes: 4,
+      publishedAt: '2026-06-01T12:00:00Z',
+      url: 'https://example.com/nfl',
+    },
+    {
+      id: 'epl',
+      title: 'Premier League transfer news from Arsenal',
+      excerpt: 'Arsenal sign a striker before the window closes',
+      body: '',
+      source: 'BBC Sport',
+      imageUrl: 'https://example.com/epl.jpg',
+      topics: ['sports'],
+      sportTags: ['soccer', 'premier-league'],
+      readTimeMinutes: 3,
+      publishedAt: '2026-06-01T11:00:00Z',
+      url: 'https://example.com/epl',
+    },
+  ];
+
+  const result = filterArticlesBySportTags(articles, ['football'], ['sports']);
+  assert.deepEqual(
+    result.map((a) => a.id),
+    ['nfl'],
+  );
+});
+
+test('SPORT_CHIP_TAGS omits the generic Football chip', () => {
+  assert.ok(!SPORT_CHIP_TAGS.includes('soccer'));
+  assert.ok(SPORT_CHIP_TAGS.includes('mls'));
+  assert.ok(SPORT_CHIP_TAGS.includes('premier-league'));
+  assert.ok(SPORT_CHIP_TAGS.includes('football'));
+});
+
+test('expandSoccerFilterTags maps Football onto the soccer league chips', () => {
+  assert.deepEqual(expandSoccerFilterTags(['soccer']), [...SOCCER_LEAGUE_TAGS]);
+  assert.ok(expandSoccerFilterTags(['soccer', 'baseball']).includes('baseball'));
+  assert.ok(expandSoccerFilterTags(['soccer', 'baseball']).includes('mls'));
+  assert.ok(!expandSoccerFilterTags(['soccer', 'baseball']).includes('soccer'));
+  assert.deepEqual(expandSoccerFilterTags(['mls']), ['mls']);
 });

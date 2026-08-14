@@ -1,7 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { SPORT_TAG_LABELS, SPORT_TAG_ORDER } from '@/catalog/sports';
+import { SPORT_TAG_LABELS, SPORT_CHIP_TAGS } from '@/catalog/sports';
 import { useTheme } from '@/hooks/useTheme';
 import { SportTag } from '@/types';
 
@@ -44,7 +44,7 @@ export function SportFilterBar({
           </Text>
         </Pressable>
 
-        {SPORT_TAG_ORDER.map((tag) => {
+        {SPORT_CHIP_TAGS.map((tag) => {
           const selected = !allSelected && enabledSportTags.includes(tag);
           return (
             <Pressable

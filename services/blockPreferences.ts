@@ -19,7 +19,7 @@ export const LEAGUE_BLOCK_KEYWORDS: LeagueBlockKeyword[] = [
   { keyword: 'nba', label: 'NBA', pattern: /\bnba\b/i, sportTag: 'basketball' },
   { keyword: 'mlb', label: 'MLB', pattern: /\bmlb\b/i, sportTag: 'baseball' },
   { keyword: 'nhl', label: 'NHL', pattern: /\bnhl\b/i, sportTag: 'hockey' },
-  { keyword: 'mls', label: 'MLS', pattern: /\bmls\b/i, sportTag: 'soccer' },
+  { keyword: 'mls', label: 'MLS', pattern: /\bmls\b/i, sportTag: 'mls' },
 ];
 
 function uniqueTopics(topics: Topic[]): Topic[] {

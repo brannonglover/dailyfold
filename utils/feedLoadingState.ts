@@ -17,7 +17,8 @@ export function shouldShowArticleFeedLoading(options: {
 /**
  * Latest paints a filtered display list. Raw stock can be ready while that list is
  * still empty (cache miss, chip filter, deferred rebuild) — show the skeleton
- * instead of the empty heart until display catches up or pagination finishes.
+ * instead of the empty heart until display catches up. Background pagination must
+ * not keep the skeleton up; a thin chip (e.g. College Football) would loop forever.
  */
 export function shouldShowFilteredFeedLoading(options: {
   contextLoading: boolean;
@@ -27,17 +28,10 @@ export function shouldShowFilteredFeedLoading(options: {
   isLoadingMore?: boolean;
   isRefreshing?: boolean;
 }): boolean {
-  const {
-    contextLoading,
-    rawCount,
-    filteredCount,
-    displayReady,
-    isLoadingMore,
-    isRefreshing,
-  } = options;
+  const { contextLoading, rawCount, filteredCount, displayReady, isRefreshing } = options;
   if (filteredCount > 0) return false;
   if (contextLoading) return true;
   if (rawCount === 0) return contextLoading || isRefreshing === true;
   if (!displayReady) return true;
-  return isLoadingMore === true || isRefreshing === true;
+  return isRefreshing === true;
 }

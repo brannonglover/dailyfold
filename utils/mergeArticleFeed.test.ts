@@ -6,6 +6,7 @@ import { Article } from '@/types';
 import {
   mergeArticleFeed,
   mergeArticlePreferringHero,
+  resolveSilentFeedUpdate,
   updateExistingFeedArticles,
 } from './mergeArticleFeed';
 
@@ -67,4 +68,65 @@ test('mergeArticlePreferringHero adopts a newly available hero', () => {
   const incoming = article('a1', 'Wire', '2026-07-29T12:00:00.000Z', 'https://cdn.example.com/new.jpg');
   const merged = mergeArticlePreferringHero(existing, incoming);
   assert.equal(merged.imageUrl, 'https://cdn.example.com/new.jpg');
+});
+
+test('resolveSilentFeedUpdate queues newcomers as pending by default', () => {
+  const prev = [article('old', 'Wire', '2026-08-14T08:00:00.000Z')];
+  const incoming = [
+    article('new', 'Wire', '2026-08-14T12:00:00.000Z'),
+    ...prev,
+  ];
+
+  const result = resolveSilentFeedUpdate({
+    prev,
+    incoming,
+    pending: [],
+    dismissedIds: new Set(),
+    suppressFeedMutation: false,
+    promoteNewcomers: false,
+  });
+
+  assert.deepEqual(result.articles.map((item) => item.id), ['old']);
+  assert.deepEqual(result.pending.map((item) => item.id), ['new']);
+});
+
+test('resolveSilentFeedUpdate merges newcomers after an explicit refresh', () => {
+  const prev = [article('old', 'Wire', '2026-08-14T08:00:00.000Z')];
+  const incoming = [
+    article('new', 'Wire', '2026-08-14T12:00:00.000Z'),
+    ...prev,
+  ];
+
+  const result = resolveSilentFeedUpdate({
+    prev,
+    incoming,
+    pending: [],
+    dismissedIds: new Set(),
+    suppressFeedMutation: false,
+    promoteNewcomers: true,
+  });
+
+  assert.ok(result.articles.some((item) => item.id === 'new'));
+  assert.ok(result.articles.some((item) => item.id === 'old'));
+  assert.equal(result.pending.length, 0);
+});
+
+test('resolveSilentFeedUpdate does not promote when silent mutation is suppressed', () => {
+  const prev = [article('old', 'Wire', '2026-08-14T08:00:00.000Z')];
+  const incoming = [
+    article('new', 'Wire', '2026-08-14T12:00:00.000Z'),
+    ...prev,
+  ];
+
+  const result = resolveSilentFeedUpdate({
+    prev,
+    incoming,
+    pending: [],
+    dismissedIds: new Set(),
+    suppressFeedMutation: true,
+    promoteNewcomers: true,
+  });
+
+  assert.deepEqual(result.articles.map((item) => item.id), ['old']);
+  assert.deepEqual(result.pending.map((item) => item.id), ['new']);
 });

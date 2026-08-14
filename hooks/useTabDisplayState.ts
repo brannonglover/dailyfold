@@ -41,10 +41,11 @@ export function useTabDisplayState(
   const rawLengthRef = useRef(sync?.rawLength ?? cached?.rawLength ?? 0);
   const filterKeyRef = useRef(cached?.filterKey ?? filterKey);
   const personalizationKeyRef = useRef(cached?.personalizationKey ?? sync?.personalizationKey ?? '');
-
-  useEffect(() => {
-    filterKeyRef.current = filterKey;
-  }, [filterKey]);
+  // Latest chip rebuilds read this to detect a pending filter change. Do not advance it
+  // until displayArticles are rebuilt — persisting the new key onto the old list makes
+  // the next pass treat soccer stories as already-filtered American Football.
+  const latestFilterKeyRef = useRef(filterKey);
+  latestFilterKeyRef.current = filterKey;
 
   useLayoutEffect(() => {
     if (displayArticles.length > 0) return;
@@ -133,9 +134,12 @@ export function useTabDisplayState(
       { displayArticles, displayReady },
       feedGenerationRef.current,
       rawLengthRef.current,
-      filterKeyRef.current,
+      latestFilterKeyRef.current,
       personalizationKey,
     );
+    // Persist only when the painted list changes so a chip toggle cannot stamp the new
+    // filterKey onto the previous (unfiltered) rows in the same commit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- filterKey is read from latestFilterKeyRef
   }, [displayArticles, displayReady, persistCache, sync?.personalizationKey, tabKey]);
 
   const isCacheFresh = useCallback(

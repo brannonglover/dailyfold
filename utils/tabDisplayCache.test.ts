@@ -6,6 +6,7 @@ import {
   hydrateTabDisplayState,
   isDisplayFeedUnderstocked,
   isDisplayFeedSynced,
+  isDisplayFeedMatchingFilter,
   isForYouDisplayCacheFresh,
   isTabDisplayCacheFresh,
   readTabDisplayCache,
@@ -305,6 +306,15 @@ test('isDisplayFeedUnderstocked detects truncated visible feeds', () => {
   assert.equal(isDisplayFeedUnderstocked(20, 20), false);
   assert.equal(isDisplayFeedUnderstocked(0, 20), true);
   assert.equal(isDisplayFeedUnderstocked(0, 0), false);
+});
+
+test('isDisplayFeedMatchingFilter rejects a painted list that ignores the chip filter', () => {
+  const nfl = article('nfl');
+  const soccer = article('soccer');
+  assert.equal(isDisplayFeedMatchingFilter([nfl], [nfl]), true);
+  assert.equal(isDisplayFeedMatchingFilter([nfl, soccer], [nfl]), false);
+  assert.equal(isDisplayFeedMatchingFilter([], [nfl]), false);
+  assert.equal(isDisplayFeedMatchingFilter([], []), true);
 });
 
 test('hydrateTabDisplayState seeds in-memory state from a fresh cache snapshot', () => {

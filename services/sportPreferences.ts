@@ -15,6 +15,16 @@ export function isAllSportTagsEnabled(enabledSportTags: SportTag[]): boolean {
   return enabledSportTags.length === 0;
 }
 
+/**
+ * Latest feed sport chips are exclusive: a new chip replaces the previous one.
+ * Tapping the already-selected chip returns to All (empty).
+ */
+export function nextEnabledSportTags(enabledSportTags: SportTag[], tag: SportTag): SportTag[] {
+  if (isAllSportTagsEnabled(enabledSportTags)) return [tag];
+  if (enabledSportTags.includes(tag)) return enabledSportTags.filter((item) => item !== tag);
+  return [tag];
+}
+
 export function isSportsTopicActive(enabledTopics: { length: number; includes: (t: 'sports') => boolean }): boolean {
   return enabledTopics.length > 0 && enabledTopics.includes('sports');
 }

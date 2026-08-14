@@ -50,7 +50,6 @@ export function TopicFilterBar({ enabledTopics, onSelectAll, onToggleTopic }: To
 
   const handleToggleTopic = useCallback(
     (topic: Topic) => {
-      console.log('[chipDebug] chip pressed', { topic });
       centerChip(topic);
       onToggleTopic(topic);
     },

@@ -290,6 +290,8 @@ export async function ingestFeeds(options: IngestOptions = {}): Promise<IngestRe
   const feedFetchStarted = Date.now();
   log('Fetching RSS feeds...');
 
+  // Upsert each feed as soon as it parses so the API can serve newcomers before
+  // the slowest outlet (or OG enrichment) finishes.
   const feedResults = await Promise.allSettled(
     FEEDS.map(async (feed, index) => {
       const feedStarted = Date.now();
@@ -298,11 +300,25 @@ export async function ingestFeeds(options: IngestOptions = {}): Promise<IngestRe
         const xml = await fetchFeedXmlWithTlsFallback(feed.url, timeoutMs);
         const parsed = await createParser(timeoutMs).parseString(xml);
         const mediaByKey = extractItemMediaFromFeedXml(xml);
-        const itemCount = Math.min(parsed.items.length, ITEMS_PER_FEED);
+        const items = parsed.items.slice(0, ITEMS_PER_FEED);
         log(
-          `  [${index + 1}/${FEEDS.length}] ${feed.source}: ${itemCount} items (${Date.now() - feedStarted}ms)`,
+          `  [${index + 1}/${FEEDS.length}] ${feed.source}: ${items.length} items (${Date.now() - feedStarted}ms)`,
         );
-        return { feed, parsed, mediaByKey };
+
+        const entries: { article: Article; feedPublishedAt?: string }[] = [];
+        for (const item of items) {
+          augmentFeedItemMediaFromXml(item, mediaByKey);
+          const normalized = normalizeFeedItem(item, feed);
+          if (!normalized) continue;
+          applyGuardianHeroFallback(normalized.article);
+          entries.push({
+            article: normalized.article,
+            feedPublishedAt: normalized.feedPublishedAt,
+          });
+        }
+
+        const upserted = await upsertArticles(entries);
+        return { feed, entries, itemsSeen: items.length, ...upserted };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown feed error';
         log(
@@ -331,22 +347,17 @@ export async function ingestFeeds(options: IngestOptions = {}): Promise<IngestRe
       continue;
     }
 
-    const { parsed, mediaByKey } = feedResult.value;
+    const { entries, itemsSeen, inserted, updated } = feedResult.value;
     result.feedsProcessed += 1;
-
-    for (const item of parsed.items.slice(0, ITEMS_PER_FEED)) {
-      augmentFeedItemMediaFromXml(item, mediaByKey);
-      result.itemsSeen += 1;
-      const normalized = normalizeFeedItem(item, feed);
-      if (!normalized) continue;
-
-      pending.push({
-        article: normalized.article,
-        feedPublishedAt: normalized.feedPublishedAt,
-      });
-    }
+    result.itemsSeen += itemsSeen;
+    result.itemsInserted += inserted;
+    result.itemsUpdated += updated;
+    pending.push(...entries);
   }
 
+  log(
+    `Upserted ${pending.length} articles (${result.itemsInserted} new, ${result.itemsUpdated} updated)`,
+  );
   log(`Normalized ${pending.length} articles from ${result.itemsSeen} feed items`);
 
   const enrichTargets = pending.filter((entry) =>
@@ -362,19 +373,10 @@ export async function ingestFeeds(options: IngestOptions = {}): Promise<IngestRe
       createHeroEnrichmentOptions(log, 'Enriching hero images', enrichTargets.length),
     );
     log(`Hero image enrichment: ${enriched} found in ${Date.now() - enrichStarted}ms`);
+    if (enriched > 0) {
+      await upsertArticles(enrichTargets);
+    }
   }
-
-  const upsertStarted = Date.now();
-  for (const entry of pending) {
-    applyGuardianHeroFallback(entry.article);
-  }
-
-  const { inserted, updated } = await upsertArticles(pending);
-  result.itemsInserted = inserted;
-  result.itemsUpdated = updated;
-  log(
-    `Upserted ${pending.length} articles (${result.itemsInserted} new, ${result.itemsUpdated} updated) in ${Date.now() - upsertStarted}ms`,
-  );
 
   if (shouldRunGuardianHeroRepair()) {
     markGuardianHeroRepairStarted();

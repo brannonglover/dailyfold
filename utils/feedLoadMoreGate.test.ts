@@ -5,6 +5,7 @@ import {
   MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION,
   shouldAllowFeedLoadMore,
   shouldAutoTopUpFeed,
+  shouldRetryFilteredFeedTopUp,
 } from './feedLoadMoreGate';
 
 test('shouldAllowFeedLoadMore allows bootstrap pagination before minimum is stocked', () => {
@@ -34,4 +35,43 @@ test('shouldAutoTopUpFeed requests more pages while the visible feed is understo
   assert.equal(shouldAutoTopUpFeed(4), true);
   assert.equal(shouldAutoTopUpFeed(MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION - 1), true);
   assert.equal(shouldAutoTopUpFeed(MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION), false);
+});
+
+test('shouldRetryFilteredFeedTopUp stops after a page that added no chip matches', () => {
+  assert.equal(
+    shouldRetryFilteredFeedTopUp({
+      hasAttempted: false,
+      previousFilteredCount: -1,
+      filteredCount: 0,
+      isStocked: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldRetryFilteredFeedTopUp({
+      hasAttempted: true,
+      previousFilteredCount: 0,
+      filteredCount: 0,
+      isStocked: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRetryFilteredFeedTopUp({
+      hasAttempted: true,
+      previousFilteredCount: 0,
+      filteredCount: 4,
+      isStocked: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldRetryFilteredFeedTopUp({
+      hasAttempted: false,
+      previousFilteredCount: -1,
+      filteredCount: 20,
+      isStocked: true,
+    }),
+    false,
+  );
 });

@@ -89,7 +89,7 @@ test('shouldShowFilteredFeedLoading keeps skeleton while display rebuilds over r
       displayReady: true,
       isLoadingMore: true,
     }),
-    true,
+    false,
   );
 
   assert.equal(

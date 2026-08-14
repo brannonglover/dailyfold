@@ -12,6 +12,7 @@ export type SportTag =
   | 'running'
   | 'xc'
   | 'fitness'
+  | 'mls'
   | 'premier-league'
   | 'la-liga'
   | 'serie-a'
@@ -26,6 +27,7 @@ export const SPORT_TAG_ORDER: SportTag[] = [
   'college-football',
   'hockey',
   'soccer',
+  'mls',
   'mtb',
   'cycling',
   'running',
@@ -42,7 +44,7 @@ export const SPORT_TAG_LABELS: Record<SportTag, string> = {
   baseball: 'Baseball',
   basketball: 'Basketball',
   'college-basketball': 'College Basketball',
-  football: 'American Football',
+  football: 'NFL',
   'college-football': 'College Football',
   hockey: 'Hockey',
   soccer: 'Football',
@@ -51,6 +53,7 @@ export const SPORT_TAG_LABELS: Record<SportTag, string> = {
   running: 'Running',
   xc: 'Cross Country',
   fitness: 'Fitness',
+  mls: 'MLS',
   'premier-league': 'Premier League',
   'la-liga': 'La Liga',
   'serie-a': 'Serie A',
@@ -58,13 +61,28 @@ export const SPORT_TAG_LABELS: Record<SportTag, string> = {
   'champions-league': 'Champions League',
 };
 
-const LEAGUE_TAGS: SportTag[] = [
+/** League chips that cover association football after the generic Football chip was removed. */
+export const SOCCER_LEAGUE_TAGS: SportTag[] = [
+  'mls',
   'premier-league',
   'la-liga',
   'serie-a',
   'bundesliga',
   'champions-league',
 ];
+
+const LEAGUE_TAGS: SportTag[] = SOCCER_LEAGUE_TAGS;
+
+/** Sports bar chips — soccer stays an internal tag, but Football is no longer selectable. */
+export const SPORT_CHIP_TAGS: SportTag[] = SPORT_TAG_ORDER.filter((tag) => tag !== 'soccer');
+
+/** Replace a leftover Football chip selection with the league chips that superseded it. */
+export function expandSoccerFilterTags(tags: SportTag[]): SportTag[] {
+  if (!tags.includes('soccer')) return tags;
+  const next = new Set(tags.filter((tag) => tag !== 'soccer'));
+  for (const league of SOCCER_LEAGUE_TAGS) next.add(league);
+  return SPORT_TAG_ORDER.filter((tag) => next.has(tag));
+}
 
 /** Unambiguous skiing/mountaineering terms — never mountain biking, regardless of source. */
 const MTB_SKI_DISQUALIFIERS =
@@ -135,7 +153,11 @@ const SPORT_INFERENCE_RULES: [SportTag, RegExp][] = [
   ['football', NFL_INFERENCE_PATTERN],
   ['college-football', COLLEGE_FOOTBALL_PATTERN],
   ['hockey', /\b(hockey|nhl|stanley cup|puck|power play|goaltender|faceoff)\b/i],
-  ['soccer', /\b(soccer|mls|fifa|world cup|goalkeeper|matchday|footballer|striker|midfielder|penalty|offside|transfer window|premier league|la liga|bundesliga|serie a|champions league|uefa)\b/i],
+  ['soccer', /\b(soccer|fifa|world cup|goalkeeper|matchday|footballer|striker|midfielder|penalty|offside|transfer window|premier league|la liga|bundesliga|serie a|champions league|uefa)\b/i],
+  [
+    'mls',
+    /\b(mls\b|major league soccer|mls cup|supporters'? shield|leagues cup|inter miami|la galaxy|\blafc\b|los angeles fc|atlanta united|seattle sounders|portland timbers|new york city fc|\bnycfc\b|new york red bulls|austin fc|fc cincinnati|columbus crew|nashville sc|orlando city|minnesota united|real salt lake|sporting kc|sporting kansas city|colorado rapids|houston dynamo|fc dallas|st\.? louis city|charlotte fc|cf montr[eé]al|toronto fc|vancouver whitecaps|san jose earthquakes|san diego fc|chicago fire|d\.?c\.? united|new england revolution|philadelphia union)\b/i,
+  ],
   [
     'premier-league',
     /\b(premier league|\bepl\b|manchester united|man united|man utd|manchester city|man city|liverpool fc|liverpool\b|arsenal fc|\barsenal\b|chelsea fc|\bchelsea\b|tottenham|spurs\b|newcastle united|west ham|aston villa|brighton|crystal palace|wolverhampton|wolves\b|nottingham forest|bournemouth|fulham|brentford|everton|ipswich|leicester|southampton)\b/i,
@@ -175,10 +197,13 @@ export function inferSportTags(text: string, baseTags: SportTag[] = []): SportTa
   }
 
   // "Football" alone usually means association football; NFL-specific terms route to American football.
+  // Dedicated CFB/NFL source tags win over that default — NCAA headlines often say
+  // "Northwestern football" without "college football", and a second inference pass
+  // would otherwise keep only soccer.
   if (/\bfootball\b/i.test(text)) {
-    if (COLLEGE_FOOTBALL_PATTERN.test(text)) {
+    if (COLLEGE_FOOTBALL_PATTERN.test(text) || baseTags.includes('college-football')) {
       inferred.add('college-football');
-    } else if (NFL_INFERENCE_PATTERN.test(text)) {
+    } else if (NFL_INFERENCE_PATTERN.test(text) || baseTags.includes('football')) {
       inferred.add('football');
     } else {
       inferred.add('soccer');
@@ -190,6 +215,12 @@ export function inferSportTags(text: string, baseTags: SportTag[] = []): SportTa
     if (inferred.has(tag)) continue;
     if (tag === 'mtb') {
       if (inheritsMtbFromSource(text, baseTags)) inferred.add(tag);
+      continue;
+    }
+    // College/NFL tags are specific, not broad outdoor defaults. Keep them even when a
+    // prior pass stored soccer alongside (baseTags.length > 1), which used to skip inherit.
+    if (tag === 'college-football' || tag === 'college-basketball' || tag === 'football') {
+      inferred.add(tag);
       continue;
     }
     if (baseTags.length === 1 || matchesSportTag(tag, text)) {
@@ -205,6 +236,10 @@ export function inferSportTags(text: string, baseTags: SportTag[] = []): SportTa
   if (inferred.has('college-football') && !/\b(nfl|super bowl)\b/i.test(text)) {
     inferred.delete('football');
   }
+  if (inferred.has('college-football') && !matchesSportTag('soccer', text)) {
+    inferred.delete('soccer');
+    for (const league of LEAGUE_TAGS) inferred.delete(league);
+  }
   if (inferred.has('college-basketball') && !/\b(nba|wnba)\b/i.test(text)) {
     inferred.delete('basketball');
   }
@@ -218,7 +253,6 @@ export function showLessSportTagLabel(tag: SportTag, text: string): string {
   if (tag === 'basketball' && /\b(nba|wnba)\b/i.test(text)) return 'NBA';
   if (tag === 'baseball' && /\bmlb\b/i.test(text)) return 'MLB';
   if (tag === 'hockey' && /\bnhl\b/i.test(text)) return 'NHL';
-  if (tag === 'soccer' && /\bmls\b/i.test(text)) return 'MLS';
   if (tag === 'soccer') return 'Soccer';
   return SPORT_TAG_LABELS[tag];
 }
@@ -229,7 +263,6 @@ export function notInterestedSportLabel(tag: SportTag, text: string): string {
   if (tag === 'basketball' && /\b(nba|wnba)\b/i.test(text)) return 'NBA';
   if (tag === 'baseball' && /\bmlb\b/i.test(text)) return 'MLB';
   if (tag === 'hockey' && /\bnhl\b/i.test(text)) return 'NHL';
-  if (tag === 'soccer' && /\bmls\b/i.test(text)) return 'MLS';
   if (tag === 'soccer') return 'Soccer';
   return SPORT_TAG_LABELS[tag];
 }

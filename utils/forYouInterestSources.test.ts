@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { sourceIdsForForYouInterests } from './forYouInterestSources';
+import { sourceIdsForForYouInterests, sportTagSourceIds } from './forYouInterestSources';
 import { CURIOSITY_ORDER } from '@/constants/curiosities';
 import type { UserPreferences } from '@/types';
 
@@ -42,6 +42,19 @@ test('sourceIdsForForYouInterests includes cycling publishers for cycling sport 
   assert.ok(ids.includes('cyclingnews'));
 });
 
-test('sourceIdsForForYouInterests returns empty without interests', () => {
-  assert.deepEqual(sourceIdsForForYouInterests(basePrefs()), []);
+test('sourceIdsForForYouInterests includes MLS publisher for mls sport tag', () => {
+  const ids = sourceIdsForForYouInterests(basePrefs({ forYouSportTags: ['mls'] }));
+  assert.ok(ids.includes('guardian-mls'));
+  assert.ok(ids.includes('scarves-and-spikes'));
+});
+
+test('sportTagSourceIds includes NCAA football feeds for college-football', () => {
+  const ids = sportTagSourceIds(['college-football']);
+  assert.ok(ids.includes('espn-college-football'));
+  assert.ok(ids.includes('ncaa-fbs-football'));
+  assert.ok(ids.includes('ncaa-fcs-football'));
+  assert.ok(ids.includes('ncaa-d2-football'));
+  assert.ok(ids.includes('ncaa-d3-football'));
+  assert.ok(ids.includes('fox-sports-cfb'));
+  assert.ok(!ids.includes('espn-nfl'));
 });

@@ -28,10 +28,10 @@ import {
 import { getFeedEmptyMessage } from '@/utils/feedEmptyMessage';
 import { shouldShowFilteredFeedLoading } from '@/utils/feedLoadingState';
 import { isFeedInteractionLocked, subscribeFeedInteractionLock } from '@/utils/feedInteractionLock';
-import { MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION } from '@/utils/feedLoadMoreGate';
+import { MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION, shouldRetryFilteredFeedTopUp } from '@/utils/feedLoadMoreGate';
 import { sportTagSourceIds, topicSourceIds } from '@/utils/forYouInterestSources';
 import { prewarmForYouDisplayCache } from '@/utils/forYouPrewarm';
-import { readTabDisplayCache, resolveTabDisplayFeed, hasShowableTabDisplayCache, isDisplayFeedUnderstocked } from '@/utils/tabDisplayCache';
+import { readTabDisplayCache, resolveTabDisplayFeed, hasShowableTabDisplayCache, isDisplayFeedUnderstocked, isDisplayFeedMatchingFilter } from '@/utils/tabDisplayCache';
 import { MIN_PENDING_ARTICLES_FOR_BANNER } from '@/utils/pendingFeedArticles';
 
 /** After this long in the background, resume should land on a refreshed feed. */
@@ -71,6 +71,8 @@ function LatestScreenContent() {
   const syncDisplayHandledRef = useRef(false);
   const wasFocusedOnTabPressRef = useRef(false);
   const chipBoostKeyRef = useRef('');
+  const prevChipSelectionKeyRef = useRef<string | null>(null);
+  const autoTopUpAttemptRef = useRef({ filterKey: '', filteredCount: -1, attempted: false });
   const appStateRef = useRef(AppState.currentState);
   const backgroundedAtRef = useRef<number | null>(null);
   const pendingResumeRefreshRef = useRef(false);
@@ -92,6 +94,16 @@ function LatestScreenContent() {
         sources: preferences?.enabledSourceIds ?? [],
       }),
     [preferences?.enabledTopics, preferences?.enabledSportTags, preferences?.enabledSourceIds],
+  );
+
+  // Topics + sports only — source hide must not scroll the feed to top.
+  const chipSelectionKey = useMemo(
+    () =>
+      JSON.stringify({
+        topics: preferences?.enabledTopics ?? [],
+        sports: preferences?.enabledSportTags ?? [],
+      }),
+    [preferences?.enabledTopics, preferences?.enabledSportTags],
   );
 
   const personalizationKey = useMemo(
@@ -160,6 +172,33 @@ function LatestScreenContent() {
     await applyPending();
   }, [markUserRebuild, applyPending]);
 
+  const rankLatestDisplay = useCallback(
+    (filteredArticles: Article[], sourceArticles: Article[]) => {
+      const baseArticles = filterFeedArticlesBase(sourceArticles);
+      fullOrderRef.current = orderFullLatest(baseArticles);
+      fullOrderRawLengthRef.current = sourceArticles.length;
+      return sliceOrderedArticles(fullOrderRef.current, filteredArticles) ?? orderLatest(filteredArticles);
+    },
+    [filterFeedArticlesBase, orderFullLatest, orderLatest],
+  );
+
+  // New chip → top of that feed. Skip first paint and prefs hydrate. Do not
+  // ingest the whole catalog; the chip-boost effect below pulls dedicated RSS.
+  useLayoutEffect(() => {
+    if (!preferences) return;
+    const prev = prevChipSelectionKeyRef.current;
+    if (prev === null) {
+      prevChipSelectionKeyRef.current = chipSelectionKey;
+      return;
+    }
+    if (prev === chipSelectionKey) return;
+    prevChipSelectionKeyRef.current = chipSelectionKey;
+    if (!isFocused) return;
+
+    void feedRef.current?.scrollToTop();
+    markUserRebuild();
+  }, [chipSelectionKey, isFocused, markUserRebuild, preferences]);
+
   useEffect(() => {
     if (isLoading && articles.length === 0) {
       if (hasShowableTabDisplayCache('latest')) return;
@@ -168,6 +207,97 @@ function LatestScreenContent() {
       prevRawLengthRef.current = 0;
     }
   }, [isLoading, articles.length, setDisplayArticles, setDisplayReady, prevRawLengthRef]);
+
+  // Pull-to-refresh / apply-pending bump feedGeneration — paint the new list on this
+  // frame instead of waiting for the deferred startTransition rebuild.
+  useLayoutEffect(() => {
+    if (!preferences || articles.length === 0) return;
+    if (isFeedInteractionLocked()) return;
+    if (feedGeneration === prevFeedGenerationRef.current) return;
+
+    const filteredArticles = filterFeedArticles(articles);
+    shouldAllowFullRebuild(filterKey !== prevFilterKeyRef.current, prevFilterKeyRef.current, filterKey, {
+      displayEmpty: displayArticles.length === 0,
+      generationChanged: true,
+    });
+    const ranked = rankLatestDisplay(filteredArticles, articles);
+    setDisplayArticles(ranked);
+    markInitialDisplay();
+    setDisplayReady(true);
+    prevFeedGenerationRef.current = feedGeneration;
+    prevRawLengthRef.current = articles.length;
+    prevFilterKeyRef.current = filterKey;
+    prevPersonalizationKeyRef.current = personalizationKey;
+    syncDisplayHandledRef.current = true;
+  }, [
+    articles,
+    displayArticles.length,
+    feedGeneration,
+    filterFeedArticles,
+    filterKey,
+    markInitialDisplay,
+    personalizationKey,
+    preferences,
+    rankLatestDisplay,
+    setDisplayArticles,
+    setDisplayReady,
+    shouldAllowFullRebuild,
+    prevFeedGenerationRef,
+    prevFilterKeyRef,
+    prevRawLengthRef,
+    feedInteractionEpoch,
+  ]);
+
+  // Chip toggles must paint on this frame. Do not wait for filterKeyRef — persist can
+  // already have that key while the painted list is still the previous chip's stories.
+  useLayoutEffect(() => {
+    if (!preferences || articles.length === 0) return;
+    if (isFeedInteractionLocked()) return;
+
+    const filteredArticles = filterFeedArticles(articles);
+    const filterChanged = filterKey !== prevFilterKeyRef.current;
+    const displayMatchesFilter = isDisplayFeedMatchingFilter(displayArticles, filteredArticles);
+    if (!filterChanged && displayMatchesFilter) return;
+
+    shouldAllowFullRebuild(true, prevFilterKeyRef.current, filterKey, {
+      displayEmpty: displayArticles.length === 0,
+    });
+
+    const canSlice =
+      articles.length === fullOrderRawLengthRef.current && fullOrderRef.current.length > 0;
+    const sliced = canSlice ? sliceOrderedArticles(fullOrderRef.current, filteredArticles) : null;
+    const next = sliced ?? rankLatestDisplay(filteredArticles, articles);
+    const alreadyPainted =
+      next.length > 0 &&
+      next.length === displayArticles.length &&
+      next.every((article, index) => article.id === displayArticles[index]?.id);
+    if (alreadyPainted) {
+      prevFilterKeyRef.current = filterKey;
+      prevRawLengthRef.current = articles.length;
+      return;
+    }
+
+    setDisplayArticles(next);
+    markInitialDisplay();
+    setDisplayReady(true);
+    prevFilterKeyRef.current = filterKey;
+    prevRawLengthRef.current = articles.length;
+    syncDisplayHandledRef.current = true;
+  }, [
+    articles,
+    displayArticles,
+    filterFeedArticles,
+    filterKey,
+    markInitialDisplay,
+    preferences,
+    rankLatestDisplay,
+    setDisplayArticles,
+    setDisplayReady,
+    shouldAllowFullRebuild,
+    prevFilterKeyRef,
+    prevRawLengthRef,
+    feedInteractionEpoch,
+  ]);
 
   useLayoutEffect(() => {
     if (!preferences || articles.length === 0) return;
@@ -240,17 +370,43 @@ function LatestScreenContent() {
   ]);
 
   useEffect(() => {
-    if (!isFocused || isLoading || isLoadingMore || !hasMore) return;
+    if (!isFocused || isLoading || isLoadingMore || !hasMore || !preferences) return;
     // Allow top-up while display is still catching up when the painted list is empty
     // (resume / chip restore) — gating on displayReady alone left the heart stuck.
     if (!displayReady && displayArticles.length > 0) return;
+
+    const { enabledTopics, enabledSportTags } = preferences;
+    const narrowSportTagActive =
+      isSportsTopicActive(enabledTopics) && !isAllSportTagsEnabled(enabledSportTags);
+    // League/sport chips fetch dedicated RSS via boostArticlesForInterests. Paging the
+    // mixed Latest catalog never finds College Football and flashes the loader forever.
+    if (narrowSportTagActive) return;
+
+    if (autoTopUpAttemptRef.current.filterKey !== filterKey) {
+      autoTopUpAttemptRef.current = { filterKey, filteredCount: -1, attempted: false };
+    }
+
     const upstream = filterFeedArticles(articles);
     if (upstream.length >= MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION) return;
     // Only skip once displayArticles has caught up with everything upstream has found —
     // when both are 0 (a chip with no matches yet) this must NOT bail, or a narrow filter
     // with zero current matches never triggers the fetch that could find more.
     if (upstream.length > 0 && upstream.length <= displayArticles.length) return;
-    console.log('[chipDebug] auto-top-up loadMore firing', { upstreamLen: upstream.length, displayLen: displayArticles.length });
+    if (
+      !shouldRetryFilteredFeedTopUp({
+        hasAttempted: autoTopUpAttemptRef.current.attempted,
+        previousFilteredCount: autoTopUpAttemptRef.current.filteredCount,
+        filteredCount: upstream.length,
+        isStocked: upstream.length >= MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION,
+      })
+    ) {
+      return;
+    }
+    autoTopUpAttemptRef.current = {
+      filterKey,
+      filteredCount: upstream.length,
+      attempted: true,
+    };
     void loadMore();
   }, [
     isFocused,
@@ -261,7 +417,9 @@ function LatestScreenContent() {
     articles,
     displayArticles.length,
     filterFeedArticles,
+    filterKey,
     loadMore,
+    preferences,
   ]);
 
   // Selecting a chip (topic or sport tag) should feel like a deliberate pull for that
@@ -282,7 +440,12 @@ function LatestScreenContent() {
       : !isAllTopicsEnabled(enabledTopics)
         ? topicSourceIds(enabledTopics)
         : [];
-    if (sourceIds.length === 0) return;
+    if (sourceIds.length === 0) {
+      // Leaving the chip must not keep the last boost key, or All → College Football
+      // would skip the fetch and stay empty after ingest.
+      chipBoostKeyRef.current = '';
+      return;
+    }
 
     // Keyed on the selection + feedGeneration (bumped by every initial/refresh load), not
     // articles.length — a pull-to-refresh replaces the article list wholesale (services/
@@ -290,9 +453,39 @@ function LatestScreenContent() {
     // look like "already pulled for this selection".
     const boostKey = `chip\0${enabledTopics.join(',')}\0${enabledSportTags.join(',')}\0${feedGeneration}`;
     if (chipBoostKeyRef.current === boostKey) return;
-    chipBoostKeyRef.current = boostKey;
-    void boostArticlesForInterests(sourceIds, boostKey);
-  }, [isFocused, preferences, isLoading, feedGeneration, boostArticlesForInterests]);
+    if (chipBoostKeyRef.current === `pending:${boostKey}`) return;
+
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    chipBoostKeyRef.current = `pending:${boostKey}`;
+
+    const run = (allowRetry: boolean) => {
+      void boostArticlesForInterests(sourceIds, boostKey).then((didMerge) => {
+        if (cancelled) return;
+        if (didMerge) {
+          chipBoostKeyRef.current = boostKey;
+          return;
+        }
+        // Empty/error must not lock the chip — ingest may still be writing rows.
+        chipBoostKeyRef.current = '';
+        if (!allowRetry) return;
+        retryTimer = setTimeout(() => {
+          if (cancelled || chipBoostKeyRef.current === boostKey) return;
+          chipBoostKeyRef.current = `pending:${boostKey}`;
+          run(false);
+        }, 4_000);
+      });
+    };
+    run(true);
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (chipBoostKeyRef.current === `pending:${boostKey}`) {
+        chipBoostKeyRef.current = '';
+      }
+    };
+  }, [isFocused, preferences, isLoading, feedGeneration, boostArticlesForInterests, articles.length]);
 
   const runResumeRefresh = useCallback(() => {
     // Re-allow chip source boost after a long absence — ArticlesContext clears its
@@ -320,9 +513,7 @@ function LatestScreenContent() {
         // Only scroll-to-top + refresh when Latest was already focused (re-tap).
         if (!wasFocusedOnTabPressRef.current) return;
         void feedRef.current?.scrollToTop();
-        InteractionManager.runAfterInteractions(() => {
-          void handleRefresh();
-        });
+        void handleRefresh();
       });
       return unsubscribe;
     }, [navigation, handleRefresh]),
@@ -376,13 +567,7 @@ function LatestScreenContent() {
   useDeferAfterFocus(
     isFocused,
     () => {
-      console.log('[chipDebug] effect fired', {
-        filterKey,
-        locked: isFeedInteractionLocked(),
-        articlesLen: articles.length,
-      });
       if (isFeedInteractionLocked()) {
-        console.log('[chipDebug] bail: interaction locked');
         return;
       }
       const handledSyncPagination = syncDisplayHandledRef.current;
@@ -415,36 +600,39 @@ function LatestScreenContent() {
         return;
       }
 
-      console.log('[chipDebug] isCacheFresh?', isCacheFresh(feedGeneration, articles.length, filterKey));
+      const filteredArticles = filterFeedArticles(articles);
+      const displayMatchesFilter = isDisplayFeedMatchingFilter(displayArticles, filteredArticles);
       if (isCacheFresh(feedGeneration, articles.length, filterKey)) {
-        const filteredArticles = filterFeedArticles(articles);
-        const visibleCount =
-          displayArticles.length > 0
-            ? displayArticles.length
-            : (readTabDisplayCache('latest')?.displayArticles.length ?? 0);
-        const understocked = isDisplayFeedUnderstocked(visibleCount, filteredArticles.length);
-        console.log('[chipDebug] cache-fresh branch', { visibleCount, filteredLen: filteredArticles.length, understocked });
-        if (!understocked) {
-          prevRawLengthRef.current = articles.length;
-          prevFeedGenerationRef.current = feedGeneration;
-          prevFilterKeyRef.current = filterKey;
-          const cached = readTabDisplayCache('latest');
-          startTransition(() => {
-            if (displayArticles.length === 0 && cached && cached.displayArticles.length > 0) {
-              setDisplayArticles(cached.displayArticles);
-            }
-            setDisplayReady(true);
-          });
-          console.log('[chipDebug] bail: cache-fresh, not understocked');
-          return;
+        if (filterKey === prevFilterKeyRef.current && displayMatchesFilter) {
+          const visibleCount =
+            displayArticles.length > 0
+              ? displayArticles.length
+              : (readTabDisplayCache('latest')?.displayArticles.length ?? 0);
+          const understocked = isDisplayFeedUnderstocked(visibleCount, filteredArticles.length);
+          if (!understocked) {
+            prevRawLengthRef.current = articles.length;
+            prevFeedGenerationRef.current = feedGeneration;
+            prevFilterKeyRef.current = filterKey;
+            const cached = readTabDisplayCache('latest');
+            startTransition(() => {
+              if (
+                displayArticles.length === 0 &&
+                cached &&
+                cached.displayArticles.length > 0 &&
+                isDisplayFeedMatchingFilter(cached.displayArticles, filteredArticles)
+              ) {
+                setDisplayArticles(cached.displayArticles);
+              }
+              setDisplayReady(true);
+            });
+            return;
+          }
         }
       }
 
-      const filteredArticles = filterFeedArticles(articles);
-      console.log('[chipDebug] filteredArticles computed', { count: filteredArticles.length });
       const generationChanged = feedGeneration !== prevFeedGenerationRef.current;
       const listShrunk = articles.length < prevRawLengthRef.current;
-      const filtersChanged = filterKey !== prevFilterKeyRef.current;
+      const filtersChanged = filterKey !== prevFilterKeyRef.current || !displayMatchesFilter;
       const personalizationChanged =
         personalizationKey !== prevPersonalizationKeyRef.current;
       const needsFullRebuild =
@@ -453,13 +641,6 @@ function LatestScreenContent() {
         filtersChanged ||
         personalizationChanged ||
         prevRawLengthRef.current === 0;
-      console.log('[chipDebug] rebuild decision', {
-        needsFullRebuild,
-        generationChanged,
-        listShrunk,
-        filtersChanged,
-        personalizationChanged,
-      });
 
       const applyDisplay = (updater: () => void) => {
         startTransition(updater);
@@ -473,28 +654,18 @@ function LatestScreenContent() {
         !listShrunk &&
         !personalizationChanged &&
         articles.length === fullOrderRawLengthRef.current;
-      console.log('[chipDebug] canSliceFullOrder', {
-        canSliceFullOrder,
-        articlesLen: articles.length,
-        fullOrderRawLen: fullOrderRawLengthRef.current,
-      });
 
       const rankFilteredArticles = () => {
         if (canSliceFullOrder) {
           const sliced = sliceOrderedArticles(fullOrderRef.current, filteredArticles);
           if (sliced) {
-            console.log('[chipDebug] fast slice path used', { count: sliced.length });
             return sliced;
           }
-          console.log('[chipDebug] slice returned null, falling back to full rank');
         }
-        const start = Date.now();
         const baseArticles = filterFeedArticlesBase(articles);
         fullOrderRef.current = orderFullLatest(baseArticles);
         fullOrderRawLengthRef.current = articles.length;
-        const result = sliceOrderedArticles(fullOrderRef.current, filteredArticles) ?? orderLatest(filteredArticles);
-        console.log('[chipDebug] full rank path used', { ms: Date.now() - start, count: result.length });
-        return result;
+        return sliceOrderedArticles(fullOrderRef.current, filteredArticles) ?? orderLatest(filteredArticles);
       };
 
       if (needsFullRebuild) {
@@ -508,18 +679,15 @@ function LatestScreenContent() {
             generationChanged,
           },
         );
-        console.log('[chipDebug] entering needsFullRebuild, shouldAllowFullRebuild=', allowRebuild);
         applyDisplay(() => {
           if (allowRebuild) {
             const ranked = rankFilteredArticles();
-            console.log('[chipDebug] setDisplayArticles (full rebuild)', { count: ranked.length });
             setDisplayArticles(ranked);
             markInitialDisplay();
             prevFeedGenerationRef.current = feedGeneration;
             prevFilterKeyRef.current = filterKey;
             prevPersonalizationKeyRef.current = personalizationKey;
           } else {
-            console.log('[chipDebug] shouldAllowFullRebuild=false, using updateDisplayArticlesInPlace (no new rows added)');
             setDisplayArticles((prev) => {
               if (prev.length === 0 && filteredArticles.length > 0) {
                 return orderLatest(filteredArticles);
@@ -530,7 +698,6 @@ function LatestScreenContent() {
           setDisplayReady(true);
         });
       } else if (!handledSyncPagination && articles.length > prevRawLengthRef.current) {
-        console.log('[chipDebug] taking append/pagination branch instead of rebuild');
         syncDisplayHandledRef.current = true;
         applyDisplay(() => {
           setDisplayArticles((prev) => {
@@ -569,7 +736,7 @@ function LatestScreenContent() {
     },
     [
       articles,
-      displayArticles.length,
+      displayArticles,
       displayReady,
       feedGeneration,
       filterFeedArticles,

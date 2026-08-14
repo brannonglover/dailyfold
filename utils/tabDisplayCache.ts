@@ -46,7 +46,7 @@ export function isForYouDisplayCacheFresh(
 ): boolean {
   return (
     isTabDisplayCacheFresh(entry, feedGeneration, rawLength, filterKey) &&
-    entry.personalizationKey === personalizationKey
+    (entry.personalizationKey ?? '') === (personalizationKey ?? '')
   );
 }
 
@@ -126,6 +126,13 @@ export function hasShowableTabDisplayCache(key: TabDisplayCacheKey): boolean {
 /** True when visible rows are missing filtered upstream matches (including empty display). */
 export function isDisplayFeedUnderstocked(displayCount: number, filteredCount: number): boolean {
   return filteredCount > 0 && displayCount < filteredCount;
+}
+
+/** False when the painted list is empty of matches or still contains rows the chip would drop. */
+export function isDisplayFeedMatchingFilter(display: Article[], filtered: Article[]): boolean {
+  if (display.length === 0) return filtered.length === 0;
+  const allowed = new Set(filtered.map((article) => article.id));
+  return display.every((article) => allowed.has(article.id));
 }
 
 /** True when tab display state matches the current upstream feed snapshot. */

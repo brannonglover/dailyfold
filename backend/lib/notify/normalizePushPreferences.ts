@@ -1,4 +1,4 @@
-import { SPORT_TAG_ORDER } from '../../../catalog/sports';
+import { expandSoccerFilterTags, SPORT_TAG_ORDER } from '../../../catalog/sports';
 import { CURIOSITY_ORDER } from './curiosities';
 import { SportTag, Topic } from '../types';
 import { normalizeBlockPreferences } from './blockPreferences';
@@ -47,8 +47,10 @@ export function normalizeFeedPreferences(prefs: PushPreferences): PushPreference
   let enabledTopics = uniqueTopics(
     rawTopics.filter((topic): topic is Topic => VALID_TOPICS.has(topic as Topic)),
   );
-  let enabledSportTags = uniqueSportTags(
-    rawSportTags.filter((tag): tag is SportTag => VALID_SPORT_TAGS.has(tag as SportTag)),
+  let enabledSportTags = expandSoccerFilterTags(
+    uniqueSportTags(
+      rawSportTags.filter((tag): tag is SportTag => VALID_SPORT_TAGS.has(tag as SportTag)),
+    ),
   );
 
   // Legacy / explicit full selection is equivalent to All (empty = no topic filter).

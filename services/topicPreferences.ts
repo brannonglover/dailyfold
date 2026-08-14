@@ -6,6 +6,16 @@ export function isAllTopicsEnabled(enabledTopics: Topic[]): boolean {
 }
 
 /**
+ * Latest feed topic chips are exclusive: a new chip replaces the previous one.
+ * Tapping the already-selected chip returns to All (empty).
+ */
+export function nextEnabledTopics(enabledTopics: Topic[], topic: Topic): Topic[] {
+  if (isAllTopicsEnabled(enabledTopics)) return [topic];
+  if (enabledTopics.includes(topic)) return enabledTopics.filter((item) => item !== topic);
+  return [topic];
+}
+
+/**
  * Topic chips use OR matching on article.topics, but sports outlets also carry a
  * secondary `world` tag (and ingest can add `world` from phrases like "World Cup").
  * When Sports is not selected, drop articles whose outlet is primarily sports.

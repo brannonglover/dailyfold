@@ -20,12 +20,13 @@ import {
 } from '@/services/sourcePreferences';
 import {
   filterArticlesBySportTags,
-  isAllSportTagsEnabled,
   isSportsTopicActive,
+  nextEnabledSportTags,
 } from '@/services/sportPreferences';
 import {
   filterArticlesByTopics,
   isAllTopicsEnabled,
+  nextEnabledTopics,
 } from '@/services/topicPreferences';
 import {
   addBlockedKeyword,
@@ -186,13 +187,10 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       if (!user) return;
       const normalized = normalizeFeedPreferences(next);
       const previous = preferencesRef.current;
-      console.log('[chipDebug] persist: setPreferences (sync state update)');
       setPreferences(normalized);
       preferencesRef.current = normalized;
       try {
-        const start = Date.now();
         await savePreferences(user.id, normalized);
-        console.log('[chipDebug] persist: savePreferences done', { ms: Date.now() - start });
 
         if (normalized.trendingNotificationsEnabled) {
           const userId = user.id;
@@ -560,16 +558,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       if (!user || !preferences) return;
       if (!isSportsTopicActive(preferences.enabledTopics)) return;
 
-      let nextTags: SportTag[];
-
-      if (isAllSportTagsEnabled(preferences.enabledSportTags)) {
-        nextTags = [tag];
-      } else if (preferences.enabledSportTags.includes(tag)) {
-        nextTags = preferences.enabledSportTags.filter((t) => t !== tag);
-      } else {
-        nextTags = [...preferences.enabledSportTags, tag];
-      }
-
+      const nextTags = nextEnabledSportTags(preferences.enabledSportTags, tag);
       await persist({ ...preferences, enabledSportTags: nextTags });
     },
     [user, preferences, persist],
@@ -621,19 +610,10 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
 
   const toggleTopic = useCallback(
     async (topic: Topic) => {
-      console.log('[chipDebug] toggleTopic called', { topic, hasUser: !!user, hasPrefs: !!preferences });
       if (!user || !preferences) return;
 
-      let nextTopics: Topic[];
-
-      if (isAllTopicsEnabled(preferences.enabledTopics)) {
-        nextTopics = [topic];
-      } else if (preferences.enabledTopics.includes(topic)) {
-        nextTopics = preferences.enabledTopics.filter((t) => t !== topic);
-      } else {
-        // One curiosity chip at a time (avoids Sports + World showing only football).
-        nextTopics = [topic];
-      }
+      // One curiosity chip at a time (avoids Sports + World showing only football).
+      const nextTopics = nextEnabledTopics(preferences.enabledTopics, topic);
 
       const nextSportTags = isAllTopicsEnabled(nextTopics)
         ? []
@@ -641,13 +621,11 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
           ? preferences.enabledSportTags
           : [];
 
-      console.log('[chipDebug] toggleTopic persisting', { nextTopics, nextSportTags });
       await persist({
         ...preferences,
         enabledTopics: nextTopics,
         enabledSportTags: nextSportTags,
       });
-      console.log('[chipDebug] toggleTopic persisted');
     },
     [user, preferences, persist],
   );

@@ -16,7 +16,6 @@ import {
   ListRenderItemInfo,
   NativeScrollEvent,
   NativeSyntheticEvent,
-  InteractionManager,
   PixelRatio,
   RefreshControlProps,
   ScrollView,
@@ -52,7 +51,7 @@ import {
 import { useTheme } from '@/hooks/useTheme';
 import { registerFeedArticles } from '@/services/articleSession';
 import { Article } from '@/types';
-import { shouldAllowFeedLoadMore, shouldAutoTopUpFeed } from '@/utils/feedLoadMoreGate';
+import { shouldAllowFeedLoadMore, shouldAutoTopUpFeed, shouldRetryFilteredFeedTopUp } from '@/utils/feedLoadMoreGate';
 import { isFeedInteractionLocked } from '@/utils/feedInteractionLock';
 import {
   markFeedScrollBeginDrag,
@@ -284,6 +283,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   const maxScrollOffset = useSharedValue(0);
   const endPullDistance = useSharedValue(0);
   const loadMoreTriggeredAtKeyRef = useRef('');
+  const lastAutoPagedVisibleRef = useRef(-1);
   const storyListCountRef = useRef(0);
   const storyLastVisibleIndexRef = useRef(-1);
   const requestLoadMoreRef = useRef<(options?: { atFeedEnd?: boolean }) => void>(() => {});
@@ -485,13 +485,36 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   requestLoadMoreRef.current = requestLoadMore;
 
   useEffect(() => {
+    lastAutoPagedVisibleRef.current = -1;
+  }, [articleOrderKey]);
+
+  const shouldPageUnderstockedFeed = useCallback((visibleCount: number) => {
+    if (
+      !shouldRetryFilteredFeedTopUp({
+        hasAttempted: lastAutoPagedVisibleRef.current !== -1,
+        previousFilteredCount: lastAutoPagedVisibleRef.current,
+        filteredCount: visibleCount,
+        isStocked: false,
+      })
+    ) {
+      return false;
+    }
+    lastAutoPagedVisibleRef.current = visibleCount;
+    return true;
+  }, []);
+
+  useEffect(() => {
     if (!onLoadMore || !canLoadMore || isLoadingMore || layout === 'list') return;
+    if (articles.length === 0) return;
     if (activeIndex < articles.length - SNAP_LOAD_MORE_PREFETCH_ITEMS) {
       loadMoreTriggeredAtKeyRef.current = '';
       return;
     }
+    if (shouldAutoTopUpFeed(articles.length) && !shouldPageUnderstockedFeed(articles.length)) {
+      return;
+    }
     requestLoadMore();
-  }, [activeIndex, articles.length, canLoadMore, isLoadingMore, layout, onLoadMore, requestLoadMore]);
+  }, [activeIndex, articles.length, canLoadMore, isLoadingMore, layout, onLoadMore, requestLoadMore, shouldPageUnderstockedFeed]);
 
   useEffect(() => {
     loadMoreTriggeredAtKeyRef.current = '';
@@ -504,6 +527,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   useEffect(() => {
     if (!onLoadMore || !canLoadMore || isLoadingMore) return;
     if (!shouldAutoTopUpFeed(articles.length)) return;
+    if (!shouldPageUnderstockedFeed(articles.length)) return;
     requestLoadMore({ atFeedEnd: true });
   }, [
     articles.length,
@@ -512,16 +536,21 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
     loadMoreTriggerKey,
     onLoadMore,
     requestLoadMore,
+    shouldPageUnderstockedFeed,
   ]);
 
   const onListContentSizeChange = useCallback(
     (_width: number, height: number) => {
       if (!onLoadMore || !canLoadMore || isLoadingMore || pageHeight <= 0) return;
+      if (articles.length === 0) return;
       if (height <= pageHeight + 1) {
+        if (shouldAutoTopUpFeed(articles.length) && !shouldPageUnderstockedFeed(articles.length)) {
+          return;
+        }
         requestLoadMore({ atFeedEnd: true });
       }
     },
-    [onLoadMore, canLoadMore, isLoadingMore, pageHeight, requestLoadMore],
+    [articles.length, onLoadMore, canLoadMore, isLoadingMore, pageHeight, requestLoadMore, shouldPageUnderstockedFeed],
   );
 
   const onListViewableItemsChanged = useRef(
@@ -582,10 +611,8 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
   const handleApplyPending = useCallback(() => {
     if (pendingCount <= 0 || !onApplyPending) return;
+    void onApplyPending();
     void scrollToTop();
-    InteractionManager.runAfterInteractions(() => {
-      void onApplyPending();
-    });
   }, [pendingCount, onApplyPending, scrollToTop]);
 
   const articleKeyExtractor = useCallback((item: Article) => item.id, []);
