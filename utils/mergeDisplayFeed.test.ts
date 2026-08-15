@@ -163,6 +163,12 @@ test('updateDisplayArticlesInPlace keeps painted rows when filtered source brief
   assert.equal(next, prev);
 });
 
+test('updateDisplayArticlesInPlace clears painted rows on a chip change to an empty filter', () => {
+  const prev = [article('a'), article('b')];
+  const next = updateDisplayArticlesInPlace(prev, [], { keepPreviousIfEmpty: false });
+  assert.deepEqual(next, []);
+});
+
 test('updateDisplayArticlesInPlace seeds an empty display from the filtered source', () => {
   const source = [article('a'), article('b')];
   const next = updateDisplayArticlesInPlace([], source);
@@ -177,6 +183,14 @@ test('isFilterExpansion detects preference widening', () => {
   const next = JSON.stringify({ topics: [], sports: [], sources: [] });
   assert.equal(isFilterExpansion(prev, next), true);
   assert.equal(isFilterExpansion(next, prev), false);
+});
+
+test('isFilterExpansion does not treat an exclusive topic chip swap as widening', () => {
+  const nfl = JSON.stringify({ topics: ['sports'], sports: ['american-football'], sources: [] });
+  const health = JSON.stringify({ topics: ['health'], sports: [], sources: [] });
+  const allSports = JSON.stringify({ topics: ['sports'], sports: [], sources: [] });
+  assert.equal(isFilterExpansion(nfl, health), false);
+  assert.equal(isFilterExpansion(nfl, allSports), true);
 });
 
 test('mergePaginatedDisplayFeed spreads prepended batches against the feed head', () => {

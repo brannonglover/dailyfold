@@ -119,6 +119,42 @@ test('Sports topic filter keeps only sports stories', () => {
   assert.deepEqual(result.map((a) => a.id), ['sport']);
 });
 
+test('Health topic filter keeps health-primary stories tagged only as science', () => {
+  const scienceOnlyHealth: Article = {
+    id: 'mx-science',
+    title: 'New study maps protein folding',
+    excerpt: 'excerpt',
+    body: 'body',
+    source: 'Medical Xpress',
+    imageUrl: 'https://example.com/mx.jpg',
+    topics: ['science'],
+    readTimeMinutes: 4,
+    publishedAt: recent(15 * 60 * 1000),
+    url: 'https://example.com/mx',
+  };
+  const prefs = basePrefs({ enabledTopics: ['health'] });
+  const result = applyFeedFilters([...articles, scienceOnlyHealth], prefs, FALLBACK_SOURCES);
+  assert.deepEqual(result.map((a) => a.id), ['mx-science']);
+});
+
+test('Health topic filter keeps health stories and hides other topics', () => {
+  const healthArticle: Article = {
+    id: 'health',
+    title: 'Health story',
+    excerpt: 'excerpt',
+    body: 'body',
+    source: 'NPR Health',
+    imageUrl: 'https://example.com/health.jpg',
+    topics: ['health'],
+    readTimeMinutes: 4,
+    publishedAt: recent(30 * 60 * 1000),
+    url: 'https://example.com/health',
+  };
+  const prefs = basePrefs({ enabledTopics: ['health'] });
+  const result = applyFeedFilters([...articles, healthArticle], prefs, FALLBACK_SOURCES);
+  assert.deepEqual(result.map((a) => a.id), ['health']);
+});
+
 test('normalizeFeedPreferences clears sport tags when All topics selected', () => {
   const normalized = normalizeFeedPreferences(
     basePrefs({ enabledTopics: [], enabledSportTags: ['premier-league'] }),
@@ -133,6 +169,11 @@ test('normalizeFeedPreferences treats full topic list as All', () => {
   );
   assert.deepEqual(normalized.enabledTopics, []);
   assert.deepEqual(normalized.enabledSportTags, []);
+});
+
+test('normalizeFeedPreferences keeps design as a valid exclusive topic', () => {
+  const normalized = normalizeFeedPreferences(basePrefs({ enabledTopics: ['design'] }));
+  assert.deepEqual(normalized.enabledTopics, ['design']);
 });
 
 test('World topic excludes sports-primary outlets', () => {

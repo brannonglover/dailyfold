@@ -220,6 +220,12 @@ export function resolveTabDisplayFeed(options: {
     return displayArticles;
   }
 
+  // Chip swap to an empty filter (Health with no ingest) is displayReady + [].
+  // Do not refill from a cache that still holds the previous chip's stories.
+  if (displayReady) {
+    return [];
+  }
+
   const cachedFeed = readShowableTabDisplayCache(
     tabKey,
     feedGeneration,

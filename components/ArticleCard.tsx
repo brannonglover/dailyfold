@@ -881,6 +881,7 @@ const styles = StyleSheet.create({
   gridSource: {
     fontFamily: 'Inter',
     fontSize: 11,
+    marginBottom: 14,
   },
   kickerText: {
     fontFamily: 'InterSemiBold',

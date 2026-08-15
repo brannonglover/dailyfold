@@ -21,12 +21,14 @@ export function filterArticlesByTopics(
   const sportsEnabled = enabled.has('sports');
 
   return articles.filter((article) => {
-    if (!article.topics.some((topic) => enabled.has(topic))) return false;
+    const primary = sourcePrimaryByName?.get(article.source);
+    const topicMatch = article.topics.some((topic) => enabled.has(topic));
+    const sourceMatch = primary != null && enabled.has(primary);
+    if (!topicMatch && !sourceMatch) return false;
 
     if (!sportsEnabled) {
       // Stale ingest tags (e.g. World Cup → world) and sports outlets.
       if (article.topics.includes('sports')) return false;
-      const primary = sourcePrimaryByName?.get(article.source);
       if (primary === 'sports') return false;
     }
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { sourceIdsForForYouInterests, sportTagSourceIds } from './forYouInterestSources';
+import { sourceIdsForForYouInterests, sportTagSourceIds, topicSourceIds } from './forYouInterestSources';
 import { CURIOSITY_ORDER } from '@/constants/curiosities';
 import type { UserPreferences } from '@/types';
 
@@ -46,6 +46,24 @@ test('sourceIdsForForYouInterests includes MLS publisher for mls sport tag', () 
   const ids = sourceIdsForForYouInterests(basePrefs({ forYouSportTags: ['mls'] }));
   assert.ok(ids.includes('guardian-mls'));
   assert.ok(ids.includes('scarves-and-spikes'));
+});
+
+test('topicSourceIds includes existing and Feedspot health publishers', () => {
+  const ids = topicSourceIds(['health']);
+  assert.ok(ids.includes('npr-health'));
+  assert.ok(ids.includes('stat-news'));
+  assert.ok(ids.includes('kff-health-news'));
+  assert.ok(ids.includes('kaiser-health-research'));
+  assert.ok(ids.includes('nyt-well'));
+  assert.ok(ids.includes('ace-fitness'));
+  assert.ok(!ids.includes('espn-nfl'));
+  assert.ok(!ids.includes('bbc-news'));
+});
+
+test('topicSourceIds includes the design-primary Dezeen feed', () => {
+  const ids = topicSourceIds(['design']);
+  assert.ok(ids.includes('dezeen'));
+  assert.ok(!ids.includes('bbc-news'));
 });
 
 test('sportTagSourceIds includes NCAA football feeds for college-football', () => {

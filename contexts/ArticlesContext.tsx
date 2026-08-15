@@ -19,6 +19,7 @@ import { loadFeedSnapshot, MAX_FEED_SNAPSHOT_ARTICLES, saveFeedSnapshot } from '
 import { applyFeedFilters, applyTrendingNotificationFilters } from '@/services/feedFilters';
 import { getEnabledSourceIds, isAllSourcesEnabled } from '@/services/sourcePreferences';
 import { isAllSportTagsEnabled, isSportsTopicActive } from '@/services/sportPreferences';
+import { isAllTopicsEnabled } from '@/services/topicPreferences';
 import { processHotTrendingNotifications } from '@/services/trendingNotifications';
 import { Article } from '@/types';
 import { setArticleFeedPatcher } from '@/services/articleFeedPatch';
@@ -30,7 +31,7 @@ import {
   RESUME_REFRESH_AFTER_MS,
 } from '@/utils/ingestPoll';
 import { shouldShowArticleFeedLoading } from '@/utils/feedLoadingState';
-import { sportTagSourceIds } from '@/utils/forYouInterestSources';
+import { sportTagSourceIds, topicSourceIds } from '@/utils/forYouInterestSources';
 import {
   mergeArticleFeed,
   resolveSilentFeedUpdate,
@@ -120,6 +121,19 @@ function appendUniqueArticles(prev: Article[], incoming: Article[]): Article[] {
   const seen = new Set(prev.map((a) => a.id));
   const fresh = incoming.filter((a) => !seen.has(a.id));
   return fresh.length > 0 ? [...prev, ...fresh] : prev;
+}
+
+async function mergeBoostedSourceArticles(data: Article[], sourceIds: string[]): Promise<Article[]> {
+  if (sourceIds.length === 0) return data;
+  try {
+    const boosted = await fetchArticles({ sourceIds, limit: 50 });
+    if (boosted.articles.length > 0) {
+      return appendUniqueArticles(data, boosted.articles);
+    }
+  } catch {
+    // Best-effort — fall back to whatever the generic page already found.
+  }
+  return data;
 }
 
 function isIngestPending(meta?: FetchArticlesResult['meta']): boolean {
@@ -404,44 +418,31 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
               !!preferences &&
               isSportsTopicActive(preferences.enabledTopics) &&
               !isAllSportTagsEnabled(preferences.enabledSportTags);
+            const narrowTopicActive =
+              !!preferences && !isAllTopicsEnabled(preferences.enabledTopics);
+            const scopedChipSourceIds = narrowSportTagActive
+              ? sportTagSourceIds(preferences!.enabledSportTags)
+              : narrowTopicActive
+                ? topicSourceIds(preferences!.enabledTopics)
+                : [];
             let data: Article[];
             let meta: FetchArticlesResult['meta'];
-            if (shouldStockFeed && narrowSportTagActive) {
+            if (shouldStockFeed && scopedChipSourceIds.length > 0) {
               ({ articles: data, meta } = await requestArticles(mode, forceRefresh, cursor));
               if (!stockOptions.isStocked(data)) {
-                const scopedSourceIds = sportTagSourceIds(preferences!.enabledSportTags);
-                if (scopedSourceIds.length > 0) {
-                  try {
-                    const boosted = await fetchArticles({ sourceIds: scopedSourceIds, limit: 50 });
-                    if (boosted.articles.length > 0) {
-                      data = appendUniqueArticles(data, boosted.articles);
-                    }
-                  } catch {
-                    // Best-effort — fall back to whatever the generic page already found.
-                  }
-                }
+                data = await mergeBoostedSourceArticles(data, scopedChipSourceIds);
               }
             } else if (shouldStockFeed) {
               ({ articles: data, meta } = await fetchFeedUntilStocked(
                 (pageCursor) => requestArticles(mode, forceRefresh, pageCursor),
                 stockOptions,
               ));
-            } else if (mode === 'append' && narrowSportTagActive) {
+            } else if (mode === 'append' && scopedChipSourceIds.length > 0) {
               const first = await requestArticles(mode, forceRefresh, cursor);
               data = appendUniqueArticles(articlesRef.current, first.articles);
               meta = first.meta;
               if (!stockOptions.isStocked(data)) {
-                const scopedSourceIds = sportTagSourceIds(preferences!.enabledSportTags);
-                if (scopedSourceIds.length > 0) {
-                  try {
-                    const boosted = await fetchArticles({ sourceIds: scopedSourceIds, limit: 50 });
-                    if (boosted.articles.length > 0) {
-                      data = appendUniqueArticles(data, boosted.articles);
-                    }
-                  } catch {
-                    // Best-effort — fall back to whatever the generic page already found.
-                  }
-                }
+                data = await mergeBoostedSourceArticles(data, scopedChipSourceIds);
               }
               data = data.slice(articlesRef.current.length);
             } else if (mode === 'append') {
@@ -808,7 +809,11 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       !!preferences &&
       isSportsTopicActive(preferences.enabledTopics) &&
       !isAllSportTagsEnabled(preferences.enabledSportTags);
-    if (narrowSportTagActive) return;
+    const narrowTopicActive =
+      !!preferences && !isAllTopicsEnabled(preferences.enabledTopics);
+    // Topic chips (Health) and league chips fetch dedicated RSS; mixed-catalog
+    // pagination will not find them and fights the chip boost.
+    if (narrowSportTagActive || narrowTopicActive) return;
     if (isFilteredFeedStocked(articlesRef.current, preferences, sources)) return;
     const filteredCount = countFilteredFeedArticles(articlesRef.current, preferences, sources);
     if (

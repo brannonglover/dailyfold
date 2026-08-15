@@ -123,3 +123,27 @@ test('shouldShowFilteredFeedLoading keeps skeleton while display rebuilds over r
     false,
   );
 });
+
+test('shouldShowFilteredFeedLoading stays true while a chip boost is in flight', () => {
+  assert.equal(
+    shouldShowFilteredFeedLoading({
+      contextLoading: false,
+      rawCount: 40,
+      filteredCount: 0,
+      displayReady: true,
+      awaitingChipBoost: true,
+    }),
+    true,
+  );
+
+  assert.equal(
+    shouldShowFilteredFeedLoading({
+      contextLoading: false,
+      rawCount: 40,
+      filteredCount: 8,
+      displayReady: true,
+      awaitingChipBoost: true,
+    }),
+    false,
+  );
+});

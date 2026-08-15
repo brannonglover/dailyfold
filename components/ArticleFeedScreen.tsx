@@ -74,9 +74,10 @@ export const ArticleFeedScreen = memo(
         {!hideFeedHeader ? (
           <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
         ) : null}
-        {/* Keep chrome + fold placeholders in one composition; real topic chips
-            mount once stories arrive so cold open doesn't flash an empty chip row. */}
-        <ArticleFeedSkeleton showTopicChips={headerExtra != null} />
+        {/* Keep the real chip bar mounted so a thin filter (Design) stays selected
+            while dedicated RSS loads. Fake skeleton chips look like a bounce back to All. */}
+        {headerExtra}
+        <ArticleFeedSkeleton showTopicChips={headerExtra == null} />
       </View>
     );
   }

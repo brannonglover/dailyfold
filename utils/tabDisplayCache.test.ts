@@ -227,6 +227,30 @@ test('resolveTabDisplayFeed can fall back to a fresh cache snapshot', () => {
   );
 });
 
+test('resolveTabDisplayFeed keeps an intentional empty chip feed over stamped cache', () => {
+  writeTabDisplayCache('latest', {
+    displayArticles: [article('nfl-1'), article('nfl-2')],
+    displayReady: true,
+    feedGeneration: 2,
+    rawLength: 20,
+    filterKey: 'health',
+    orderLocked: true,
+  });
+
+  assert.deepEqual(
+    resolveTabDisplayFeed({
+      contextLoading: false,
+      displayArticles: [],
+      displayReady: true,
+      tabKey: 'latest',
+      feedGeneration: 2,
+      rawLength: 20,
+      filterKey: 'health',
+    }),
+    [],
+  );
+});
+
 test('resolveTabDisplayFeed ignores cache when filter key changed', () => {
   writeTabDisplayCache('latest', {
     displayArticles: [article('stale-1'), article('stale-2')],
@@ -315,6 +339,7 @@ test('isDisplayFeedMatchingFilter rejects a painted list that ignores the chip f
   assert.equal(isDisplayFeedMatchingFilter([nfl, soccer], [nfl]), false);
   assert.equal(isDisplayFeedMatchingFilter([], [nfl]), false);
   assert.equal(isDisplayFeedMatchingFilter([], []), true);
+  assert.equal(isDisplayFeedMatchingFilter([nfl], []), false);
 });
 
 test('hydrateTabDisplayState seeds in-memory state from a fresh cache snapshot', () => {

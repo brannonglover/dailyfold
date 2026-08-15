@@ -27,10 +27,14 @@ export function shouldShowFilteredFeedLoading(options: {
   displayReady: boolean;
   isLoadingMore?: boolean;
   isRefreshing?: boolean;
+  /** Topic/sport chip is fetching dedicated RSS — show skeleton, not leftover All stories. */
+  awaitingChipBoost?: boolean;
 }): boolean {
-  const { contextLoading, rawCount, filteredCount, displayReady, isRefreshing } = options;
+  const { contextLoading, rawCount, filteredCount, displayReady, isRefreshing, awaitingChipBoost } =
+    options;
   if (filteredCount > 0) return false;
   if (contextLoading) return true;
+  if (awaitingChipBoost) return true;
   if (rawCount === 0) return contextLoading || isRefreshing === true;
   if (!displayReady) return true;
   return isRefreshing === true;

@@ -190,6 +190,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       setPreferences(normalized);
       preferencesRef.current = normalized;
       try {
+        // Yield so chip/UI state can commit before stringify + disk I/O.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
         await savePreferences(user.id, normalized);
 
         if (normalized.trendingNotificationsEnabled) {

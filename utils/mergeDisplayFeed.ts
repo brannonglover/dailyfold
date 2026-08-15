@@ -46,6 +46,10 @@ export function articleFeedCardFieldsEqual(a: Article, b: Article): boolean {
   return true;
 }
 
+function sameIdList(prev: unknown[], next: unknown[]): boolean {
+  return prev.length === next.length && prev.every((value, index) => value === next[index]);
+}
+
 export function isFilterExpansion(prevKey: string, nextKey: string): boolean {
   if (!prevKey || prevKey === nextKey) return false;
   try {
@@ -59,6 +63,12 @@ export function isFilterExpansion(prevKey: string, nextKey: string): boolean {
       sports: unknown[];
       sources: unknown[];
     };
+    // Exclusive chip swap (Sports/NFL → Health) clears sport tags as a side effect.
+    // That is a replacement, not a widening — the painted list must rebuild.
+    const topicsReplaced =
+      prev.topics.length > 0 && next.topics.length > 0 && !sameIdList(prev.topics, next.topics);
+    if (topicsReplaced) return false;
+
     return (
       (prev.topics.length > 0 && next.topics.length === 0) ||
       (prev.sports.length > 0 && next.sports.length === 0) ||
@@ -81,10 +91,16 @@ export function sliceOrderedArticles(ordered: Article[], allowed: Article[]): Ar
   return sliced.length === allowedIds.size ? sliced : null;
 }
 
+export type UpdateDisplayArticlesInPlaceOptions = {
+  /** Chip/filter changes must paint an empty source. Silent refresh keeps the last list. */
+  keepPreviousIfEmpty?: boolean;
+};
+
 /** Refresh article fields without changing which rows are visible or their order. */
 export function updateDisplayArticlesInPlace(
   prev: Article[],
   sourceArticles: Article[],
+  options?: UpdateDisplayArticlesInPlaceOptions,
 ): Article[] {
   // Empty display with a stocked filtered source must seed — order lock callers
   // that fall through here should not leave the heart empty after resume.
@@ -92,9 +108,10 @@ export function updateDisplayArticlesInPlace(
     return sourceArticles;
   }
   // An empty filtered source usually means a transient silent-refresh regression
-  // (e.g. heroes blanked server-side). Keep the painted feed instead of wiping it.
+  // (e.g. heroes blanked server-side). Keep the painted feed instead of wiping it —
+  // unless this is a chip change, which must show the new (possibly empty) filter.
   if (sourceArticles.length === 0) {
-    return prev;
+    return options?.keepPreviousIfEmpty === false ? [] : prev;
   }
 
   const byId = new Map(sourceArticles.map((article) => [article.id, article]));

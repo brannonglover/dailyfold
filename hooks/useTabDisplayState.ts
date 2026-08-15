@@ -41,14 +41,15 @@ export function useTabDisplayState(
   const rawLengthRef = useRef(sync?.rawLength ?? cached?.rawLength ?? 0);
   const filterKeyRef = useRef(cached?.filterKey ?? filterKey);
   const personalizationKeyRef = useRef(cached?.personalizationKey ?? sync?.personalizationKey ?? '');
-  // Latest chip rebuilds read this to detect a pending filter change. Do not advance it
-  // until displayArticles are rebuilt — persisting the new key onto the old list makes
-  // the next pass treat soccer stories as already-filtered American Football.
-  const latestFilterKeyRef = useRef(filterKey);
-  latestFilterKeyRef.current = filterKey;
+  // Latest chip rebuilds read filterKeyRef to detect a pending filter change. Do not
+  // advance it until displayArticles are rebuilt — persisting the new key onto the old
+  // list makes the next pass treat soccer stories as already-filtered American Football.
 
   useLayoutEffect(() => {
     if (displayArticles.length > 0) return;
+    // Intentional empty after a chip swap (Health with no ingest yet) must not
+    // be refilled from a cache that still holds the previous chip's stories.
+    if (displayReady) return;
 
     const cached = readTabDisplayCache(tabKey);
     if (!cached || cached.displayArticles.length === 0 || cached.filterKey !== filterKey) {
@@ -75,6 +76,7 @@ export function useTabDisplayState(
     tabKey,
     filterKey,
     displayArticles.length,
+    displayReady,
     sync?.feedGeneration,
     sync?.rawLength,
     sync?.personalizationKey,
@@ -134,12 +136,12 @@ export function useTabDisplayState(
       { displayArticles, displayReady },
       feedGenerationRef.current,
       rawLengthRef.current,
-      latestFilterKeyRef.current,
+      filterKeyRef.current,
       personalizationKey,
     );
-    // Persist only when the painted list changes so a chip toggle cannot stamp the new
-    // filterKey onto the previous (unfiltered) rows in the same commit.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- filterKey is read from latestFilterKeyRef
+    // Persist the painted filterKeyRef, not the incoming chip key, so a toggle cannot
+    // stamp Health onto leftover Sports/NFL rows in the same commit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- filterKey is applied via filterKeyRef after rebuild
   }, [displayArticles, displayReady, persistCache, sync?.personalizationKey, tabKey]);
 
   const isCacheFresh = useCallback(

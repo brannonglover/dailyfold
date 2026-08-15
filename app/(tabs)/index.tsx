@@ -66,6 +66,7 @@ function LatestScreenContent() {
     recordFeedClick,
   } = usePreferences();
   const [emptyMessage, setEmptyMessage] = useState<string | undefined>();
+  const [chipBoostPending, setChipBoostPending] = useState(false);
   const syncDisplayHandledRef = useRef(false);
   const wasFocusedOnTabPressRef = useRef(false);
   const chipBoostKeyRef = useRef('');
@@ -182,6 +183,8 @@ function LatestScreenContent() {
 
   // New chip → top of that feed. Skip first paint and prefs hydrate. Do not
   // ingest the whole catalog; the chip-boost effect below pulls dedicated RSS.
+  // Slice out rows this chip would hide before the next paint (cheap — no
+  // getLatestFeed) so Health cannot keep showing All-topics stories.
   useLayoutEffect(() => {
     if (!preferences) return;
     const prev = prevChipSelectionKeyRef.current;
@@ -195,7 +198,31 @@ function LatestScreenContent() {
 
     void feedRef.current?.scrollToTop();
     markUserRebuild();
-  }, [chipSelectionKey, isFocused, markUserRebuild, preferences]);
+
+    if (articles.length > 0) {
+      const filteredArticles = filterFeedArticles(articles);
+      setDisplayArticles((prevDisplay) => {
+        const sliced = sliceOrderedArticles(prevDisplay, filteredArticles);
+        return sliced ?? filteredArticles;
+      });
+      setDisplayReady(true);
+    }
+
+    const { enabledTopics, enabledSportTags } = preferences;
+    const awaitingBoost =
+      (isSportsTopicActive(enabledTopics) && !isAllSportTagsEnabled(enabledSportTags)) ||
+      !isAllTopicsEnabled(enabledTopics);
+    setChipBoostPending(awaitingBoost);
+  }, [
+    articles,
+    chipSelectionKey,
+    filterFeedArticles,
+    isFocused,
+    markUserRebuild,
+    preferences,
+    setDisplayArticles,
+    setDisplayReady,
+  ]);
 
   useEffect(() => {
     if (isLoading && articles.length === 0) {
@@ -246,41 +273,56 @@ function LatestScreenContent() {
     feedInteractionEpoch,
   ]);
 
-  // Chip toggles must paint on this frame. Do not wait for filterKeyRef — persist can
-  // already have that key while the painted list is still the previous chip's stories.
-  useLayoutEffect(() => {
+  // Chip chrome first, then the feed. Ranking / setDisplayArticles in
+  // useLayoutEffect blocked the selected-chip paint until getLatestFeed
+  // finished. Yield a frame so Sport/TopicFilterBar can highlight, then
+  // slice or rank. Keep the previous stories on screen (displayReady stays
+  // true) so we don't flash the skeleton or stamp the new filterKey on the
+  // old rows. persist already setPreferences before savePreferences.
+  useEffect(() => {
     if (!preferences || articles.length === 0) return;
     if (isFeedInteractionLocked()) return;
 
-    const filteredArticles = filterFeedArticles(articles);
     const filterChanged = filterKey !== prevFilterKeyRef.current;
-    const displayMatchesFilter = isDisplayFeedMatchingFilter(displayArticles, filteredArticles);
-    if (!filterChanged && displayMatchesFilter) return;
-
-    shouldAllowFullRebuild(true, prevFilterKeyRef.current, filterKey, {
-      displayEmpty: displayArticles.length === 0,
-    });
-
-    const canSlice =
-      articles.length === fullOrderRawLengthRef.current && fullOrderRef.current.length > 0;
-    const sliced = canSlice ? sliceOrderedArticles(fullOrderRef.current, filteredArticles) : null;
-    const next = sliced ?? rankLatestDisplay(filteredArticles, articles);
-    const alreadyPainted =
-      next.length > 0 &&
-      next.length === displayArticles.length &&
-      next.every((article, index) => article.id === displayArticles[index]?.id);
-    if (alreadyPainted) {
-      prevFilterKeyRef.current = filterKey;
-      prevRawLengthRef.current = articles.length;
-      return;
+    if (!filterChanged) {
+      const filteredArticles = filterFeedArticles(articles);
+      if (isDisplayFeedMatchingFilter(displayArticles, filteredArticles)) return;
     }
 
-    setDisplayArticles(next);
-    markInitialDisplay();
-    setDisplayReady(true);
-    prevFilterKeyRef.current = filterKey;
-    prevRawLengthRef.current = articles.length;
-    syncDisplayHandledRef.current = true;
+    const frame = requestAnimationFrame(() => {
+      const filteredArticles = filterFeedArticles(articles);
+      const displayMatchesFilter = isDisplayFeedMatchingFilter(displayArticles, filteredArticles);
+      // Stamp-only bail is safe when the painted rows already belong to this chip.
+      // An empty Health filter vs leftover Sports/NFL rows must still swap.
+      if (filterKey === prevFilterKeyRef.current && displayMatchesFilter) return;
+
+      shouldAllowFullRebuild(true, prevFilterKeyRef.current, filterKey, {
+        displayEmpty: displayArticles.length === 0 || filteredArticles.length === 0,
+      });
+
+      const canSlice =
+        articles.length === fullOrderRawLengthRef.current && fullOrderRef.current.length > 0;
+      const sliced = canSlice ? sliceOrderedArticles(fullOrderRef.current, filteredArticles) : null;
+      const next = sliced ?? rankLatestDisplay(filteredArticles, articles);
+      const alreadyPainted =
+        next.length === displayArticles.length &&
+        next.every((article, index) => article.id === displayArticles[index]?.id);
+      if (alreadyPainted) {
+        prevFilterKeyRef.current = filterKey;
+        prevRawLengthRef.current = articles.length;
+        setDisplayReady(true);
+        return;
+      }
+
+      setDisplayArticles(next);
+      markInitialDisplay();
+      setDisplayReady(true);
+      prevFilterKeyRef.current = filterKey;
+      prevRawLengthRef.current = articles.length;
+      syncDisplayHandledRef.current = true;
+    });
+
+    return () => cancelAnimationFrame(frame);
   }, [
     articles,
     displayArticles,
@@ -378,6 +420,7 @@ function LatestScreenContent() {
       isSportsTopicActive(enabledTopics) && !isAllSportTagsEnabled(enabledSportTags);
     // League/sport chips fetch dedicated RSS via boostArticlesForInterests. Paging the
     // mixed Latest catalog never finds College Football and flashes the loader forever.
+    // Topic chips like Health still top up from the mixed catalog (and boost separately).
     if (narrowSportTagActive) return;
 
     if (autoTopUpAttemptRef.current.filterKey !== filterKey) {
@@ -427,7 +470,11 @@ function LatestScreenContent() {
   // for the current selection every time it changes, rather than waiting on an
   // understock check that only fires when the existing pool already looks thin.
   useEffect(() => {
-    if (!isFocused || !preferences || isLoading) return;
+    if (!isFocused || !preferences) {
+      setChipBoostPending(false);
+      return;
+    }
+    if (isLoading) return;
     const { enabledTopics, enabledSportTags } = preferences;
 
     const narrowSportTagActive =
@@ -442,6 +489,7 @@ function LatestScreenContent() {
       // Leaving the chip must not keep the last boost key, or All → College Football
       // would skip the fetch and stay empty after ingest.
       chipBoostKeyRef.current = '';
+      setChipBoostPending(false);
       return;
     }
 
@@ -457,16 +505,21 @@ function LatestScreenContent() {
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     chipBoostKeyRef.current = `pending:${boostKey}`;
 
+    setChipBoostPending(true);
     const run = (allowRetry: boolean) => {
       void boostArticlesForInterests(sourceIds, boostKey).then((didMerge) => {
         if (cancelled) return;
         if (didMerge) {
           chipBoostKeyRef.current = boostKey;
+          setChipBoostPending(false);
           return;
         }
         // Empty/error must not lock the chip — ingest may still be writing rows.
         chipBoostKeyRef.current = '';
-        if (!allowRetry) return;
+        if (!allowRetry) {
+          setChipBoostPending(false);
+          return;
+        }
         retryTimer = setTimeout(() => {
           if (cancelled || chipBoostKeyRef.current === boostKey) return;
           chipBoostKeyRef.current = `pending:${boostKey}`;
@@ -483,7 +536,7 @@ function LatestScreenContent() {
         chipBoostKeyRef.current = '';
       }
     };
-  }, [isFocused, preferences, isLoading, feedGeneration, boostArticlesForInterests, articles.length]);
+  }, [isFocused, preferences, isLoading, feedGeneration, boostArticlesForInterests]);
 
   const runResumeRefresh = useCallback(() => {
     // Re-allow chip source boost after a long absence — ArticlesContext clears its
@@ -673,12 +726,12 @@ function LatestScreenContent() {
           prevFilterKeyRef.current,
           filterKey,
           {
-            displayEmpty: displayArticles.length === 0,
+            displayEmpty: displayArticles.length === 0 || (filtersChanged && filteredArticles.length === 0),
             generationChanged,
           },
         );
         applyDisplay(() => {
-          if (allowRebuild) {
+          if (allowRebuild || filtersChanged) {
             const ranked = rankFilteredArticles();
             setDisplayArticles(ranked);
             markInitialDisplay();
@@ -848,6 +901,7 @@ function LatestScreenContent() {
     displayReady,
     isLoadingMore,
     isRefreshing,
+    awaitingChipBoost: chipBoostPending,
   });
 
   return (

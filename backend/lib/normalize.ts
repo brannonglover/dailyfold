@@ -336,7 +336,10 @@ function inferExtraTopics(text: string, base: Topic[], feedPrimaryTopic?: Topic)
     if (pattern.test(lower)) inferred.add(topic);
   }
 
-  if (inferred.size === 0 && feedPrimaryTopic && allowed.has(feedPrimaryTopic)) {
+  // Always keep the outlet's primary curiosity. Keyword inference can otherwise
+  // tag a Health+Science feed as science-only ("study"/"research") and the
+  // Health chip will drop the row.
+  if (feedPrimaryTopic) {
     inferred.add(feedPrimaryTopic);
   }
 
