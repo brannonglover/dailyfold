@@ -2,6 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { SPORT_TAG_LABELS, SPORT_CHIP_TAGS } from '@/catalog/sports';
+import { useCenteredChipScroll } from '@/hooks/useCenteredChipScroll';
 import { useTheme } from '@/hooks/useTheme';
 import { SportTag } from '@/types';
 
@@ -11,6 +12,8 @@ interface SportFilterBarProps {
   onToggleSportTag: (tag: SportTag) => void;
 }
 
+type ChipKey = 'all' | SportTag;
+
 export function SportFilterBar({
   enabledSportTags,
   onSelectAll,
@@ -18,14 +21,22 @@ export function SportFilterBar({
 }: SportFilterBarProps) {
   const { colors } = useTheme();
   const allSelected = enabledSportTags.length === 0;
+  const selectedKey: ChipKey = allSelected ? 'all' : (enabledSportTags[0] ?? 'all');
+  const { scrollRef, setChipRef, onChipLayout, onScroll } = useCenteredChipScroll(selectedKey);
 
   return (
     <View style={[styles.container, { borderBottomColor: colors.border, backgroundColor: colors.background }]}>
       <ScrollView
+        ref={scrollRef}
         horizontal
         showsHorizontalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         contentContainerStyle={styles.scrollContent}>
         <Pressable
+          ref={(node) => setChipRef('all', node)}
+          collapsable={false}
+          onLayout={() => onChipLayout('all')}
           onPress={onSelectAll}
           accessibilityRole="button"
           accessibilityState={{ selected: allSelected }}
@@ -49,6 +60,9 @@ export function SportFilterBar({
           return (
             <Pressable
               key={tag}
+              ref={(node) => setChipRef(tag, node)}
+              collapsable={false}
+              onLayout={() => onChipLayout(tag)}
               onPress={() => onToggleSportTag(tag)}
               accessibilityRole="button"
               accessibilityState={{ selected }}
