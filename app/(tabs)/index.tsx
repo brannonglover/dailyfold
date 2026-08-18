@@ -50,6 +50,7 @@ function LatestScreenContent() {
     notice,
     usingDemoArticles,
     dismissPendingArticles,
+    pendingCount,
     pendingCountForFeed,
     prunePendingInFeed,
     refresh,
@@ -162,14 +163,14 @@ function LatestScreenContent() {
   );
 
   const handleRefresh = useCallback(async () => {
-    markUserRebuild();
+    // Pending stories are already fetched — prepend them without a full re-rank.
+    if (pendingCount === 0) markUserRebuild();
     await refresh();
-  }, [markUserRebuild, refresh]);
+  }, [markUserRebuild, pendingCount, refresh]);
 
   const handleApplyPending = useCallback(async () => {
-    markUserRebuild();
     await applyPending();
-  }, [markUserRebuild, applyPending]);
+  }, [applyPending]);
 
   const rankLatestDisplay = useCallback(
     (filteredArticles: Article[], sourceArticles: Article[]) => {
@@ -233,8 +234,9 @@ function LatestScreenContent() {
     }
   }, [isLoading, articles.length, setDisplayArticles, setDisplayReady, prevRawLengthRef]);
 
-  // Pull-to-refresh / apply-pending bump feedGeneration — paint the new list on this
-  // frame instead of waiting for the deferred startTransition rebuild.
+  // Pull-to-refresh (no pending queue) bumps feedGeneration — paint the new list on
+  // this frame instead of waiting for the deferred startTransition rebuild.
+  // Apply-pending does not bump generation; the growth layout effect prepends.
   useLayoutEffect(() => {
     if (!preferences || articles.length === 0) return;
     if (isFeedInteractionLocked()) return;
@@ -284,10 +286,9 @@ function LatestScreenContent() {
     if (isFeedInteractionLocked()) return;
 
     const filterChanged = filterKey !== prevFilterKeyRef.current;
-    if (!filterChanged) {
-      const filteredArticles = filterFeedArticles(articles);
-      if (isDisplayFeedMatchingFilter(displayArticles, filteredArticles)) return;
-    }
+    // Article-list growth (apply-pending, pagination) is owned by the layout
+    // effects. Re-ranking here is what made "More stories available" wait.
+    if (!filterChanged) return;
 
     const frame = requestAnimationFrame(() => {
       const filteredArticles = filterFeedArticles(articles);

@@ -700,27 +700,11 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       }
       return merged;
     });
-    setFeedGeneration((g) => g + 1);
+    // Don't bump feedGeneration — that full-ranks the catalog and refetches chip
+    // RSS. Pending rows are already in memory; the display layer prepends them.
     setPendingArticles([]);
     return true;
   }, [user, sourceIdsKey]);
-
-  const runWithRefreshIndicator = useCallback(async (action: () => boolean) => {
-    refreshInFlightRef.current += 1;
-    setIsRefreshing(true);
-    await new Promise<void>((resolve) => {
-      queueMicrotask(resolve);
-    });
-    try {
-      return action();
-    } finally {
-      refreshInFlightRef.current -= 1;
-      if (refreshInFlightRef.current <= 0) {
-        refreshInFlightRef.current = 0;
-        setIsRefreshing(false);
-      }
-    }
-  }, []);
 
   const applyPending = useCallback(async () => {
     if (!hasActionablePending(pendingArticlesRef.current, articlesRef.current)) {
@@ -729,16 +713,16 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       }
       return;
     }
-    await runWithRefreshIndicator(applyPendingArticles);
+    applyPendingArticles();
     // Refill the pending pipeline in the background for the next instant pull.
     void load('silent', true);
-  }, [applyPendingArticles, load, runWithRefreshIndicator]);
+  }, [applyPendingArticles, load]);
 
   const refresh = useCallback(async () => {
     // Flipboard-style: pull merges already-ready stories instantly. Never block the
     // gesture on a full RSS ingest — that work stays in the background.
     if (hasActionablePending(pendingArticlesRef.current, articlesRef.current)) {
-      await runWithRefreshIndicator(applyPendingArticles);
+      applyPendingArticles();
       void load('silent', true);
       return;
     }
@@ -749,7 +733,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     // Returns the current cache immediately (and may kick background ingest).
     // Follow-up silent polls queue newcomers for the next pull.
     await load('refresh', true);
-  }, [applyPendingArticles, load, runWithRefreshIndicator]);
+  }, [applyPendingArticles, load]);
 
   const loadMore = useCallback(async () => {
     if (!hasMore || loadMoreInFlightRef.current) {
