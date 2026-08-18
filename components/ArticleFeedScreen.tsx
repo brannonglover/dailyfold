@@ -66,64 +66,60 @@ export const ArticleFeedScreen = memo(
     },
     ref,
   ) {
-  const { colors } = useTheme();
+    const { colors } = useTheme();
+    const showSkeleton = !!isLoading && articles.length === 0;
 
-  if (isLoading && articles.length === 0) {
     return (
-      <View style={[styles.flex, { backgroundColor: colors.background }]}>
-        {!hideFeedHeader ? (
-          <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
-        ) : null}
-        {/* Keep the real chip bar mounted so a thin filter (Design) stays selected
-            while dedicated RSS loads. Fake skeleton chips look like a bounce back to All. */}
-        {headerExtra}
-        <ArticleFeedSkeleton showTopicChips={headerExtra == null} />
-      </View>
-    );
-  }
-
-  return (
-    <SourceMenuHost>
-      <View style={styles.flex}>
-        <ArticleFeed
-        ref={ref}
-        articles={articles}
-        title={title}
-        subtitle={subtitle}
-        titleTrailing={titleTrailing}
-        emptyMessage={emptyMessage}
-        error={error}
-        notice={notice}
-        refreshControl={
-          onRefresh ? (
-            <RefreshControl
-              refreshing={!!isRefreshing}
-              onRefresh={onRefresh}
-              tintColor={colors.text}
-              colors={[colors.text]}
-              progressBackgroundColor={colors.surface}
+      <SourceMenuHost>
+        <View style={[styles.flex, { backgroundColor: colors.background }]}>
+          {!hideFeedHeader ? (
+            <FeedHeader title={title} subtitle={subtitle} titleTrailing={titleTrailing} />
+          ) : null}
+          {/* Chip bars stay mounted across skeleton ↔ feed so a selected chip
+              keeps its scroll offset instead of sliding back to All. */}
+          {headerExtra}
+          {showSkeleton ? (
+            <ArticleFeedSkeleton showTopicChips={headerExtra == null} />
+          ) : (
+            <ArticleFeed
+              ref={ref}
+              articles={articles}
+              title={title}
+              subtitle={subtitle}
+              titleTrailing={titleTrailing}
+              emptyMessage={emptyMessage}
+              error={error}
+              notice={notice}
+              refreshControl={
+                onRefresh ? (
+                  <RefreshControl
+                    refreshing={!!isRefreshing}
+                    onRefresh={onRefresh}
+                    tintColor={colors.text}
+                    colors={[colors.text]}
+                    progressBackgroundColor={colors.surface}
+                  />
+                ) : undefined
+              }
+              pendingCount={pendingCount}
+              pendingRefreshHint={pendingRefreshHint}
+              onApplyPending={onApplyPending ?? onRefresh}
+              onDismissPending={onDismissPending}
+              onLoadMore={onLoadMore}
+              canLoadMore={canLoadMore}
+              isLoadingMore={isLoadingMore}
+              loadMoreCursor={loadMoreCursor}
+              loadMoreEpoch={loadMoreEpoch}
+              layout={layout}
+              matchReasonsByArticleId={matchReasonsByArticleId}
+              onFeedClick={onFeedClick}
+              isRefreshing={isRefreshing}
+              hideFeedHeader
             />
-          ) : undefined
-        }
-        headerExtra={headerExtra}
-        pendingCount={pendingCount}
-        pendingRefreshHint={pendingRefreshHint}
-        onApplyPending={onApplyPending ?? onRefresh}
-        onDismissPending={onDismissPending}
-        onLoadMore={onLoadMore}
-        canLoadMore={canLoadMore}
-        isLoadingMore={isLoadingMore}
-        loadMoreCursor={loadMoreCursor}
-        loadMoreEpoch={loadMoreEpoch}
-        layout={layout}
-        matchReasonsByArticleId={matchReasonsByArticleId}
-        onFeedClick={onFeedClick}
-        isRefreshing={isRefreshing}
-        hideFeedHeader={hideFeedHeader}
-      />
-      </View>
-    </SourceMenuHost>
-  );
+          )}
+        </View>
+      </SourceMenuHost>
+    );
   }),
 );
 

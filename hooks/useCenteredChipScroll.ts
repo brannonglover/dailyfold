@@ -55,6 +55,7 @@ export function useCenteredChipScroll<K extends string>(selectedKey: K) {
           scrollX,
           viewportWidth,
         );
+        if (Math.abs(nextX - contentOffsetRef.current) < 1) return;
         contentOffsetRef.current = nextX;
         scroll.scrollTo({ x: nextX, animated });
       });

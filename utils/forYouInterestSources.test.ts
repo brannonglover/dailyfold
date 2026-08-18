@@ -46,6 +46,12 @@ test('sourceIdsForForYouInterests includes MLS publisher for mls sport tag', () 
   const ids = sourceIdsForForYouInterests(basePrefs({ forYouSportTags: ['mls'] }));
   assert.ok(ids.includes('guardian-mls'));
   assert.ok(ids.includes('scarves-and-spikes'));
+  assert.ok(ids.includes('fox-sports-mls'));
+});
+
+test('sportTagSourceIds includes Fox Sports MLS and Pinkbike', () => {
+  assert.ok(sportTagSourceIds(['mls']).includes('fox-sports-mls'));
+  assert.ok(sportTagSourceIds(['mtb']).includes('pinkbike'));
 });
 
 test('topicSourceIds includes existing and Feedspot health publishers', () => {

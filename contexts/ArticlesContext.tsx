@@ -77,7 +77,11 @@ interface UseArticlesResult {
   loadMore: () => Promise<void>;
   dismissPendingArticles: () => void;
   /** Fetch and merge stories from interest-specific publishers (e.g. cycling magazines). */
-  boostArticlesForInterests: (sourceIds: string[], boostKey: string) => Promise<boolean>;
+  boostArticlesForInterests: (
+    sourceIds: string[],
+    boostKey: string,
+    options?: { forceRefresh?: boolean },
+  ) => Promise<boolean>;
   /** Merge fresher article fields (e.g. hero image after detail enrichment) into the visible feed. */
   patchArticle: (article: Article) => void;
 }
@@ -773,21 +777,33 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   }, [hasMore, load]);
 
   const boostArticlesForInterests = useCallback(
-    async (sourceIds: string[], boostKey: string): Promise<boolean> => {
+    async (
+      sourceIds: string[],
+      boostKey: string,
+      options?: { forceRefresh?: boolean },
+    ): Promise<boolean> => {
       if (sourceIds.length === 0) return false;
-      if (interestBoostKeyRef.current === boostKey) return true;
+      const filteredMatches = () =>
+        countFilteredFeedArticles(articlesRef.current, preferences, sources);
+      if (interestBoostKeyRef.current === boostKey && filteredMatches() > 0) return true;
       if (interestBoostInFlightRef.current) return false;
 
       interestBoostInFlightRef.current = true;
       try {
         const generation = fetchGenerationRef.current;
-        const { articles: data, meta } = await fetchArticles({
+        const { articles: data } = await fetchArticles({
           sourceIds,
           limit: 50,
+          forceRefresh: options?.forceRefresh === true,
         });
-        if (generation !== fetchGenerationRef.current || data.length === 0) return false;
+        if (generation !== fetchGenerationRef.current) return false;
+        if (data.length > 0) {
+          const next = appendUniqueArticles(articlesRef.current, data);
+          articlesRef.current = next;
+          setArticles(next);
+        }
+        if (filteredMatches() === 0) return false;
         interestBoostKeyRef.current = boostKey;
-        applyFetchResult('append', data, meta, generation);
         return true;
       } catch {
         // Non-fatal — For You / Latest still show whatever matches the main pool.
@@ -796,7 +812,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         interestBoostInFlightRef.current = false;
       }
     },
-    [applyFetchResult],
+    [preferences, sources],
   );
 
   const lastAutoTopUpLengthRef = useRef(-1);

@@ -312,6 +312,63 @@ test('inferSportTags inherits mls from dedicated feed defaults', () => {
   assert.ok(tags.includes('soccer'));
 });
 
+test('inferSportTags keeps mls when soccer was also stored on the article', () => {
+  const tags = inferSportTags('Weekend roundup', ['soccer', 'mls']);
+  assert.ok(tags.includes('mls'));
+  assert.ok(tags.includes('soccer'));
+});
+
+test('filterArticlesBySportTags keeps dedicated MLS and MTB publisher stories without stored tags', () => {
+  const articles: Article[] = [
+    {
+      id: 'mls',
+      title: 'Weekend roundup',
+      excerpt: 'What to watch this Saturday',
+      body: '',
+      source: 'The Guardian MLS',
+      imageUrl: 'https://example.com/mls.jpg',
+      topics: ['sports'],
+      readTimeMinutes: 3,
+      publishedAt: '2026-08-17T12:00:00Z',
+      url: 'https://example.com/mls',
+    },
+    {
+      id: 'mtb',
+      title: 'Weekly gear roundup',
+      excerpt: 'New helmets and trail shoes',
+      body: '',
+      source: 'Pinkbike',
+      imageUrl: 'https://example.com/mtb.jpg',
+      topics: ['sports'],
+      readTimeMinutes: 4,
+      publishedAt: '2026-08-17T11:00:00Z',
+      url: 'https://example.com/mtb',
+    },
+    {
+      id: 'epl',
+      title: 'Weekend roundup',
+      excerpt: 'What to watch this Saturday',
+      body: '',
+      source: 'BBC Sport',
+      imageUrl: 'https://example.com/epl.jpg',
+      topics: ['sports'],
+      sportTags: ['soccer', 'premier-league'],
+      readTimeMinutes: 3,
+      publishedAt: '2026-08-17T10:00:00Z',
+      url: 'https://example.com/epl',
+    },
+  ];
+
+  assert.deepEqual(
+    filterArticlesBySportTags(articles, ['mls'], ['sports']).map((article) => article.id),
+    ['mls'],
+  );
+  assert.deepEqual(
+    filterArticlesBySportTags(articles, ['mtb'], ['sports']).map((article) => article.id),
+    ['mtb'],
+  );
+});
+
 test('notInterestedSportLabel uses USA-friendly soccer naming', () => {
   assert.equal(notInterestedSportLabel('soccer', 'Premier League transfer news'), 'Soccer');
   assert.equal(notInterestedSportLabel('mls', 'MLS expansion teams announced'), 'MLS');

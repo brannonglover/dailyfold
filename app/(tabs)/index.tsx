@@ -207,13 +207,20 @@ function LatestScreenContent() {
         return sliced ?? filteredArticles;
       });
       setDisplayReady(true);
+      const needsBoost =
+        (isSportsTopicActive(preferences.enabledTopics) &&
+          !isAllSportTagsEnabled(preferences.enabledSportTags)) ||
+        !isAllTopicsEnabled(preferences.enabledTopics);
+      // Stories already in the loaded catalog should paint immediately. Only
+      // wait on a source fetch when this chip has nothing to show yet.
+      setChipBoostPending(needsBoost && filteredArticles.length === 0);
+    } else {
+      const { enabledTopics, enabledSportTags } = preferences;
+      const awaitingBoost =
+        (isSportsTopicActive(enabledTopics) && !isAllSportTagsEnabled(enabledSportTags)) ||
+        !isAllTopicsEnabled(enabledTopics);
+      setChipBoostPending(awaitingBoost);
     }
-
-    const { enabledTopics, enabledSportTags } = preferences;
-    const awaitingBoost =
-      (isSportsTopicActive(enabledTopics) && !isAllSportTagsEnabled(enabledSportTags)) ||
-      !isAllTopicsEnabled(enabledTopics);
-    setChipBoostPending(awaitingBoost);
   }, [
     articles,
     chipSelectionKey,
@@ -506,27 +513,30 @@ function LatestScreenContent() {
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     chipBoostKeyRef.current = `pending:${boostKey}`;
 
-    setChipBoostPending(true);
+    const inMemoryMatches = filterFeedArticles(articles).length;
+    if (inMemoryMatches === 0) setChipBoostPending(true);
     const run = (allowRetry: boolean) => {
-      void boostArticlesForInterests(sourceIds, boostKey).then((didMerge) => {
-        if (cancelled) return;
-        if (didMerge) {
-          chipBoostKeyRef.current = boostKey;
-          setChipBoostPending(false);
-          return;
-        }
-        // Empty/error must not lock the chip — ingest may still be writing rows.
-        chipBoostKeyRef.current = '';
-        if (!allowRetry) {
-          setChipBoostPending(false);
-          return;
-        }
-        retryTimer = setTimeout(() => {
-          if (cancelled || chipBoostKeyRef.current === boostKey) return;
-          chipBoostKeyRef.current = `pending:${boostKey}`;
-          run(false);
-        }, 4_000);
-      });
+      void boostArticlesForInterests(sourceIds, boostKey, { forceRefresh: !allowRetry }).then(
+        (didMerge) => {
+          if (cancelled) return;
+          if (didMerge) {
+            chipBoostKeyRef.current = boostKey;
+            setChipBoostPending(false);
+            return;
+          }
+          // Empty/error must not lock the chip — ingest may still be writing rows.
+          chipBoostKeyRef.current = '';
+          if (!allowRetry) {
+            setChipBoostPending(false);
+            return;
+          }
+          retryTimer = setTimeout(() => {
+            if (cancelled || chipBoostKeyRef.current === boostKey) return;
+            chipBoostKeyRef.current = `pending:${boostKey}`;
+            run(false);
+          }, 4_000);
+        },
+      );
     };
     run(true);
 

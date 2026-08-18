@@ -217,9 +217,14 @@ export function inferSportTags(text: string, baseTags: SportTag[] = []): SportTa
       if (inheritsMtbFromSource(text, baseTags)) inferred.add(tag);
       continue;
     }
-    // College/NFL tags are specific, not broad outdoor defaults. Keep them even when a
+    // College/NFL/MLS tags are specific, not broad outdoor defaults. Keep them even when a
     // prior pass stored soccer alongside (baseTags.length > 1), which used to skip inherit.
-    if (tag === 'college-football' || tag === 'college-basketball' || tag === 'football') {
+    if (
+      tag === 'college-football' ||
+      tag === 'college-basketball' ||
+      tag === 'football' ||
+      tag === 'mls'
+    ) {
       inferred.add(tag);
       continue;
     }

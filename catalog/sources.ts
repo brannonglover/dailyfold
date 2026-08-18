@@ -1157,6 +1157,16 @@ export const SOURCE_CATALOG: SourceCatalogEntry[] = [
     logoDomain: 'theguardian.com',
   },
   {
+    id: 'fox-sports-mls',
+    url: 'https://api.foxsports.com/v2/content/optimized-rss?partnerKey=MB0Wehpmuj2lUhuRhQaafhBjAJqaPU244mlTDK1i&size=30&tags=soccer%2Fmls%2Fleague%2F5',
+    name: 'Fox Sports MLS',
+    description: 'Fox Sports Major League Soccer news and analysis',
+    primaryTopic: 'sports',
+    topics: ['sports'],
+    sportTags: ['mls'],
+    logoDomain: 'foxsports.com',
+  },
+  {
     id: 'guardian-mls',
     url: 'https://www.theguardian.com/football/mls/rss',
     name: 'The Guardian MLS',
@@ -2136,3 +2146,14 @@ export const SOURCE_CATALOG: SourceCatalogEntry[] = [
     topics: ['design', 'culture', 'art'],
   },
 ];
+
+const SPORT_TAGS_BY_SOURCE_NAME: ReadonlyMap<string, SportTag[]> = new Map(
+  SOURCE_CATALOG.flatMap((entry) =>
+    entry.sportTags && entry.sportTags.length > 0 ? [[entry.name, entry.sportTags] as const] : [],
+  ),
+);
+
+/** Catalog sport/league tags for a publisher name as stored on articles. */
+export function sportTagsForSourceName(name: string): SportTag[] {
+  return SPORT_TAGS_BY_SOURCE_NAME.get(name) ?? [];
+}
