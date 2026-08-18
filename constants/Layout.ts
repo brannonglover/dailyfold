@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 /** Matches tabBarStyle.height in app/(tabs)/_layout.tsx */
 export const TAB_BAR_HEIGHT = 88;
 
@@ -6,6 +8,24 @@ export const TAB_BAR_PADDING_BOTTOM = 28;
 
 /** Matches tabBarStyle.paddingTop in app/(tabs)/_layout.tsx */
 export const TAB_BAR_PADDING_TOP = 8;
+
+/**
+ * Extra bottom inset when the iOS 26 liquid-glass tab bar overlays scene content
+ * instead of taking layout space. Zero on Android and on iOS 18 and earlier.
+ */
+export function tabBarOverlayInset(
+  platform: typeof Platform.OS = Platform.OS,
+  version: string | number = Platform.Version,
+): number {
+  if (platform !== 'ios') return 0;
+  const major = typeof version === 'string' ? parseInt(version, 10) : version;
+  return Number.isFinite(major) && major >= 26 ? TAB_BAR_HEIGHT : 0;
+}
+
+/** Padding below the last item on a tab screen (safe area, or overlay tab bar). */
+export function tabSceneBottomPadding(safeAreaBottom: number, extra = 0): number {
+  return (tabBarOverlayInset() || safeAreaBottom) + extra;
+}
 
 /** Peek of the next card visible below the active snap page (logical px). */
 export const FEED_SCROLL_PEEK_PX = 20;

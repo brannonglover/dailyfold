@@ -3,6 +3,7 @@ import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
 import { FeedHeader } from '@/components/FeedHeader';
 import { LikedArticleRow } from '@/components/LikedArticleRow';
+import { tabBarOverlayInset } from '@/constants/Layout';
 import { useTheme } from '@/hooks/useTheme';
 import { Article } from '@/types';
 
@@ -55,7 +56,11 @@ export function LikedArticleList({
             </Text>
           </View>
         }
-        contentContainerStyle={articles.length === 0 ? styles.emptyList : undefined}
+        contentContainerStyle={
+          articles.length === 0
+            ? styles.emptyList
+            : { paddingBottom: 16 + tabBarOverlayInset() }
+        }
         refreshControl={
           onRefresh ? (
             <RefreshControl

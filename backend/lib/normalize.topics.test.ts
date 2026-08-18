@@ -37,3 +37,27 @@ run('health-primary feed keeps health when headline only matches science', () =>
   assert.ok(normalized!.article.topics.includes('health'));
   assert.ok(normalized!.article.topics.includes('science'));
 });
+
+const bookFeed: FeedConfig = {
+  id: 'bookriot',
+  url: 'https://bookriot.com/feed',
+  source: 'Book Riot',
+  description: 'Book news, recommendations, and reading culture',
+  topics: ['books', 'culture'],
+  primaryTopic: 'books',
+  logoUrl: 'https://example.com/bookriot.png',
+};
+
+run('books-primary feed keeps books on a review headline', () => {
+  const normalized = normalizeFeedItem(
+    {
+      title: 'The best new novels of the week',
+      link: 'https://bookriot.com/2026/08/18/best-new-novels',
+      isoDate: '2026-08-18T12:00:00Z',
+      contentSnippet: 'A roundup of literary fiction and memoirs worth reading.',
+    },
+    bookFeed,
+  );
+  assert.ok(normalized);
+  assert.ok(normalized!.article.topics.includes('books'));
+});

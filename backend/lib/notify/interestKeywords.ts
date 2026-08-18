@@ -76,6 +76,7 @@ export const PRIMARY_INTEREST_KEYWORDS = new Set([
   'documentary',
   'film',
   'gaming',
+  'books',
   'miniseries',
   'movie',
   'podcast',
@@ -165,6 +166,7 @@ const CULTURE_MEDIA_HINTS = new Set([
 ]);
 
 const GAMING_HINTS = new Set(['game', 'gaming', 'playstation', 'switch', 'xbox']);
+const BOOK_HINTS = new Set(['book', 'books', 'novel', 'author', 'memoir', 'poetry', 'literary']);
 
 /** Headline vocabulary too generic to qualify as a single-like interest match on its own. */
 export const GENERIC_INTEREST_KEYWORDS = new Set([
@@ -353,6 +355,13 @@ function inferTopicKeywords(topics: Topic[] | undefined, text: string, found: Se
     const hasGamingSignal = [...GAMING_HINTS].some((hint) => lower.includes(hint));
     if (hasGamingSignal && !found.has('gaming')) {
       inferred.push('gaming');
+    }
+  }
+
+  if (topicList.includes('books')) {
+    const hasBookSignal = [...BOOK_HINTS].some((hint) => lower.includes(hint));
+    if (hasBookSignal && !found.has('books')) {
+      inferred.push('books');
     }
   }
 

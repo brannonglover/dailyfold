@@ -21,6 +21,7 @@ import { TourGcStandings } from '@/components/TourGcStandings';
 import { TourJerseyChips } from '@/components/TourJerseyChips';
 import { TourPillBar } from '@/components/TourPillBar';
 import { TourStageTimeline } from '@/components/TourStageTimeline';
+import { tabSceneBottomPadding } from '@/constants/Layout';
 import { TOUR_JERSEY_COLORS } from '@/constants/tourDeFrance';
 import { TourJerseyHolder, TourStage } from '@/data/tourDeFrance2026';
 import { useTheme } from '@/hooks/useTheme';
@@ -334,7 +335,7 @@ export default function TourDeFranceScreen() {
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={{
-          paddingBottom: insets.bottom + 24,
+          paddingBottom: tabSceneBottomPadding(insets.bottom, 24),
         }}
         refreshControl={
           <RefreshControl

@@ -20,6 +20,7 @@ const TOPICS: Topic[] = [
   'art',
   'gardening',
   'gaming',
+  'books',
 ];
 
 /** Client renders an in-app placeholder when empty. */
@@ -316,6 +317,10 @@ function inferExtraTopics(text: string, base: Topic[], feedPrimaryTopic?: Topic)
       /\b(video game|video games|gaming|playstation|xbox|nintendo|steam deck|steam|esports|e-sports|multiplayer|single-player|dlc|gameplay|open world|indie game|game developer|game studio|fps|rpg|mmorpg|battle royale|speedrun|game release|game trailer|patch notes|game update)\b/,
       'gaming',
     ],
+    [
+      /\b(book|books|novel|novels|author|authors|memoir|poetry|literary|literature|bestseller|book review|bookstore|bookshop)\b/,
+      'books',
+    ],
     [/\b(art|artist|gallery|museum|painting|sculpture|exhibition|curator)\b/, 'art'],
     [/\b(ai|artificial intelligence|machine learning|software|tech)\b/, 'technology'],
     [/\b(health|medical|medicine|wellness|diet)\b/, 'health'],
@@ -326,7 +331,7 @@ function inferExtraTopics(text: string, base: Topic[], feedPrimaryTopic?: Topic)
       /\b(election|elections|government|policy|politic|politics|political|senate|congress|candidate|candidates|ballot|vote|voting|campaign|republican|democrat|democratic|gop|incumbent|legislat|parliament|minister|president|governor|white house|capitol)\b/,
       'politics',
     ],
-    [/\b(culture|film|music|society|theater|theatre|literature|books)\b/, 'culture'],
+    [/\b(culture|film|music|society|theater|theatre)\b/, 'culture'],
     [/\b(world|global|international|war|climate)\b/, 'world'],
   ];
 

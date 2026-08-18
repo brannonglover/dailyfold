@@ -72,6 +72,18 @@ test('topicSourceIds includes the design-primary Dezeen feed', () => {
   assert.ok(!ids.includes('bbc-news'));
 });
 
+test('topicSourceIds includes book publishers for the Books chip', () => {
+  const ids = topicSourceIds(['books']);
+  assert.ok(ids.includes('bookriot'));
+  assert.ok(ids.includes('bookbrowse'));
+  assert.ok(ids.includes('reddit-books'));
+  assert.ok(ids.includes('reddit-booksuggestions'));
+  assert.ok(ids.includes('nyt-books'));
+  assert.ok(ids.includes('nyt-book-review'));
+  assert.ok(!ids.includes('bbc-news'));
+  assert.ok(!ids.includes('new-yorker'));
+});
+
 test('sportTagSourceIds includes NCAA football feeds for college-football', () => {
   const ids = sportTagSourceIds(['college-football']);
   assert.ok(ids.includes('espn-college-football'));

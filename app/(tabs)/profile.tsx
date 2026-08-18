@@ -9,6 +9,7 @@ import { ProfileNavRow } from '@/components/ProfileNavRow';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useTheme } from '@/hooks/useTheme';
+import { tabSceneBottomPadding } from '@/constants/Layout';
 import { CURIOSITY_ORDER } from '@/constants/curiosities';
 import { SPORT_TAG_LABELS } from '@/catalog/sports';
 import { formatInterestLabel } from '@/utils/interestKeywords';
@@ -79,7 +80,7 @@ export default memo(function ProfileScreen() {
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={{
         paddingTop: insets.top + 16,
-        paddingBottom: insets.bottom + 32,
+        paddingBottom: tabSceneBottomPadding(insets.bottom, 32),
         paddingHorizontal: 24,
       }}>
       <Text style={[styles.title, { color: colors.text }]}>Profile</Text>

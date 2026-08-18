@@ -26,7 +26,7 @@ import {
   WorldCupTeamScore,
 } from '@/components/WorldCupMatchScore';
 import { WorldCupTab, WorldCupTabBar } from '@/components/WorldCupTabBar';
-import { WORLD_CUP_GROUP_CARD_MIN_HEIGHT } from '@/constants/Layout';
+import { tabSceneBottomPadding, WORLD_CUP_GROUP_CARD_MIN_HEIGHT } from '@/constants/Layout';
 import {
   WORLD_CUP_KNOCKOUT_COLUMN_WIDTH,
   WORLD_CUP_LIVE_POLL_INTERVAL_MS,
@@ -759,7 +759,7 @@ export default function WorldCupScreen() {
         }}
         scrollEventThrottle={16}
         contentContainerStyle={{
-          paddingBottom: insets.bottom + 24,
+          paddingBottom: tabSceneBottomPadding(insets.bottom, 24),
           paddingHorizontal: 24,
         }}
         refreshControl={

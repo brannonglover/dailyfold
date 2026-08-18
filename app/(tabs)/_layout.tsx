@@ -1,14 +1,80 @@
 import { Ionicons } from '@expo/vector-icons';
+import { NativeTabs, Icon, Label } from 'expo-router/unstable-native-tabs';
 import { Tabs } from 'expo-router';
-import { View } from 'react-native';
+import { Platform, View } from 'react-native';
 
 import Colors from '@/constants/Colors';
 import { TAB_BAR_HEIGHT, TAB_BAR_PADDING_BOTTOM, TAB_BAR_PADDING_TOP } from '@/constants/Layout';
 import { TOUR_DE_FRANCE_TAB_ENABLED } from '@/constants/tourDeFrance';
 import { WORLD_CUP_TAB_ENABLED } from '@/constants/worldCup';
-export default function TabLayout() {
-  const colors = Colors.dark;
 
+const colors = Colors.dark;
+
+export default function TabLayout() {
+  if (Platform.OS === 'ios') {
+    return <IosNativeTabs />;
+  }
+
+  return <JsTabs />;
+}
+
+/**
+ * System UITabBarController — Liquid Glass on iOS 26+ (Xcode 26), classic
+ * translucent material on earlier iOS. JS tabs stay on Android/web.
+ */
+function IosNativeTabs() {
+  return (
+    <NativeTabs
+      minimizeBehavior="never"
+      disableTransparentOnScrollEdge
+      backgroundColor={null}
+      blurEffect="systemChromeMaterialDark"
+      tintColor={colors.tabIconSelected}
+      iconColor={{
+        default: colors.tabIconDefault,
+        selected: colors.tabIconSelected,
+      }}
+      labelStyle={{
+        default: {
+          fontFamily: 'InterMedium',
+          fontSize: 11,
+          color: colors.tabIconDefault,
+        },
+        selected: {
+          fontFamily: 'InterMedium',
+          fontSize: 11,
+          color: colors.tabIconSelected,
+        },
+      }}>
+      <NativeTabs.Trigger name="index">
+        <Label>Latest</Label>
+        <Icon sf={{ default: 'newspaper', selected: 'newspaper.fill' }} />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="tour-de-france" hidden={!TOUR_DE_FRANCE_TAB_ENABLED}>
+        <Label>Tour</Label>
+        <Icon sf={{ default: 'bicycle', selected: 'bicycle' }} />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="world-cup" hidden={!WORLD_CUP_TAB_ENABLED}>
+        <Label>World Cup</Label>
+        <Icon sf={{ default: 'trophy', selected: 'trophy.fill' }} />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="for-you">
+        <Label>For You</Label>
+        <Icon sf={{ default: 'sparkles', selected: 'sparkles' }} />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="saved">
+        <Label>Liked</Label>
+        <Icon sf={{ default: 'heart', selected: 'heart.fill' }} />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="profile">
+        <Label>Profile</Label>
+        <Icon sf={{ default: 'person.circle', selected: 'person.circle.fill' }} />
+      </NativeTabs.Trigger>
+    </NativeTabs>
+  );
+}
+
+function JsTabs() {
   return (
     <Tabs
       screenOptions={{

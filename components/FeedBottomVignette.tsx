@@ -5,6 +5,7 @@ import {
   FEED_SCROLL_PEEK_PX,
   FEED_SCROLL_PERSISTENT_GRADIENT_HEIGHT,
   FEED_SCROLL_PERSISTENT_GRADIENT_OPACITY,
+  tabBarOverlayInset,
 } from '@/constants/Layout';
 import { useTheme } from '@/hooks/useTheme';
 
@@ -19,6 +20,7 @@ function withAlpha(hex: string, alpha: number) {
 /** Softens the next-card peek so it reads as a hint, not a bright strip. */
 export function FeedBottomVignette() {
   const { colors } = useTheme();
+  const overlayInset = tabBarOverlayInset();
 
   const gradientColors = [
     withAlpha(colors.background, 0),
@@ -29,7 +31,11 @@ export function FeedBottomVignette() {
 
   return (
     <View
-      style={[styles.overlay, Platform.OS === 'android' && styles.overlayAndroid]}
+      style={[
+        styles.overlay,
+        overlayInset > 0 && { bottom: overlayInset },
+        Platform.OS === 'android' && styles.overlayAndroid,
+      ]}
       pointerEvents="none"
       collapsable={false}>
       <LinearGradient

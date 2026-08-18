@@ -19,6 +19,7 @@ const DEFAULT_TOPIC_SCORES: Record<Topic, number> = {
   art: 0,
   gardening: 0,
   gaming: 0,
+  books: 0,
 };
 
 export async function getPreferences(userId: string): Promise<UserPreferences> {

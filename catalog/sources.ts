@@ -20,7 +20,8 @@ export type Topic =
   | 'sports'
   | 'art'
   | 'gardening'
-  | 'gaming';
+  | 'gaming'
+  | 'books';
 
 export interface SourceCatalogEntry {
   id: string;
@@ -2134,6 +2135,62 @@ export const SOURCE_CATALOG: SourceCatalogEntry[] = [
     description: 'Agricultural and plant research from the USDA',
     primaryTopic: 'gardening',
     topics: ['gardening', 'science'],
+  },
+
+  // —— Books ——
+  {
+    id: 'bookriot',
+    url: 'https://bookriot.com/feed',
+    name: 'Book Riot',
+    description: 'Book news, recommendations, and reading culture',
+    primaryTopic: 'books',
+    topics: ['books', 'culture'],
+  },
+  {
+    id: 'reddit-booksuggestions',
+    url: 'https://www.reddit.com/r/booksuggestions/.rss',
+    name: 'Reddit r/booksuggestions',
+    description: 'Reader recommendations and what to read next',
+    primaryTopic: 'books',
+    topics: ['books', 'culture'],
+    logoDomain: 'reddit.com',
+  },
+  {
+    id: 'bookbrowse',
+    url: 'https://www.bookbrowse.com/rss/book_news.rss',
+    name: 'BookBrowse',
+    description: 'Book news, reviews, and author features',
+    primaryTopic: 'books',
+    topics: ['books', 'culture'],
+  },
+  {
+    id: 'reddit-books',
+    url: 'https://www.reddit.com/r/books/.rss',
+    name: 'Reddit r/books',
+    description: 'Book discussion, reviews, and literary news',
+    primaryTopic: 'books',
+    topics: ['books', 'culture'],
+    logoDomain: 'reddit.com',
+  },
+  {
+    id: 'nyt-books',
+    subscriptionPublisher: true,
+    url: 'https://rss.nytimes.com/services/xml/rss/nyt/Books.xml',
+    name: 'NYT Books',
+    description: 'Book news and reviews from The New York Times',
+    primaryTopic: 'books',
+    topics: ['books', 'culture'],
+    logoDomain: 'nytimes.com',
+  },
+  {
+    id: 'nyt-book-review',
+    subscriptionPublisher: true,
+    url: 'https://rss.nytimes.com/services/xml/rss/nyt/SundayBookReview.xml',
+    name: 'NYT Book Review',
+    description: 'Reviews and essays from The New York Times Book Review',
+    primaryTopic: 'books',
+    topics: ['books', 'culture'],
+    logoDomain: 'nytimes.com',
   },
 
   // —— Design ——

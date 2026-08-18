@@ -48,6 +48,8 @@ import { FeedPendingBanner } from '@/components/FeedPendingBanner';
 import {
   FEED_SCROLL_PEEK_PX,
   FEED_SEPARATOR_WIDTH,
+  FOLD_GRID_GAP,
+  tabBarOverlayInset,
 } from '@/constants/Layout';
 import { useTheme } from '@/hooks/useTheme';
 import { registerFeedArticles } from '@/services/articleSession';
@@ -62,7 +64,6 @@ import {
 import { readLastFeedListHeight, rememberFeedListHeight } from '@/utils/feedListViewport';
 import { buildLoadMoreTriggerKey } from '@/utils/paginationRevision';
 import { computeFoldLayout } from '@/utils/foldFeedLayout';
-import { FOLD_GRID_GAP } from '@/constants/Layout';
 
 const AnimatedFlatList = Animated.createAnimatedComponent(FlatList<Article>);
 
@@ -185,7 +186,7 @@ function normalizeHeight(height: number) {
 }
 
 function getSnapMetrics(pageHeight: number) {
-  const peekPx = FEED_SCROLL_PEEK_PX;
+  const peekPx = FEED_SCROLL_PEEK_PX + tabBarOverlayInset();
   const snapHeight = normalizeHeight(pageHeight - peekPx);
   return { peekPx, snapHeight };
 }
@@ -271,6 +272,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
   ref,
 ) {
   const { colors } = useTheme();
+  const overlayInset = tabBarOverlayInset();
   const [pageHeight, setPageHeight] = useState(() => readLastFeedListHeight());
   const [activeIndex, setActiveIndex] = useState(0);
   const [freeScroll, setFreeScroll] = useState(false);
@@ -813,7 +815,10 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
               renderItem={renderItem}
               itemLayoutAnimation={FEED_ITEM_LAYOUT_TRANSITION}
               style={[styles.list, { height: pageHeight }]}
-              contentContainerStyle={styles.storyListContent}
+              contentContainerStyle={[
+                styles.storyListContent,
+                overlayInset > 0 && { paddingBottom: 24 + overlayInset },
+              ]}
               showsVerticalScrollIndicator={false}
               refreshControl={refreshControl}
               scrollEventThrottle={16}

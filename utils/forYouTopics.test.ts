@@ -51,6 +51,7 @@ const bikePool: Article[] = [
 test('searchTopics matches labels and ids case-insensitively', () => {
   assert.deepEqual(searchTopics('tech'), ['technology']);
   assert.deepEqual(searchTopics('video games'), ['gaming']);
+  assert.deepEqual(searchTopics('books'), ['books']);
   assert.deepEqual(searchTopics(''), []);
 });
 
