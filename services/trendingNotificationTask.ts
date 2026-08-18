@@ -12,6 +12,8 @@ import {
 import { fetchSources } from '@/services/sources';
 import { getPreferences } from '@/services/storage';
 import { processHotTrendingNotifications } from '@/services/trendingNotifications';
+import { isIngestPendingMeta } from '@/utils/ingestPoll';
+import { remainingPostIngestNotificationDelayMs } from '@/utils/postIngestNotificationDelay';
 
 export const TRENDING_NOTIFICATION_TASK = 'dailyfold-trending-notifications';
 
@@ -28,7 +30,19 @@ export async function runTrendingNotificationCheck(): Promise<void> {
   if (!preferences.trendingNotificationsEnabled) return;
   if (!(await getNotificationPermissionGranted())) return;
 
-  const [sources, { articles }] = await Promise.all([fetchSources(), fetchArticles()]);
+  const [sources, { articles, meta }] = await Promise.all([fetchSources(), fetchArticles()]);
+  if (isIngestPendingMeta(meta)) return;
+
+  const lastIngestAtMs = meta?.lastIngestAt ? Date.parse(meta.lastIngestAt) : Number.NaN;
+  if (
+    remainingPostIngestNotificationDelayMs(
+      Number.isFinite(lastIngestAtMs) ? lastIngestAtMs : null,
+      Date.now(),
+    ) > 0
+  ) {
+    return;
+  }
+
   const filtered = applyTrendingNotificationFilters(articles, preferences, sources);
   await processHotTrendingNotifications(user.id, filtered, true, preferences);
 }

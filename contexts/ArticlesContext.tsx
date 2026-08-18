@@ -20,7 +20,7 @@ import { applyFeedFilters, applyTrendingNotificationFilters } from '@/services/f
 import { getEnabledSourceIds, isAllSourcesEnabled } from '@/services/sourcePreferences';
 import { isAllSportTagsEnabled, isSportsTopicActive } from '@/services/sportPreferences';
 import { isAllTopicsEnabled } from '@/services/topicPreferences';
-import { processHotTrendingNotifications } from '@/services/trendingNotifications';
+import { processHotTrendingNotifications, scheduleHotTrendingNotificationsAfterImport } from '@/services/trendingNotifications';
 import { Article } from '@/types';
 import { setArticleFeedPatcher } from '@/services/articleFeedPatch';
 import { ingestNoticeForFetch } from '@/utils/ingestNotice';
@@ -30,6 +30,7 @@ import {
   nextIngestPollDelayMs,
   RESUME_REFRESH_AFTER_MS,
 } from '@/utils/ingestPoll';
+import { remainingPostIngestNotificationDelayMs } from '@/utils/postIngestNotificationDelay';
 import { shouldShowArticleFeedLoading } from '@/utils/feedLoadingState';
 import { sportTagSourceIds, topicSourceIds } from '@/utils/forYouInterestSources';
 import {
@@ -357,9 +358,29 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         setAwaitingBackgroundFeed(false);
       }
 
-      if (user && preferences?.trendingNotificationsEnabled && mode !== 'append' && data.length > 0) {
+      if (
+        user &&
+        preferences?.trendingNotificationsEnabled &&
+        mode !== 'append' &&
+        data.length > 0 &&
+        !isIngestPending(meta)
+      ) {
         const forTrending = applyTrendingNotificationFilters(data, preferences, sources);
-        void processHotTrendingNotifications(user.id, forTrending, true, preferences);
+        const lastIngestAtMs = meta?.lastIngestAt ? Date.parse(meta.lastIngestAt) : Number.NaN;
+        const waitMs = remainingPostIngestNotificationDelayMs(
+          Number.isFinite(lastIngestAtMs) ? lastIngestAtMs : null,
+          Date.now(),
+        );
+        if (waitMs > 0) {
+          void scheduleHotTrendingNotificationsAfterImport(
+            user.id,
+            forTrending,
+            preferences,
+            waitMs,
+          );
+        } else {
+          void processHotTrendingNotifications(user.id, forTrending, true, preferences);
+        }
       }
 
       if (user && mode !== 'append' && data.length > 0) {

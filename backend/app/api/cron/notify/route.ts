@@ -5,6 +5,7 @@ import { jsonResponse } from '@/lib/cors';
 import {
   deletePushReceipts,
   deletePushSubscription,
+  getLastIngestAt,
   insertPushReceiptTickets,
   listActivePushSubscriptions,
   listArticlesSince,
@@ -18,6 +19,7 @@ import { articlePath } from '@/lib/notify/notificationArticleLink';
 import { buildSourcePrimaryTopicMap, filterArticlesBySources } from '@/lib/notify/sourcePreferences';
 import { filterArticlesBySportTags } from '@/lib/notify/sportPreferences';
 import { filterArticlesByTopics, isAllTopicsEnabled } from '@/lib/notify/topicPreferences';
+import { shouldDeferNotificationsAfterIngest } from '@/lib/notify/postIngestNotificationDelay';
 import {
   findHotTrendingCandidates,
   HotTrendingCandidate,
@@ -141,6 +143,20 @@ async function handleNotifyCron(): Promise<Response> {
     staleTokensRemoved += await cleanupReceipts(expo);
   } catch {
     // Never let receipt cleanup block sending new notifications.
+  }
+
+  const lastIngestAt = await getLastIngestAt();
+  if (shouldDeferNotificationsAfterIngest(lastIngestAt?.getTime(), Date.now())) {
+    return jsonResponse(
+      {
+        deferredUntilIngestSettles: true,
+        candidatesConsidered: 0,
+        subscribersConsidered: 0,
+        notificationsSent: 0,
+        staleTokensRemoved,
+      },
+      null,
+    );
   }
 
   const sinceIso = new Date(Date.now() - TRENDING_WINDOW_MS).toISOString();
