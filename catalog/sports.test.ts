@@ -318,6 +318,15 @@ test('inferSportTags keeps mls when soccer was also stored on the article', () =
   assert.ok(tags.includes('soccer'));
 });
 
+test('inferSportTags drops inherited mls when the headline is Premier League', () => {
+  const tags = inferSportTags(
+    'Premier League transfer news from Arsenal',
+    ['soccer', 'mls'],
+  );
+  assert.ok(!tags.includes('mls'));
+  assert.ok(tags.includes('premier-league'));
+});
+
 test('filterArticlesBySportTags keeps dedicated MLS and MTB publisher stories without stored tags', () => {
   const articles: Article[] = [
     {
@@ -437,4 +446,76 @@ test('expandSoccerFilterTags maps Football onto the soccer league chips', () => 
   assert.ok(expandSoccerFilterTags(['soccer', 'baseball']).includes('mls'));
   assert.ok(!expandSoccerFilterTags(['soccer', 'baseball']).includes('soccer'));
   assert.deepEqual(expandSoccerFilterTags(['mls']), ['mls']);
+});
+
+test('filterArticlesBySportTags drops Premier League even when mls was stored on the row', () => {
+  const articles: Article[] = [
+    {
+      id: 'epl',
+      title: 'Premier League transfer news from Arsenal',
+      excerpt: 'Arsenal sign a striker before the window closes',
+      body: '',
+      source: 'ESPN Soccer',
+      imageUrl: 'https://example.com/epl.jpg',
+      topics: ['sports'],
+      sportTags: ['soccer', 'mls', 'premier-league'],
+      readTimeMinutes: 3,
+      publishedAt: '2026-08-18T11:00:00Z',
+      url: 'https://example.com/epl',
+    },
+    {
+      id: 'miami',
+      title: 'Inter Miami sign Casemiro as MLS announces investigation',
+      excerpt: 'The Brazilian midfielder joins Messi in Florida',
+      body: '',
+      source: 'ESPN Soccer',
+      imageUrl: 'https://example.com/miami.jpg',
+      topics: ['sports'],
+      sportTags: ['soccer', 'mls'],
+      readTimeMinutes: 3,
+      publishedAt: '2026-08-18T12:00:00Z',
+      url: 'https://example.com/miami',
+    },
+  ];
+
+  assert.deepEqual(
+    filterArticlesBySportTags(articles, ['mls'], ['sports']).map((article) => article.id),
+    ['miami'],
+  );
+});
+
+test('filterArticlesBySportTags keeps MLS keyword stories from mixed soccer publishers', () => {
+  const articles: Article[] = [
+    {
+      id: 'miami',
+      title: 'Inter Miami sign Casemiro as MLS announces investigation',
+      excerpt: 'The Brazilian midfielder joins Messi in Florida',
+      body: '',
+      source: 'ESPN Soccer',
+      imageUrl: 'https://example.com/miami.jpg',
+      topics: ['sports'],
+      sportTags: ['soccer'],
+      readTimeMinutes: 3,
+      publishedAt: '2026-08-18T12:00:00Z',
+      url: 'https://example.com/miami',
+    },
+    {
+      id: 'epl',
+      title: 'Premier League transfer news from Arsenal',
+      excerpt: 'Arsenal sign a striker before the window closes',
+      body: '',
+      source: 'BBC Sport',
+      imageUrl: 'https://example.com/epl.jpg',
+      topics: ['sports'],
+      sportTags: ['soccer', 'premier-league'],
+      readTimeMinutes: 3,
+      publishedAt: '2026-08-18T11:00:00Z',
+      url: 'https://example.com/epl',
+    },
+  ];
+
+  assert.deepEqual(
+    filterArticlesBySportTags(articles, ['mls'], ['sports']).map((article) => article.id),
+    ['miami'],
+  );
 });

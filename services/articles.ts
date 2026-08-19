@@ -25,6 +25,7 @@ export interface FetchArticlesResult {
 export interface FetchArticlesOptions {
   forceRefresh?: boolean;
   sourceIds?: string[];
+  sportTags?: string[];
   cursor?: string;
   limit?: number;
 }
@@ -116,6 +117,9 @@ function buildArticlesSearchParams(options?: FetchArticlesOptions): URLSearchPar
   if (options?.cursor) params.set('cursor', options.cursor);
   if (options?.sourceIds && options.sourceIds.length > 0) {
     params.set('sources', options.sourceIds.join(','));
+  }
+  if (options?.sportTags && options.sportTags.length > 0) {
+    params.set('sportTags', options.sportTags.join(','));
   }
   return params;
 }

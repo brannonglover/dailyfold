@@ -1,5 +1,9 @@
 import { resolveSourceLogoUrl } from '../../catalog/logoUrl';
-import { SOURCE_CATALOG } from '../../catalog/sources';
+import {
+  SOURCE_CATALOG,
+  sourceNamesForArticleQuery,
+  specificSportTagsForSourceIds,
+} from '../../catalog/sources';
 
 import { FeedConfig, Topic } from './types';
 
@@ -30,3 +34,5 @@ export function listSources() {
 export function getSourceNameById(id: string): string | undefined {
   return FEEDS.find((f) => f.id === id)?.source;
 }
+
+export { sourceNamesForArticleQuery, specificSportTagsForSourceIds };

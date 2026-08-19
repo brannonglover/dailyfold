@@ -32,7 +32,7 @@ import {
 } from '@/utils/ingestPoll';
 import { remainingPostIngestNotificationDelayMs } from '@/utils/postIngestNotificationDelay';
 import { shouldShowArticleFeedLoading } from '@/utils/feedLoadingState';
-import { sportTagSourceIds, topicSourceIds } from '@/utils/forYouInterestSources';
+import { chipBoostSourceIds, topicSourceIds } from '@/utils/forYouInterestSources';
 import {
   mergeArticleFeed,
   resolveSilentFeedUpdate,
@@ -80,7 +80,7 @@ interface UseArticlesResult {
   boostArticlesForInterests: (
     sourceIds: string[],
     boostKey: string,
-    options?: { forceRefresh?: boolean },
+    options?: { forceRefresh?: boolean; sportTags?: string[] },
   ) => Promise<boolean>;
   /** Merge fresher article fields (e.g. hero image after detail enrichment) into the visible feed. */
   patchArticle: (article: Article) => void;
@@ -128,10 +128,14 @@ function appendUniqueArticles(prev: Article[], incoming: Article[]): Article[] {
   return fresh.length > 0 ? [...prev, ...fresh] : prev;
 }
 
-async function mergeBoostedSourceArticles(data: Article[], sourceIds: string[]): Promise<Article[]> {
+async function mergeBoostedSourceArticles(
+  data: Article[],
+  sourceIds: string[],
+  sportTags?: string[],
+): Promise<Article[]> {
   if (sourceIds.length === 0) return data;
   try {
-    const boosted = await fetchArticles({ sourceIds, limit: 50 });
+    const boosted = await fetchArticles({ sourceIds, sportTags, limit: 50 });
     if (boosted.articles.length > 0) {
       return appendUniqueArticles(data, boosted.articles);
     }
@@ -446,7 +450,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
             const narrowTopicActive =
               !!preferences && !isAllTopicsEnabled(preferences.enabledTopics);
             const scopedChipSourceIds = narrowSportTagActive
-              ? sportTagSourceIds(preferences!.enabledSportTags)
+              ? chipBoostSourceIds(preferences!.enabledSportTags)
               : narrowTopicActive
                 ? topicSourceIds(preferences!.enabledTopics)
                 : [];
@@ -455,7 +459,11 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
             if (shouldStockFeed && scopedChipSourceIds.length > 0) {
               ({ articles: data, meta } = await requestArticles(mode, forceRefresh, cursor));
               if (!stockOptions.isStocked(data)) {
-                data = await mergeBoostedSourceArticles(data, scopedChipSourceIds);
+                data = await mergeBoostedSourceArticles(
+                  data,
+                  scopedChipSourceIds,
+                  narrowSportTagActive ? preferences!.enabledSportTags : undefined,
+                );
               }
             } else if (shouldStockFeed) {
               ({ articles: data, meta } = await fetchFeedUntilStocked(
@@ -467,7 +475,11 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
               data = appendUniqueArticles(articlesRef.current, first.articles);
               meta = first.meta;
               if (!stockOptions.isStocked(data)) {
-                data = await mergeBoostedSourceArticles(data, scopedChipSourceIds);
+                data = await mergeBoostedSourceArticles(
+                  data,
+                  scopedChipSourceIds,
+                  narrowSportTagActive ? preferences!.enabledSportTags : undefined,
+                );
               }
               data = data.slice(articlesRef.current.length);
             } else if (mode === 'append') {
@@ -780,7 +792,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     async (
       sourceIds: string[],
       boostKey: string,
-      options?: { forceRefresh?: boolean },
+      options?: { forceRefresh?: boolean; sportTags?: string[] },
     ): Promise<boolean> => {
       if (sourceIds.length === 0) return false;
       const filteredMatches = () =>
@@ -793,6 +805,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         const generation = fetchGenerationRef.current;
         const { articles: data } = await fetchArticles({
           sourceIds,
+          sportTags: options?.sportTags,
           limit: 50,
           forceRefresh: options?.forceRefresh === true,
         });

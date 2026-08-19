@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { sourceIdsForForYouInterests, sportTagSourceIds, topicSourceIds } from './forYouInterestSources';
+import { sourceIdsForForYouInterests, chipBoostSourceIds, sportTagSourceIds, topicSourceIds } from './forYouInterestSources';
+import { sourceNamesForArticleQuery, specificSportTagsForSourceIds } from '@/catalog/sources';
 import { CURIOSITY_ORDER } from '@/constants/curiosities';
 import type { UserPreferences } from '@/types';
 
@@ -52,6 +53,29 @@ test('sourceIdsForForYouInterests includes MLS publisher for mls sport tag', () 
 test('sportTagSourceIds includes Fox Sports MLS and Pinkbike', () => {
   assert.ok(sportTagSourceIds(['mls']).includes('fox-sports-mls'));
   assert.ok(sportTagSourceIds(['mtb']).includes('pinkbike'));
+});
+
+test('chipBoostSourceIds for MLS stays on dedicated MLS feeds', () => {
+  const ids = chipBoostSourceIds(['mls']);
+  assert.ok(ids.includes('fox-sports-mls'));
+  assert.ok(ids.includes('guardian-mls'));
+  assert.ok(ids.includes('scarves-and-spikes'));
+  assert.ok(!ids.includes('espn-soccer'));
+  assert.ok(!ids.includes('bbc-sport-football'));
+  assert.ok(!ids.includes('guardian-football'));
+  assert.ok(!chipBoostSourceIds(['mtb']).includes('espn-soccer'));
+});
+
+test('specificSportTagsForSourceIds keeps MLS without generic soccer', () => {
+  assert.deepEqual(specificSportTagsForSourceIds(['fox-sports-mls', 'espn-soccer']), ['mls']);
+});
+
+test('sourceNamesForArticleQuery keeps MLS on dedicated feeds, not mixed soccer', () => {
+  const names = sourceNamesForArticleQuery(['fox-sports-mls', 'espn-soccer']);
+  assert.ok(names.includes('Fox Sports MLS'));
+  assert.ok(!names.includes('ESPN Soccer'));
+  assert.ok(!names.includes('The Guardian Football'));
+  assert.ok(!sourceNamesForArticleQuery(['pinkbike']).includes('ESPN Soccer'));
 });
 
 test('topicSourceIds includes existing and Feedspot health publishers', () => {

@@ -79,7 +79,7 @@ export const SPORT_CHIP_TAGS: SportTag[] = SPORT_TAG_ORDER.filter((tag) => tag !
 /** Replace a leftover Football chip selection with the league chips that superseded it. */
 export function expandSoccerFilterTags(tags: SportTag[]): SportTag[] {
   if (!tags.includes('soccer')) return tags;
-  const next = new Set(tags.filter((tag) => tag !== 'soccer'));
+  const next = new Set<SportTag>(tags.filter((tag) => tag !== 'soccer'));
   for (const league of SOCCER_LEAGUE_TAGS) next.add(league);
   return SPORT_TAG_ORDER.filter((tag) => next.has(tag));
 }
@@ -219,12 +219,16 @@ export function inferSportTags(text: string, baseTags: SportTag[] = []): SportTa
     }
     // College/NFL/MLS tags are specific, not broad outdoor defaults. Keep them even when a
     // prior pass stored soccer alongside (baseTags.length > 1), which used to skip inherit.
-    if (
-      tag === 'college-football' ||
-      tag === 'college-basketball' ||
-      tag === 'football' ||
-      tag === 'mls'
-    ) {
+    // Do not keep inherited MLS when the headline is clearly another soccer league —
+    // stored `mls` on a Crystal Palace / Arsenal story must not pass the MLS chip.
+    if (tag === 'mls') {
+      const otherSoccerLeague = SOCCER_LEAGUE_TAGS.some(
+        (league) => league !== 'mls' && inferred.has(league),
+      );
+      if (!otherSoccerLeague || matchesSportTag('mls', text)) inferred.add(tag);
+      continue;
+    }
+    if (tag === 'college-football' || tag === 'college-basketball' || tag === 'football') {
       inferred.add(tag);
       continue;
     }

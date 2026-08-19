@@ -149,10 +149,18 @@ export async function upsertArticles(
       title = t.title,
       excerpt = t.excerpt,
       body = t.body,
-      source = t.source,
+      source = CASE
+        WHEN a.sport_tags && ARRAY['mls','premier-league','la-liga','serie-a','bundesliga','champions-league','college-football','college-basketball','football','mtb']::text[]
+         AND NOT (t.sport_tags && ARRAY['mls','premier-league','la-liga','serie-a','bundesliga','champions-league','college-football','college-basketball','football','mtb']::text[])
+        THEN a.source
+        ELSE t.source
+      END,
       image_url = t.image_url,
       topics = t.topics,
-      sport_tags = t.sport_tags,
+      sport_tags = (
+        SELECT COALESCE(array_agg(DISTINCT tag), '{}'::text[])
+        FROM unnest(COALESCE(a.sport_tags, '{}'::text[]) || COALESCE(t.sport_tags, '{}'::text[])) AS tag
+      ),
       search_tags = t.search_tags,
       requires_subscription = t.requires_subscription,
       read_time_minutes = t.read_time_minutes,
@@ -206,6 +214,7 @@ export async function upsertArticle(
 export interface ListArticlesOptions {
   limit?: number;
   sources?: string[];
+  sportTags?: string[];
   /** Opaque cursor from a prior page (`publishedAt|id`). */
   cursor?: string;
 }
@@ -273,41 +282,41 @@ export async function searchArticles(query: string, options?: SearchArticlesOpti
 export async function listArticles(options?: ListArticlesOptions): Promise<ListArticlesResult> {
   const sql = getSql();
   const limit = Math.min(Math.max(1, options?.limit ?? 200), 100);
-  const sources = options?.sources?.filter(Boolean);
+  const sources = options?.sources?.filter(Boolean) ?? [];
+  const sportTags = options?.sportTags?.filter(Boolean) ?? [];
+  const hasSources = sources.length > 0;
+  const hasTags = sportTags.length > 0;
   const decoded = options?.cursor ? decodeArticleCursor(options.cursor) : null;
   const fetchLimit = limit + 1;
 
-  let rows: ArticleRow[];
-
-  if (sources && sources.length > 0) {
-    rows = decoded
-      ? await sql<ArticleRow[]>`
-          SELECT * FROM articles
-          WHERE source = ANY(${sources}::text[])
-            AND (published_at, id) < (${decoded.publishedAt}::timestamptz, ${decoded.id})
-          ORDER BY published_at DESC, id DESC
-          LIMIT ${fetchLimit}
-        `
-      : await sql<ArticleRow[]>`
-          SELECT * FROM articles
-          WHERE source = ANY(${sources}::text[])
-          ORDER BY published_at DESC, id DESC
-          LIMIT ${fetchLimit}
-        `;
-  } else {
-    rows = decoded
-      ? await sql<ArticleRow[]>`
-          SELECT * FROM articles
-          WHERE (published_at, id) < (${decoded.publishedAt}::timestamptz, ${decoded.id})
-          ORDER BY published_at DESC, id DESC
-          LIMIT ${fetchLimit}
-        `
-      : await sql<ArticleRow[]>`
-          SELECT * FROM articles
-          ORDER BY published_at DESC, id DESC
-          LIMIT ${fetchLimit}
-        `;
-  }
+  const rows = decoded
+    ? await sql<ArticleRow[]>`
+        SELECT * FROM articles
+        WHERE (
+          (${hasSources}::boolean AND source = ANY(${sources}::text[]))
+          OR (${hasTags}::boolean AND sport_tags && ${sportTags}::text[])
+          OR (NOT ${hasSources}::boolean AND NOT ${hasTags}::boolean)
+        )
+          AND (published_at, id) < (${decoded.publishedAt}::timestamptz, ${decoded.id})
+        ORDER BY
+          CASE WHEN ${hasTags}::boolean AND sport_tags && ${sportTags}::text[] THEN 0 ELSE 1 END,
+          published_at DESC,
+          id DESC
+        LIMIT ${fetchLimit}
+      `
+    : await sql<ArticleRow[]>`
+        SELECT * FROM articles
+        WHERE (
+          (${hasSources}::boolean AND source = ANY(${sources}::text[]))
+          OR (${hasTags}::boolean AND sport_tags && ${sportTags}::text[])
+          OR (NOT ${hasSources}::boolean AND NOT ${hasTags}::boolean)
+        )
+        ORDER BY
+          CASE WHEN ${hasTags}::boolean AND sport_tags && ${sportTags}::text[] THEN 0 ELSE 1 END,
+          published_at DESC,
+          id DESC
+        LIMIT ${fetchLimit}
+      `;
 
   const hasMore = rows.length > limit;
   const pageRows = hasMore ? rows.slice(0, limit) : rows;

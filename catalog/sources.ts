@@ -1,4 +1,4 @@
-import type { SportTag } from './sports';
+import { SOCCER_LEAGUE_TAGS, type SportTag } from './sports';
 
 /**
  * Curated publisher catalog — single place to add or edit outlets.
@@ -1164,8 +1164,9 @@ export const SOURCE_CATALOG: SourceCatalogEntry[] = [
     description: 'Fox Sports Major League Soccer news and analysis',
     primaryTopic: 'sports',
     topics: ['sports'],
-    sportTags: ['mls'],
+    sportTags: ['soccer', 'mls'],
     logoDomain: 'foxsports.com',
+    fetchTimeoutMs: 30_000,
   },
   {
     id: 'guardian-mls',
@@ -1174,7 +1175,7 @@ export const SOURCE_CATALOG: SourceCatalogEntry[] = [
     description: 'Major League Soccer news and analysis',
     primaryTopic: 'sports',
     topics: ['sports'],
-    sportTags: ['mls'],
+    sportTags: ['soccer', 'mls'],
     logoDomain: 'theguardian.com',
   },
   {
@@ -1184,7 +1185,7 @@ export const SOURCE_CATALOG: SourceCatalogEntry[] = [
     description: 'Atlanta United and Major League Soccer news and analysis',
     primaryTopic: 'sports',
     topics: ['sports'],
-    sportTags: ['mls'],
+    sportTags: ['soccer', 'mls'],
     logoDomain: 'scarvesandspikes.com',
   },
   {
@@ -2213,4 +2214,44 @@ const SPORT_TAGS_BY_SOURCE_NAME: ReadonlyMap<string, SportTag[]> = new Map(
 /** Catalog sport/league tags for a publisher name as stored on articles. */
 export function sportTagsForSourceName(name: string): SportTag[] {
   return SPORT_TAGS_BY_SOURCE_NAME.get(name) ?? [];
+}
+
+/**
+ * League/sport tags for chip boost queries. Omits generic `soccer` so an MLS
+ * request does not return the entire football catalog.
+ */
+export function specificSportTagsForSourceIds(ids: readonly string[]): SportTag[] {
+  const selected = new Set(ids);
+  const tags = new Set<SportTag>();
+  for (const entry of SOURCE_CATALOG) {
+    if (!selected.has(entry.id)) continue;
+    for (const tag of entry.sportTags ?? []) {
+      if (tag !== 'soccer') tags.add(tag);
+    }
+  }
+  return [...tags];
+}
+
+/**
+ * Publisher names to query for a chip boost. Soccer-league chips keep only
+ * dedicated league feeds (Fox Sports MLS, Guardian MLS, …). Mixed soccer
+ * outlets are found via `sport_tags`, not `source = ANY(all soccer)` — that
+ * OR leaked Premier League stories onto the MLS chip.
+ */
+export function sourceNamesForArticleQuery(ids: readonly string[]): string[] {
+  const selected = new Set(ids);
+  const leagueTags = specificSportTagsForSourceIds(ids).filter((tag) =>
+    SOCCER_LEAGUE_TAGS.includes(tag),
+  );
+  const names = new Set<string>();
+
+  for (const entry of SOURCE_CATALOG) {
+    if (!selected.has(entry.id)) continue;
+    if (leagueTags.length > 0) {
+      const dedicated = (entry.sportTags ?? []).some((tag) => leagueTags.includes(tag));
+      if (!dedicated) continue;
+    }
+    names.add(entry.name);
+  }
+  return [...names];
 }

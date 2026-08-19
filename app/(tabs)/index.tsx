@@ -29,7 +29,7 @@ import { getFeedEmptyMessage } from '@/utils/feedEmptyMessage';
 import { shouldShowFilteredFeedLoading } from '@/utils/feedLoadingState';
 import { isFeedInteractionLocked, subscribeFeedInteractionLock } from '@/utils/feedInteractionLock';
 import { MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION, shouldRetryFilteredFeedTopUp } from '@/utils/feedLoadMoreGate';
-import { sportTagSourceIds, topicSourceIds } from '@/utils/forYouInterestSources';
+import { chipBoostSourceIds, topicSourceIds } from '@/utils/forYouInterestSources';
 import { prewarmForYouDisplayCache } from '@/utils/forYouPrewarm';
 import { readTabDisplayCache, resolveTabDisplayFeed, hasShowableTabDisplayCache, isDisplayFeedUnderstocked, isDisplayFeedMatchingFilter } from '@/utils/tabDisplayCache';
 import { MIN_PENDING_ARTICLES_FOR_BANNER } from '@/utils/pendingFeedArticles';
@@ -489,7 +489,7 @@ function LatestScreenContent() {
       isSportsTopicActive(enabledTopics) && !isAllSportTagsEnabled(enabledSportTags);
 
     const sourceIds = narrowSportTagActive
-      ? sportTagSourceIds(enabledSportTags)
+      ? chipBoostSourceIds(enabledSportTags)
       : !isAllTopicsEnabled(enabledTopics)
         ? topicSourceIds(enabledTopics)
         : [];
@@ -516,7 +516,10 @@ function LatestScreenContent() {
     const inMemoryMatches = filterFeedArticles(articles).length;
     if (inMemoryMatches === 0) setChipBoostPending(true);
     const run = (allowRetry: boolean) => {
-      void boostArticlesForInterests(sourceIds, boostKey, { forceRefresh: !allowRetry }).then(
+      void boostArticlesForInterests(sourceIds, boostKey, {
+        forceRefresh: !allowRetry,
+        sportTags: narrowSportTagActive ? enabledSportTags : undefined,
+      }).then(
         (didMerge) => {
           if (cancelled) return;
           if (didMerge) {
