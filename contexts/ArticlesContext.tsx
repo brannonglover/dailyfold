@@ -457,8 +457,16 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
             let data: Article[];
             let meta: FetchArticlesResult['meta'];
             if (shouldStockFeed && scopedChipSourceIds.length > 0) {
-              ({ articles: data, meta } = await requestArticles(mode, forceRefresh, cursor));
-              if (!stockOptions.isStocked(data)) {
+              const chipPage = await fetchArticles({
+                sourceIds: scopedChipSourceIds,
+                sportTags: narrowSportTagActive ? preferences!.enabledSportTags : undefined,
+                forceRefresh: forceRefresh && (mode === 'refresh' || mode === 'silent'),
+                cursor,
+                limit: ARTICLE_PAGE_SIZE,
+              });
+              data = chipPage.articles;
+              meta = chipPage.meta;
+              if (!cursor && !stockOptions.isStocked(data)) {
                 data = await mergeBoostedSourceArticles(
                   data,
                   scopedChipSourceIds,

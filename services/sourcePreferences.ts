@@ -28,6 +28,9 @@ export function filterArticlesBySources(
   sources: FeedSource[],
   enabledSourceIds: string[],
 ): Article[] {
+  // Empty enabledSourceIds means every outlet is on — including publishers the
+  // local catalog does not know yet (new MLS feeds on an older TestFlight binary).
+  if (isAllSourcesEnabled(enabledSourceIds)) return articles;
   const names = getEnabledSourceNames(sources, enabledSourceIds);
   return articles.filter((article) => names.has(article.source));
 }

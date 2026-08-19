@@ -1,3 +1,4 @@
+import { SOCCER_LEAGUE_TAGS } from '@/catalog/sports';
 import { FALLBACK_SOURCES } from '@/data/sources';
 import { filterArticlesByBlocks } from '@/services/blockPreferences';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
@@ -25,6 +26,11 @@ export function filterArticlesWithRealHeroImage(articles: Article[]): Article[] 
 function withoutActiveSportTagBlocks(prefs: UserPreferences): UserPreferences {
   if (prefs.blockedSportTags.length === 0 || prefs.enabledSportTags.length === 0) return prefs;
   const active = new Set(prefs.enabledSportTags);
+  // League chips always infer generic `soccer` alongside MLS / EPL / etc. A prior
+  // "Show less Soccer" must not empty the MLS chip the reader just selected.
+  if (prefs.enabledSportTags.some((tag) => SOCCER_LEAGUE_TAGS.includes(tag))) {
+    active.add('soccer');
+  }
   const blockedSportTags = prefs.blockedSportTags.filter((tag) => !active.has(tag));
   if (blockedSportTags.length === prefs.blockedSportTags.length) return prefs;
   return { ...prefs, blockedSportTags };

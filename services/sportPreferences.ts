@@ -1,6 +1,6 @@
 import { sportTagsForSourceName } from '@/catalog/sources';
-import { inferSportTags } from '@/catalog/sports';
-import { Article, SportTag, Topic } from '@/types';
+import { inferSportTags, SOCCER_LEAGUE_TAGS, SPORT_TAG_ORDER, type SportTag } from '@/catalog/sports';
+import { Article, Topic } from '@/types';
 
 import { isAllTopicsEnabled } from './topicPreferences';
 
@@ -11,8 +11,14 @@ export function articleSportTags(article: Article): SportTag[] {
   const text = `${article.title} ${article.excerpt}`;
   const stored = article.topics.includes('sports') ? (article.sportTags ?? []) : [];
   const baseTags = [...new Set([...stored, ...fromSource])];
-  // Re-derive tags from content so stale broad source defaults do not leak into filters.
-  return inferSportTags(text, baseTags);
+  // Re-derive tags from content so stale broad source defaults (MTB on Everest, etc.)
+  // do not leak into filters. Keep ingest league tags — mixed soccer outlets store MLS
+  // stories under ESPN Soccer, and headlines like "SKC signs…" otherwise lose `mls`.
+  const inferred = new Set(inferSportTags(text, baseTags));
+  for (const tag of stored) {
+    if (SOCCER_LEAGUE_TAGS.includes(tag)) inferred.add(tag);
+  }
+  return SPORT_TAG_ORDER.filter((tag) => inferred.has(tag));
 }
 
 /** Empty enabledSportTags means all sports/leagues within the Sports topic filter. */

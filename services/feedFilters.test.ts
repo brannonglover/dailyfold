@@ -369,6 +369,23 @@ test('Selecting a sport chip overrides an earlier "Show less" block on that same
   assert.deepEqual(result.map((a) => a.id), ['mls-story']);
 });
 
+test('Selecting MLS still shows stories after a prior "Show less Soccer" block', () => {
+  const mlsArticle = hotSportArticle({
+    id: 'mls-story',
+    title: 'Inter Miami wins MLS Cup in extra time',
+    source: 'ESPN Soccer',
+    sportTags: ['soccer', 'mls'],
+  });
+  const prefs = basePrefs({
+    enabledTopics: ['sports'],
+    enabledSportTags: ['mls'],
+    blockedSportTags: ['soccer'],
+  });
+
+  const result = applyFeedFilters([mlsArticle], prefs, FALLBACK_SOURCES);
+  assert.deepEqual(result.map((a) => a.id), ['mls-story']);
+});
+
 test('A blocked sport tag still stays hidden from chips other than the one selected', () => {
   const mlsArticle = hotSportArticle({
     id: 'mls-story',

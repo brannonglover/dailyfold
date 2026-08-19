@@ -439,6 +439,42 @@ test('expandSoccerFilterTags maps Football onto the soccer league chips', () => 
   assert.deepEqual(expandSoccerFilterTags(['mls']), ['mls']);
 });
 
+test('filterArticlesBySportTags keeps ingest-tagged MLS when the headline omits a team name', () => {
+  const articles: Article[] = [
+    {
+      id: 'skc',
+      title: 'SKC signs Brazilian André Luiz for record $18M',
+      excerpt: 'The club announced the deal on Wednesday',
+      body: '',
+      source: 'ESPN Soccer',
+      imageUrl: 'https://example.com/skc.jpg',
+      topics: ['sports'],
+      sportTags: ['soccer', 'mls'],
+      readTimeMinutes: 3,
+      publishedAt: '2026-08-18T12:00:00Z',
+      url: 'https://example.com/skc',
+    },
+    {
+      id: 'epl',
+      title: 'Premier League transfer news from Arsenal',
+      excerpt: 'Arsenal sign a striker before the window closes',
+      body: '',
+      source: 'ESPN Soccer',
+      imageUrl: 'https://example.com/epl.jpg',
+      topics: ['sports'],
+      sportTags: ['soccer', 'premier-league'],
+      readTimeMinutes: 3,
+      publishedAt: '2026-08-18T11:00:00Z',
+      url: 'https://example.com/epl',
+    },
+  ];
+
+  assert.deepEqual(
+    filterArticlesBySportTags(articles, ['mls'], ['sports']).map((article) => article.id),
+    ['skc'],
+  );
+});
+
 test('filterArticlesBySportTags keeps MLS to Premier League transfer stories on the MLS chip', () => {
   const articles: Article[] = [
     {

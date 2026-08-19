@@ -29,6 +29,7 @@ export function filterArticlesBySources(
   sources: FeedSource[],
   enabledSourceIds: string[],
 ): Article[] {
+  if (isAllSourcesEnabled(enabledSourceIds)) return articles;
   const names = getEnabledSourceNames(sources, enabledSourceIds);
   return articles.filter((article) => names.has(article.source));
 }
