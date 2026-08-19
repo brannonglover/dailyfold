@@ -318,15 +318,6 @@ test('inferSportTags keeps mls when soccer was also stored on the article', () =
   assert.ok(tags.includes('soccer'));
 });
 
-test('inferSportTags drops inherited mls when the headline is Premier League', () => {
-  const tags = inferSportTags(
-    'Premier League transfer news from Arsenal',
-    ['soccer', 'mls'],
-  );
-  assert.ok(!tags.includes('mls'));
-  assert.ok(tags.includes('premier-league'));
-});
-
 test('filterArticlesBySportTags keeps dedicated MLS and MTB publisher stories without stored tags', () => {
   const articles: Article[] = [
     {
@@ -448,39 +439,39 @@ test('expandSoccerFilterTags maps Football onto the soccer league chips', () => 
   assert.deepEqual(expandSoccerFilterTags(['mls']), ['mls']);
 });
 
-test('filterArticlesBySportTags drops Premier League even when mls was stored on the row', () => {
+test('filterArticlesBySportTags keeps MLS to Premier League transfer stories on the MLS chip', () => {
   const articles: Article[] = [
+    {
+      id: 'gozo',
+      title: "U.S. youth Gozo, 19, seals move to Crystal Palace",
+      excerpt: 'The MLS academy product joins the Premier League club',
+      body: '',
+      source: 'ESPN Soccer',
+      imageUrl: 'https://example.com/gozo.jpg',
+      topics: ['sports'],
+      sportTags: ['soccer', 'mls', 'premier-league'],
+      readTimeMinutes: 3,
+      publishedAt: '2026-08-18T11:00:00Z',
+      url: 'https://example.com/gozo',
+    },
     {
       id: 'epl',
       title: 'Premier League transfer news from Arsenal',
       excerpt: 'Arsenal sign a striker before the window closes',
       body: '',
-      source: 'ESPN Soccer',
+      source: 'BBC Sport',
       imageUrl: 'https://example.com/epl.jpg',
       topics: ['sports'],
-      sportTags: ['soccer', 'mls', 'premier-league'],
+      sportTags: ['soccer', 'premier-league'],
       readTimeMinutes: 3,
-      publishedAt: '2026-08-18T11:00:00Z',
+      publishedAt: '2026-08-18T10:00:00Z',
       url: 'https://example.com/epl',
-    },
-    {
-      id: 'miami',
-      title: 'Inter Miami sign Casemiro as MLS announces investigation',
-      excerpt: 'The Brazilian midfielder joins Messi in Florida',
-      body: '',
-      source: 'ESPN Soccer',
-      imageUrl: 'https://example.com/miami.jpg',
-      topics: ['sports'],
-      sportTags: ['soccer', 'mls'],
-      readTimeMinutes: 3,
-      publishedAt: '2026-08-18T12:00:00Z',
-      url: 'https://example.com/miami',
     },
   ];
 
   assert.deepEqual(
     filterArticlesBySportTags(articles, ['mls'], ['sports']).map((article) => article.id),
-    ['miami'],
+    ['gozo'],
   );
 });
 

@@ -219,16 +219,12 @@ export function inferSportTags(text: string, baseTags: SportTag[] = []): SportTa
     }
     // College/NFL/MLS tags are specific, not broad outdoor defaults. Keep them even when a
     // prior pass stored soccer alongside (baseTags.length > 1), which used to skip inherit.
-    // Do not keep inherited MLS when the headline is clearly another soccer league —
-    // stored `mls` on a Crystal Palace / Arsenal story must not pass the MLS chip.
-    if (tag === 'mls') {
-      const otherSoccerLeague = SOCCER_LEAGUE_TAGS.some(
-        (league) => league !== 'mls' && inferred.has(league),
-      );
-      if (!otherSoccerLeague || matchesSportTag('mls', text)) inferred.add(tag);
-      continue;
-    }
-    if (tag === 'college-football' || tag === 'college-basketball' || tag === 'football') {
+    if (
+      tag === 'college-football' ||
+      tag === 'college-basketball' ||
+      tag === 'football' ||
+      tag === 'mls'
+    ) {
       inferred.add(tag);
       continue;
     }
