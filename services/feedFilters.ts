@@ -17,6 +17,20 @@ export function filterArticlesWithRealHeroImage(articles: Article[]): Article[] 
 }
 
 /**
+ * Picking a sport chip is an explicit request for that league's stories — a prior
+ * "Show less" block on the same tag must not silently zero out the chip the reader
+ * just tapped. Only the actively selected tag(s) are exempted; everything else the
+ * reader blocked stays hidden.
+ */
+function withoutActiveSportTagBlocks(prefs: UserPreferences): UserPreferences {
+  if (prefs.blockedSportTags.length === 0 || prefs.enabledSportTags.length === 0) return prefs;
+  const active = new Set(prefs.enabledSportTags);
+  const blockedSportTags = prefs.blockedSportTags.filter((tag) => !active.has(tag));
+  if (blockedSportTags.length === prefs.blockedSportTags.length) return prefs;
+  return { ...prefs, blockedSportTags };
+}
+
+/**
  * Client-side feed filter pipeline.
  * Source toggles always apply. All topics (`enabledTopics: []`) bypasses topic and
  * sport filters so the feed is not stuck on sports-only outlets from a prior category
@@ -41,7 +55,7 @@ export function applyFeedFilters(
       result = filterArticlesBySportTags(result, prefs.enabledSportTags, prefs.enabledTopics);
     }
 
-    result = filterArticlesByBlocks(result, prefs);
+    result = filterArticlesByBlocks(result, withoutActiveSportTagBlocks(prefs));
   }
 
   return filterArticlesWithRealHeroImage(result);
@@ -114,5 +128,5 @@ export function applyTrendingNotificationFilters(
   const sourcePrimaryByName = buildSourcePrimaryTopicMap(catalogSources);
   result = filterArticlesByTopics(result, prefs.enabledTopics, sourcePrimaryByName);
   result = filterArticlesBySportTags(result, prefs.enabledSportTags, prefs.enabledTopics);
-  return filterArticlesByBlocks(result, prefs);
+  return filterArticlesByBlocks(result, withoutActiveSportTagBlocks(prefs));
 }

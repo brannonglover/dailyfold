@@ -353,6 +353,38 @@ test('applyFeedFilters swaps imageless Guardian for sibling story with hero imag
   assert.deepEqual(result.map((a) => a.id), ['bbc-floods']);
 });
 
+test('Selecting a sport chip overrides an earlier "Show less" block on that same tag', () => {
+  const mlsArticle = hotSportArticle({
+    id: 'mls-story',
+    title: 'Inter Miami wins MLS Cup in extra time',
+    sportTags: ['soccer', 'mls'],
+  });
+  const prefs = basePrefs({
+    enabledTopics: ['sports'],
+    enabledSportTags: ['mls'],
+    blockedSportTags: ['mls'],
+  });
+
+  const result = applyFeedFilters([mlsArticle], prefs, FALLBACK_SOURCES);
+  assert.deepEqual(result.map((a) => a.id), ['mls-story']);
+});
+
+test('A blocked sport tag still stays hidden from chips other than the one selected', () => {
+  const mlsArticle = hotSportArticle({
+    id: 'mls-story',
+    title: 'Inter Miami wins MLS Cup in extra time',
+    sportTags: ['soccer', 'mls'],
+  });
+  const prefs = basePrefs({
+    enabledTopics: ['sports'],
+    enabledSportTags: [],
+    blockedSportTags: ['mls'],
+  });
+
+  const result = applyFeedFilters([mlsArticle], prefs, FALLBACK_SOURCES);
+  assert.deepEqual(result.map((a) => a.id), []);
+});
+
 test('applyFeedFilters removes articles without a real hero image', () => {
   const withImage = articles[0]!;
   const imageless: Article = { ...articles[1]!, id: 'no-hero', imageUrl: '' };
