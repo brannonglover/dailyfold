@@ -1,6 +1,8 @@
 import { router } from 'expo-router';
 import { Platform } from 'react-native';
 
+import { claimArticleOpen } from '@/utils/articleOpenLock';
+
 export type OpenPublisherOptions = {
   title?: string;
   source?: string;
@@ -35,10 +37,13 @@ export async function openPublisherArticle(
 ): Promise<void> {
   if (!hasOpenablePublisherUrl(url)) return;
 
+  const href = publisherBrowserHref(url, options);
+  if (!claimArticleOpen(href)) return;
+
   if (Platform.OS === 'web') {
     window.open(url, '_blank', 'noopener,noreferrer');
     return;
   }
 
-  router.push(publisherBrowserHref(url, options));
+  router.push(href);
 }

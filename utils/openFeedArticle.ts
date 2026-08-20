@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 
 import { rememberOpenArticle } from '@/services/articleSession';
 import { Article } from '@/types';
+import { claimArticleOpen } from '@/utils/articleOpenLock';
 import { articlePath } from '@/utils/notificationArticleLink';
 import {
   hasOpenablePublisherUrl,
@@ -33,5 +34,7 @@ export async function openFeedArticle(
     return;
   }
 
-  router.push(articlePath(article.id));
+  const href = articlePath(article.id);
+  if (!claimArticleOpen(href)) return;
+  router.push(href);
 }
