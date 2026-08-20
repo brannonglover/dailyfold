@@ -155,6 +155,17 @@ test('Health topic filter keeps health stories and hides other topics', () => {
   assert.deepEqual(result.map((a) => a.id), ['health']);
 });
 
+test('normalizeFeedPreferences clears leftover Show less Soccer blocks', () => {
+  const normalized = normalizeFeedPreferences(
+    basePrefs({
+      blockedSportTags: ['soccer', 'football'],
+      blockedKeywords: ['soccer', 'messi'],
+    }),
+  );
+  assert.deepEqual(normalized.blockedSportTags, ['football']);
+  assert.deepEqual(normalized.blockedKeywords, ['messi']);
+});
+
 test('normalizeFeedPreferences clears sport tags when All topics selected', () => {
   const normalized = normalizeFeedPreferences(
     basePrefs({ enabledTopics: [], enabledSportTags: ['premier-league'] }),

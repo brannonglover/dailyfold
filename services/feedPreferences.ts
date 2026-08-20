@@ -91,8 +91,12 @@ export function normalizeFeedPreferences(prefs: UserPreferences): UserPreference
   const trendingNotificationsEnabled = prefs.trendingNotificationsEnabled === true;
 
   const blockedTopics = prefs.blockedTopics ?? [];
-  const blockedSportTags = prefs.blockedSportTags ?? [];
-  const blockedKeywords = prefs.blockedKeywords ?? [];
+  // Generic "Show less Soccer" hides every MLS/EPL story (they all carry `soccer`).
+  // Drop that leftover mark so league chips can show stories again.
+  const blockedSportTags = (prefs.blockedSportTags ?? []).filter((tag) => tag !== 'soccer');
+  const blockedKeywords = (prefs.blockedKeywords ?? []).filter(
+    (keyword) => keyword.trim().toLowerCase() !== 'soccer',
+  );
 
   if (
     sameStringArray(enabledTopics, prefs.enabledTopics) &&

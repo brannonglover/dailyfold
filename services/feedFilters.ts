@@ -24,16 +24,25 @@ export function filterArticlesWithRealHeroImage(articles: Article[]): Article[] 
  * reader blocked stays hidden.
  */
 function withoutActiveSportTagBlocks(prefs: UserPreferences): UserPreferences {
-  if (prefs.blockedSportTags.length === 0 || prefs.enabledSportTags.length === 0) return prefs;
+  if (prefs.enabledSportTags.length === 0) return prefs;
   const active = new Set(prefs.enabledSportTags);
   // League chips always infer generic `soccer` alongside MLS / EPL / etc. A prior
   // "Show less Soccer" must not empty the MLS chip the reader just selected.
   if (prefs.enabledSportTags.some((tag) => SOCCER_LEAGUE_TAGS.includes(tag))) {
     active.add('soccer');
   }
-  const blockedSportTags = prefs.blockedSportTags.filter((tag) => !active.has(tag));
-  if (blockedSportTags.length === prefs.blockedSportTags.length) return prefs;
-  return { ...prefs, blockedSportTags };
+  const hideKeys = new Set<string>(active);
+  const blockedSportTags = prefs.blockedSportTags.filter((tag) => !hideKeys.has(tag));
+  const blockedKeywords = prefs.blockedKeywords.filter(
+    (keyword) => !hideKeys.has(keyword.trim().toLowerCase()),
+  );
+  if (
+    blockedSportTags.length === prefs.blockedSportTags.length &&
+    blockedKeywords.length === prefs.blockedKeywords.length
+  ) {
+    return prefs;
+  }
+  return { ...prefs, blockedSportTags, blockedKeywords };
 }
 
 /**
