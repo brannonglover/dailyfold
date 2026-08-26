@@ -65,6 +65,14 @@ export interface LikedFolder {
   createdAt: string;
 }
 
+/** How far and how long a reader engaged with an opened article. */
+export interface ArticleEngagement {
+  /** Highest scroll depth reached, 0–100. */
+  readPercent: number;
+  dwellSeconds: number;
+  updatedAt: string;
+}
+
 export interface UserPreferences {
   likedArticleIds: string[];
   /** Cached article metadata so Liked survives feed refreshes and pagination. */
@@ -73,6 +81,8 @@ export interface UserPreferences {
   clickedArticleIds: string[];
   /** Cached metadata for clicked feed articles used in For You personalization. */
   clickedArticles: Record<string, Article>;
+  /** Read depth and dwell time for opened articles — weights curiosity signals. */
+  articleEngagement?: Record<string, ArticleEngagement>;
   topicScores: Record<Topic, number>;
   /** @deprecated Legacy outlet scores — no longer updated from likes. */
   sourceScores: Record<string, number>;

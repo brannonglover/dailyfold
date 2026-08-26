@@ -4,6 +4,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -173,7 +175,7 @@ function ContinueReadingButton({
 
 export function ArticleReader({ article }: ArticleReaderProps) {
   const { colors } = useTheme();
-  const { recordArticleOpen } = usePreferences();
+  const { recordArticleOpen, recordArticleEngagement } = usePreferences();
   const insets = useSafeAreaInsets();
   const requiresSubscription = article.requiresSubscription === true;
   const { open: openOnPublisher, isOpening: isOpeningPublisher, canOpen: canOpenOnPublisher } =
@@ -189,12 +191,45 @@ export function ArticleReader({ article }: ArticleReaderProps) {
   );
   const activeContentArticleIdRef = useRef(article.id);
   const recordedOpenRef = useRef<string | null>(null);
+  const openedAtRef = useRef(Date.now());
+  const maxReadPercentRef = useRef(0);
 
   useEffect(() => {
     if (recordedOpenRef.current === article.id) return;
     recordedOpenRef.current = article.id;
     recordArticleOpen(article);
   }, [article, recordArticleOpen]);
+
+  useEffect(() => {
+    openedAtRef.current = Date.now();
+    maxReadPercentRef.current = 0;
+
+    return () => {
+      const dwellSeconds = Math.round((Date.now() - openedAtRef.current) / 1000);
+      recordArticleEngagement(article, {
+        readPercent: Math.round(maxReadPercentRef.current),
+        dwellSeconds,
+      });
+    };
+  }, [article.id, article, recordArticleEngagement]);
+
+  function handleScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const scrollableHeight = contentSize.height - layoutMeasurement.height;
+    if (scrollableHeight <= 0) {
+      if (contentOffset.y > 0) {
+        maxReadPercentRef.current = 100;
+      }
+      return;
+    }
+
+    const viewedBottom = contentOffset.y + layoutMeasurement.height;
+    const readPercent = (viewedBottom / contentSize.height) * 100;
+    maxReadPercentRef.current = Math.max(
+      maxReadPercentRef.current,
+      Math.min(100, readPercent),
+    );
+  }
 
   useEffect(() => {
     seedReaderContentFromArticle(article);
@@ -257,6 +292,8 @@ export function ArticleReader({ article }: ArticleReaderProps) {
           contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]}
           keyboardShouldPersistTaps="handled"
           delaysContentTouches={false}
+          onScroll={handleScroll}
+          scrollEventThrottle={200}
         showsVerticalScrollIndicator={false}
         showsHorizontalScrollIndicator={false}
         alwaysBounceHorizontal={false}

@@ -35,7 +35,7 @@ export default memo(function ProfileScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
-  const likedCount = preferences?.likedArticleIds.length ?? 0;
+  const readLaterCount = preferences?.likedArticleIds.length ?? 0;
 
   async function handleTrendingAlertsToggle(enabled: boolean) {
     const result = await setTrendingNotificationsEnabled(enabled);
@@ -98,8 +98,8 @@ export default memo(function ProfileScreen() {
       <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Reading taste</Text>
       <View style={[styles.statsRow, { borderColor: colors.border }]}>
         <View style={styles.stat}>
-          <Text style={[styles.statValue, { color: colors.text }]}>{likedCount}</Text>
-          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Liked</Text>
+          <Text style={[styles.statValue, { color: colors.text }]}>{readLaterCount}</Text>
+          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Read later</Text>
         </View>
         <View style={[styles.divider, { backgroundColor: colors.border }]} />
         <View style={styles.stat}>
@@ -126,7 +126,7 @@ export default memo(function ProfileScreen() {
             Narrower interests
           </Text>
           <Text style={[styles.sectionHelper, { color: colors.textSecondary }]}>
-            Keywords from liked headlines and sport leagues you follow most.
+            Keywords from saved headlines and sport leagues you follow most.
           </Text>
           {topKeywords.length > 0 && (
             <View style={styles.topics}>
@@ -165,7 +165,7 @@ export default memo(function ProfileScreen() {
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         {topicScoreRows.length === 0 ? (
           <Text style={[styles.emptyScores, { color: colors.textSecondary }]}>
-            Like articles to build your topic interests.
+            Read stories to build your topic interests.
           </Text>
         ) : (
           topicScoreRows.map(({ topic, score }) => (

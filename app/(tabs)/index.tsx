@@ -148,8 +148,11 @@ function LatestScreenContent() {
   );
 
   const orderLatestPage = useCallback(
-    (items: Article[]) =>
-      getLatestFeed(items, orderOpts.prefs, { diversifyTopics: orderOpts.diversifyTopics }),
+    (items: Article[], prior: Article[]) =>
+      getLatestFeed(items, orderOpts.prefs, {
+        diversifyTopics: orderOpts.diversifyTopics,
+        priorSports: prior.filter((article) => article.topics.includes('sports')),
+      }),
     [orderOpts],
   );
 

@@ -1,12 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
-import { memo, useState } from 'react';
+import { memo } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ArticleImage } from '@/components/ArticleImage';
 import { ArticleSourceMenu } from '@/components/ArticleSourceMenu';
-import { FolderPickerModal } from '@/components/FolderPickerModal';
 import { FoldedImage } from '@/components/FoldedImage';
 import { CURIOSITY_LABELS } from '@/constants/curiosities';
 import {
@@ -18,7 +16,6 @@ import {
   STORY_CARD_IMAGE_ASPECT,
   STORY_CARD_LEAD_IMAGE_ASPECT,
 } from '@/constants/Layout';
-import { usePreferences } from '@/contexts/PreferencesContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Article } from '@/types';
 import { openFeedArticle, warmArticleOpen } from '@/utils/openFeedArticle';
@@ -143,49 +140,33 @@ function SubscriptionBadge({ compact }: { compact?: boolean }) {
   );
 }
 
-function StoryLikeButton({ article }: { article: Article }) {
+/** Muted attribution under the headline; options live in the quiet ⋯ control. */
+function StoryCardFooter({
+  article,
+  requiresSubscription,
+}: {
+  article: Article;
+  requiresSubscription?: boolean;
+}) {
   const { colors } = useTheme();
-  const { isLiked, toggleLike } = usePreferences();
-  const liked = isLiked(article.id);
-  const [showFolderPicker, setShowFolderPicker] = useState(false);
-
-  function handleLike() {
-    toggleLike(article);
-    if (Platform.OS !== 'web') {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-  }
 
   return (
-    <>
-      <Pressable
-        onPress={handleLike}
-        hitSlop={12}
-        accessibilityRole="button"
-        accessibilityLabel={liked ? 'Unlike article' : 'Like article'}
-        style={({ pressed }) => [styles.storyLikeButton, pressed && styles.pressed]}>
-        <Ionicons
-          name={liked ? 'heart' : 'heart-outline'}
-          size={26}
-          color={liked ? colors.accent : colors.textSecondary}
-        />
-      </Pressable>
-      {liked ? (
-        <Pressable
-          onPress={() => setShowFolderPicker(true)}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="Add to folder"
-          style={({ pressed }) => [styles.storyLikeButton, pressed && styles.pressed]}>
-          <Ionicons name="folder-outline" size={22} color={colors.textSecondary} />
-        </Pressable>
-      ) : null}
-      <FolderPickerModal
-        visible={showFolderPicker}
-        articleId={article.id}
-        onClose={() => setShowFolderPicker(false)}
-      />
-    </>
+    <View style={styles.storyFooterRow}>
+      <View style={styles.storyFooterMeta}>
+        {requiresSubscription ? <SubscriptionBadge compact /> : null}
+        <Text
+          style={[styles.storyFooterText, { color: colors.textSecondary }]}
+          numberOfLines={1}
+          ellipsizeMode="tail">
+          {article.source}
+          {' · '}
+          {formatDate(article.publishedAt)}
+        </Text>
+      </View>
+      <View style={styles.storyFooterActions}>
+        <ArticleSourceMenu article={article} presentation="icon" />
+      </View>
+    </View>
   );
 }
 
@@ -252,19 +233,6 @@ function StoryCard({
           </View>
         ) : null}
 
-        <View style={styles.storyMetaRow}>
-          <View style={styles.storyMetaSource}>
-            <ArticleSourceMenu article={article} />
-          </View>
-          <View style={styles.metaEnd}>
-            {requiresSubscription ? <SubscriptionBadge compact /> : null}
-            <Text style={[styles.storyMeta, { color: colors.textSecondary }]}>
-              {formatDate(article.publishedAt)}
-            </Text>
-            <StoryLikeButton article={article} />
-          </View>
-        </View>
-
         <Pressable
           onPressIn={() => warmArticleOpen(article)}
           onPress={openArticle}
@@ -282,6 +250,8 @@ function StoryCard({
             {article.title}
           </Text>
         </Pressable>
+
+        <StoryCardFooter article={article} requiresSubscription={requiresSubscription} />
       </View>
     </View>
   );
@@ -335,9 +305,7 @@ function StoryGridCard({ article, onFeedClick }: { article: Article; onFeedClick
             {article.title}
           </Text>
         </Pressable>
-        <Text style={[styles.gridSource, { color: colors.textSecondary }]} numberOfLines={1}>
-          {article.source}
-        </Text>
+        <StoryCardFooter article={article} requiresSubscription={requiresSubscription} />
       </View>
     </View>
   );
@@ -353,37 +321,41 @@ function StoryRowCard({ article, onFeedClick }: { article: Article; onFeedClick?
   }
 
   return (
-    <Pressable
-      onPressIn={() => warmArticleOpen(article)}
-      onPress={openArticle}
-      accessibilityRole="button"
-      accessibilityLabel={`Open ${article.title}`}
-      style={({ pressed }) => [styles.rowCard, pressed && styles.pressed]}>
-      <FoldedImage
-        uri={article.imageUrl}
-        recyclingKey={article.id}
-        source={article.source}
-        sourceLogo={article.sourceLogo}
-        style={styles.rowImageWrap}
-      />
+    <View style={styles.rowCard}>
+      <Pressable
+        onPressIn={() => warmArticleOpen(article)}
+        onPress={openArticle}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${article.title}`}
+        style={({ pressed }) => [pressed && styles.pressed]}>
+        <FoldedImage
+          uri={article.imageUrl}
+          recyclingKey={article.id}
+          source={article.source}
+          sourceLogo={article.sourceLogo}
+          style={styles.rowImageWrap}
+        />
+      </Pressable>
       <View style={styles.rowBody}>
         <Text style={[styles.kickerText, { color: colors.accent }]} numberOfLines={1}>
           {articleKicker(article)}
         </Text>
-        <Text
-          style={[styles.storyTitle, styles.storyTitleRow, { color: colors.text }]}
-          numberOfLines={3}
-          ellipsizeMode="tail">
-          {article.title}
-        </Text>
-        <View style={styles.rowMetaRow}>
-          <Text style={[styles.rowSource, { color: colors.textSecondary }]} numberOfLines={1}>
-            {article.source}
+        <Pressable
+          onPressIn={() => warmArticleOpen(article)}
+          onPress={openArticle}
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${article.title}`}
+          style={({ pressed }) => [pressed && styles.pressed]}>
+          <Text
+            style={[styles.storyTitle, styles.storyTitleRow, { color: colors.text }]}
+            numberOfLines={3}
+            ellipsizeMode="tail">
+            {article.title}
           </Text>
-          {requiresSubscription ? <SubscriptionBadge compact /> : null}
-        </View>
+        </Pressable>
+        <StoryCardFooter article={article} requiresSubscription={requiresSubscription} />
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -442,18 +414,6 @@ function StoryPageCard({
           </View>
         ) : null}
 
-        <View style={styles.storyMetaRow}>
-          <View style={styles.storyMetaSource}>
-            <ArticleSourceMenu article={article} />
-          </View>
-          <View style={styles.metaEnd}>
-            <Text style={[styles.storyMeta, { color: colors.textSecondary }]}>
-              {formatDate(article.publishedAt)}
-            </Text>
-            <StoryLikeButton article={article} />
-          </View>
-        </View>
-
         <Pressable
           onPressIn={() => warmArticleOpen(article)}
           onPress={openArticle}
@@ -467,6 +427,8 @@ function StoryPageCard({
             {article.title}
           </Text>
         </Pressable>
+
+        <StoryCardFooter article={article} requiresSubscription={requiresSubscription} />
       </View>
     </View>
   );
@@ -580,18 +542,6 @@ export const ArticleCard = memo(function ArticleCard({
         </Pressable>
 
         <View style={[styles.textBlock, { paddingBottom: VIGNETTE_TEXT_CLEARANCE }]}>
-          <View style={styles.metaRow}>
-            <View style={styles.metaSource}>
-              <ArticleSourceMenu article={article} />
-            </View>
-            <View style={styles.metaEnd}>
-              {requiresSubscription ? <SubscriptionBadge /> : null}
-              <Text style={[styles.meta, { color: colors.textSecondary }]}>
-                {formatDate(article.publishedAt)}
-              </Text>
-            </View>
-          </View>
-
           <Pressable
             onPressIn={() => warmArticleOpen(article)}
             onPress={openArticle}
@@ -630,6 +580,8 @@ export const ArticleCard = memo(function ArticleCard({
 
             <Text style={[styles.readMore, { color: colors.accent }]}>Open article</Text>
           </Pressable>
+
+          <StoryCardFooter article={article} requiresSubscription={requiresSubscription} />
         </View>
       </View>
     </View>
@@ -687,24 +639,6 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     justifyContent: 'flex-start',
   },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-    flexShrink: 0,
-    gap: 8,
-  },
-  metaSource: {
-    flex: 1,
-    minWidth: 0,
-  },
-  metaEnd: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexShrink: 0,
-  },
   subBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -736,11 +670,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 4,
     elevation: 3,
-  },
-  meta: {
-    fontFamily: 'Inter',
-    fontSize: 12,
-    flexShrink: 0,
   },
   title: {
     fontFamily: 'LoraBold',
@@ -812,23 +741,31 @@ const styles = StyleSheet.create({
   storyMatchReasons: {
     marginBottom: 2,
   },
-  storyMetaRow: {
+  storyFooterRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
+    marginTop: 10,
   },
-  storyMetaSource: {
+  storyFooterMeta: {
     flex: 1,
     minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  storyMeta: {
-    fontFamily: 'InterMedium',
-    fontSize: 14,
+  storyFooterText: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily: 'Inter',
+    fontSize: 12,
+  },
+  storyFooterActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
     flexShrink: 0,
-  },
-  storyLikeButton: {
-    padding: 4,
   },
   storyTitle: {
     fontFamily: 'LoraBold',
@@ -876,12 +813,8 @@ const styles = StyleSheet.create({
   },
   gridBody: {
     paddingTop: 8,
+    paddingBottom: 14,
     gap: 3,
-  },
-  gridSource: {
-    fontFamily: 'Inter',
-    fontSize: 11,
-    marginBottom: 14,
   },
   kickerText: {
     fontFamily: 'InterSemiBold',
@@ -911,16 +844,6 @@ const styles = StyleSheet.create({
     minWidth: 0,
     justifyContent: 'center',
     gap: 4,
-  },
-  rowMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  rowSource: {
-    fontFamily: 'InterMedium',
-    fontSize: 12,
-    flexShrink: 1,
   },
   storyTitleRow: {
     fontSize: 17,

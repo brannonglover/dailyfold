@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   Linking,
   Platform,
   Pressable,
@@ -15,10 +17,15 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView, type WebViewMessageEvent, type WebViewNavigation } from 'react-native-webview';
 
+import { usePreferences } from '@/contexts/PreferencesContext';
 import { useTheme } from '@/hooks/useTheme';
+import { fetchArticleById } from '@/services/articles';
+import { lookupArticleById, lookupArticleByUrl, rememberOpenArticle } from '@/services/articleSession';
 import { hasOpenablePublisherUrl } from '@/utils/openPublisherBrowser';
 import { buildWebViewReaderHtml, type WebViewReaderArticle } from '@/utils/webviewReaderHtml';
 import { WEBVIEW_READABILITY_EXTRACT_JS } from '@/utils/webviewReadabilityScript';
+import { WEBVIEW_READ_PROGRESS_INJECT_JS } from '@/utils/webviewReadProgressScript';
+import { Article } from '@/types';
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   if (typeof value === 'string') return value;
@@ -51,11 +58,20 @@ type ReaderExtractMessage =
       error?: string;
     };
 
-function parseReaderMessage(raw: string): ReaderExtractMessage | null {
+type ReadProgressMessage = {
+  type: 'readProgress';
+  readPercent: number;
+};
+
+type BrowserWebMessage = ReaderExtractMessage | ReadProgressMessage;
+
+function parseBrowserWebMessage(raw: string): BrowserWebMessage | null {
   try {
-    const data = JSON.parse(raw) as ReaderExtractMessage;
-    if (!data || data.type !== 'readerResult') return null;
-    return data;
+    const data = JSON.parse(raw) as BrowserWebMessage;
+    if (!data?.type) return null;
+    if (data.type === 'readProgress') return data;
+    if (data.type === 'readerResult') return data;
+    return null;
   } catch {
     return null;
   }
@@ -69,7 +85,10 @@ export default function PublisherBrowserScreen() {
     url?: string | string[];
     title?: string | string[];
     source?: string | string[];
+    articleId?: string | string[];
   }>();
+
+  const { recordArticleOpen, recordArticleEngagement, isLiked, toggleLike } = usePreferences();
 
   const initialUrl = useMemo(() => {
     const raw = firstParam(params.url)?.trim();
@@ -85,8 +104,45 @@ export default function PublisherBrowserScreen() {
 
   const paramSource = firstParam(params.source)?.trim();
   const paramTitle = firstParam(params.title)?.trim();
+  const paramArticleId = firstParam(params.articleId)?.trim();
+
+  const resolveTrackedArticle = useCallback((): Article | undefined => {
+    if (paramArticleId) {
+      const byId = lookupArticleById(paramArticleId);
+      if (byId) return byId;
+    }
+    return lookupArticleByUrl(initialUrl ?? undefined);
+  }, [paramArticleId, initialUrl]);
+
+  const [trackedArticle, setTrackedArticle] = useState<Article | undefined>(() =>
+    resolveTrackedArticle(),
+  );
+
+  useEffect(() => {
+    const resolved = resolveTrackedArticle();
+    if (resolved) {
+      setTrackedArticle(resolved);
+      return;
+    }
+    if (!paramArticleId) return;
+
+    let cancelled = false;
+    void fetchArticleById(paramArticleId).then((fetched) => {
+      if (cancelled || !fetched) return;
+      rememberOpenArticle(fetched);
+      setTrackedArticle(fetched);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [paramArticleId, resolveTrackedArticle]);
 
   const webRef = useRef<WebView>(null);
+  const readerWebRef = useRef<WebView>(null);
+  const openedAtRef = useRef(Date.now());
+  const maxReadPercentRef = useRef(0);
+  const recordedOpenRef = useRef<string | null>(null);
   const [currentUrl, setCurrentUrl] = useState(initialUrl ?? '');
   const [pageTitle, setPageTitle] = useState(paramTitle ?? '');
   const [canGoBack, setCanGoBack] = useState(false);
@@ -95,7 +151,34 @@ export default function PublisherBrowserScreen() {
   const [hasError, setHasError] = useState(false);
   const [readerArticle, setReaderArticle] = useState<WebViewReaderArticle | null>(null);
   const [isConvertingReader, setIsConvertingReader] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState({ top: 0, right: 16 });
+  const moreButtonRef = useRef<View>(null);
   const readerMode = readerArticle != null;
+
+  useEffect(() => {
+    if (!trackedArticle) return;
+    if (recordedOpenRef.current === trackedArticle.id) return;
+    recordedOpenRef.current = trackedArticle.id;
+    recordArticleOpen(trackedArticle);
+  }, [trackedArticle, recordArticleOpen]);
+
+  useEffect(() => {
+    if (!trackedArticle) return;
+    openedAtRef.current = Date.now();
+    maxReadPercentRef.current = 0;
+
+    return () => {
+      recordArticleEngagement(trackedArticle, {
+        readPercent: Math.round(maxReadPercentRef.current),
+        dwellSeconds: Math.round((Date.now() - openedAtRef.current) / 1000),
+      });
+    };
+  }, [trackedArticle, recordArticleEngagement]);
+
+  const injectReadProgress = useCallback((target: WebView | null) => {
+    target?.injectJavaScript(WEBVIEW_READ_PROGRESS_INJECT_JS);
+  }, []);
 
   const headerLabel =
     paramSource ||
@@ -163,14 +246,54 @@ export default function PublisherBrowserScreen() {
     }
   }, [currentUrl, initialUrl]);
 
-  const handleMore = useCallback(() => {
-    const externalLabel = Platform.OS === 'ios' ? 'Open in Safari' : 'Open in browser';
-    Alert.alert(headerLabel, undefined, [
-      { text: 'Share link', onPress: () => void handleShare() },
-      { text: externalLabel, onPress: () => void handleOpenExternal() },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  }, [handleOpenExternal, handleShare, headerLabel]);
+  const handleToggleReadLater = useCallback(async () => {
+    let article = trackedArticle ?? resolveTrackedArticle();
+    if (!article && paramArticleId) {
+      const fetched = await fetchArticleById(paramArticleId);
+      if (fetched) {
+        rememberOpenArticle(fetched);
+        article = fetched;
+        setTrackedArticle(fetched);
+      }
+    }
+    if (!article) {
+      Alert.alert('Unable to save', 'This page could not be matched to a Dailyfold story.');
+      return;
+    }
+
+    toggleLike(article);
+    if (Platform.OS !== 'web') {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  }, [trackedArticle, resolveTrackedArticle, paramArticleId, toggleLike]);
+
+  const readLaterArticleId = trackedArticle?.id ?? paramArticleId;
+  const canSaveForLater = Boolean(readLaterArticleId || resolveTrackedArticle());
+  const savedForLater = readLaterArticleId ? isLiked(readLaterArticleId) : false;
+  const externalBrowserLabel = Platform.OS === 'ios' ? 'Open in Safari' : 'Open in browser';
+
+  const closeOverflowMenu = useCallback(() => {
+    setOverflowOpen(false);
+  }, []);
+
+  const openOverflowMenu = useCallback(() => {
+    moreButtonRef.current?.measureInWindow((x, y, width, height) => {
+      const windowWidth = Dimensions.get('window').width;
+      setMenuAnchor({
+        top: y + height + 6,
+        right: Math.max(12, windowWidth - x - width),
+      });
+      setOverflowOpen(true);
+    });
+  }, []);
+
+  const runOverflowAction = useCallback(
+    (action: () => void | Promise<void>) => {
+      closeOverflowMenu();
+      void action();
+    },
+    [closeOverflowMenu],
+  );
 
   const handleRetry = useCallback(() => {
     setHasError(false);
@@ -181,6 +304,7 @@ export default function PublisherBrowserScreen() {
   }, [exitReaderMode]);
 
   const handleWebBack = useCallback(() => {
+    closeOverflowMenu();
     if (readerMode) {
       exitReaderMode();
       return;
@@ -190,7 +314,7 @@ export default function PublisherBrowserScreen() {
       return;
     }
     handleClose();
-  }, [canGoBack, exitReaderMode, handleClose, readerMode]);
+  }, [canGoBack, closeOverflowMenu, exitReaderMode, handleClose, readerMode]);
 
   const enterReaderMode = useCallback(() => {
     if (isLoading || isConvertingReader || hasError) return;
@@ -208,8 +332,16 @@ export default function PublisherBrowserScreen() {
 
   const handleWebMessage = useCallback(
     (event: WebViewMessageEvent) => {
-      const message = parseReaderMessage(event.nativeEvent.data);
+      const message = parseBrowserWebMessage(event.nativeEvent.data);
       if (!message) return;
+
+      if (message.type === 'readProgress') {
+        maxReadPercentRef.current = Math.max(
+          maxReadPercentRef.current,
+          Math.min(100, message.readPercent),
+        );
+        return;
+      }
 
       clearConvertTimeout();
       setIsConvertingReader(false);
@@ -328,10 +460,12 @@ export default function PublisherBrowserScreen() {
                 <Ionicons name="share-outline" size={22} color={colors.text} />
               </Pressable>
               <Pressable
-                onPress={handleMore}
+                ref={moreButtonRef}
+                onPress={openOverflowMenu}
                 hitSlop={10}
                 accessibilityRole="button"
-                accessibilityLabel="More options">
+                accessibilityLabel="More options"
+                accessibilityState={{ expanded: overflowOpen }}>
                 <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
               </Pressable>
             </View>
@@ -348,6 +482,68 @@ export default function PublisherBrowserScreen() {
             ) : null}
           </View>
         </View>
+
+        {overflowOpen ? (
+          <View style={styles.menuLayer} pointerEvents="box-none">
+            <Pressable
+              style={styles.menuBackdrop}
+              onPress={closeOverflowMenu}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss menu"
+            />
+            <View
+              style={[
+                styles.menuPanel,
+                {
+                  top: menuAnchor.top,
+                  right: menuAnchor.right,
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}>
+              {canSaveForLater ? (
+                <Pressable
+                  onPress={() => runOverflowAction(handleToggleReadLater)}
+                  style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    savedForLater ? 'Remove from Read Later' : 'Save for Read Later'
+                  }>
+                  <Ionicons
+                    name={savedForLater ? 'bookmark' : 'bookmark-outline'}
+                    size={18}
+                    color={savedForLater ? colors.accent : colors.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.menuRowLabel,
+                      { color: savedForLater ? colors.accent : colors.text },
+                    ]}>
+                    {savedForLater ? 'Remove from Read Later' : 'Read Later'}
+                  </Text>
+                </Pressable>
+              ) : null}
+              <Pressable
+                onPress={() => runOverflowAction(handleShare)}
+                style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Share link">
+                <Ionicons name="share-outline" size={18} color={colors.textSecondary} />
+                <Text style={[styles.menuRowLabel, { color: colors.text }]}>Share link</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => runOverflowAction(handleOpenExternal)}
+                style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={externalBrowserLabel}>
+                <Ionicons name="open-outline" size={18} color={colors.textSecondary} />
+                <Text style={[styles.menuRowLabel, { color: colors.text }]}>
+                  {externalBrowserLabel}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
 
         {hasError ? (
           <View style={styles.centered}>
@@ -389,6 +585,7 @@ export default function PublisherBrowserScreen() {
                 onLoadEnd={() => {
                   setIsLoading(false);
                   setProgress(1);
+                  injectReadProgress(webRef.current);
                 }}
                 onError={() => {
                   setIsLoading(false);
@@ -417,12 +614,15 @@ export default function PublisherBrowserScreen() {
 
             {readerMode && readerHtml ? (
               <WebView
+                ref={readerWebRef}
                 source={{ html: readerHtml, baseUrl: readerArticle?.baseUrl || initialUrl }}
                 style={[styles.readerWebview, { backgroundColor: colors.background }]}
                 originWhitelist={['*']}
                 setSupportMultipleWindows={false}
                 showsVerticalScrollIndicator={false}
                 decelerationRate="normal"
+                onMessage={handleWebMessage}
+                onLoadEnd={() => injectReadProgress(readerWebRef.current)}
               />
             ) : null}
 
@@ -448,6 +648,40 @@ const styles = StyleSheet.create({
   topBarWrap: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     zIndex: 2,
+  },
+  menuLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 30,
+  },
+  menuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  menuPanel: {
+    position: 'absolute',
+    minWidth: 220,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  menuRowPressed: {
+    opacity: 0.7,
+  },
+  menuRowLabel: {
+    fontFamily: 'InterMedium',
+    fontSize: 15,
+    flexShrink: 1,
   },
   topBar: {
     flexDirection: 'row',

@@ -1,3 +1,4 @@
+import { engagementSignalMultiplier } from '@/services/articleEngagement';
 import { resolveClickedArticles } from '@/services/clickedArticles';
 import { resolveLikedArticles } from '@/services/likedArticles';
 import { articleSportTags } from '@/services/sportPreferences';
@@ -197,21 +198,31 @@ export function mergeInterestProfiles(
 }
 
 function profileFromLikedArticles(liked: Article[]): LikedInterestProfile {
+  return profileFromWeightedArticles(liked, () => 1);
+}
+
+function profileFromWeightedArticles(
+  articles: Article[],
+  weightFor: (article: Article) => number,
+): LikedInterestProfile {
   const topicScores = {} as UserPreferences['topicScores'];
   const keywordScores: Record<string, number> = {};
   const sportTagScores: Record<string, number> = {};
 
-  for (const article of liked) {
+  for (const article of articles) {
+    const weight = weightFor(article);
+    if (weight <= 0) continue;
+
     for (const topic of article.topics) {
       if (isSourceBleed(topic, article.source)) continue;
-      topicScores[topic as Topic] = (topicScores[topic as Topic] ?? 0) + 1;
+      topicScores[topic as Topic] = (topicScores[topic as Topic] ?? 0) + weight;
     }
     for (const keyword of articleInterestKeywords(article)) {
-      const weight = getInterestKeywordWeight(keyword);
-      keywordScores[keyword] = (keywordScores[keyword] ?? 0) + weight;
+      const keywordWeight = getInterestKeywordWeight(keyword);
+      keywordScores[keyword] = (keywordScores[keyword] ?? 0) + keywordWeight * weight;
     }
     for (const tag of articleSportTags(article)) {
-      sportTagScores[tag] = (sportTagScores[tag] ?? 0) + 1;
+      sportTagScores[tag] = (sportTagScores[tag] ?? 0) + weight;
     }
   }
 
@@ -298,7 +309,15 @@ export function buildInterestProfile(
   }
 
   if (clicked.length > 0) {
-    parts.push(scaleProfile(profileFromLikedArticles(clicked), CLICK_BOOST));
+    const engagement = prefs.articleEngagement ?? {};
+    parts.push(
+      scaleProfile(
+        profileFromWeightedArticles(clicked, (article) =>
+          CLICK_BOOST * engagementSignalMultiplier(engagement[article.id]),
+        ),
+        1,
+      ),
+    );
   }
 
   if (parts.length > 0) {

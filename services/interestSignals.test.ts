@@ -233,3 +233,40 @@ test('buildInterestProfile ignores clicked articles that are also liked', () => 
   assert.ok(profile);
   assert.equal(profile!.topicScores.culture, 1);
 });
+
+test('buildInterestProfile weights clicked articles by read engagement', () => {
+  const clicked = article({
+    id: 'clicked-tv',
+    title: 'Must-watch series season finale',
+    topics: ['culture'],
+  });
+  const shallowPrefs = {
+    ...basePrefs(),
+    clickedArticleIds: ['clicked-tv'],
+    clickedArticles: { 'clicked-tv': clicked },
+    articleEngagement: {
+      'clicked-tv': {
+        readPercent: 5,
+        dwellSeconds: 2,
+        updatedAt: new Date().toISOString(),
+      },
+    },
+  };
+  const deepPrefs = {
+    ...shallowPrefs,
+    articleEngagement: {
+      'clicked-tv': {
+        readPercent: 85,
+        dwellSeconds: 90,
+        updatedAt: new Date().toISOString(),
+      },
+    },
+  };
+
+  const shallowProfile = buildInterestProfile(shallowPrefs);
+  const deepProfile = buildInterestProfile(deepPrefs);
+
+  assert.ok(shallowProfile);
+  assert.ok(deepProfile);
+  assert.ok(deepProfile!.topicScores.culture! > shallowProfile!.topicScores.culture!);
+});

@@ -3,7 +3,8 @@ import {
   mergeLikedArticleSnapshot,
   removeLikedArticleSnapshot,
 } from '@/services/likedArticles';
-import { Article } from '@/types';
+import { qualifiesForContinueReading } from '@/services/articleEngagement';
+import { Article, ArticleEngagement } from '@/types';
 
 export const MAX_CLICKED_ARTICLES = 50;
 
@@ -60,4 +61,31 @@ export function pruneClickedArticlesCache(
     if (article) next[id] = article;
   }
   return next;
+}
+
+export function missingClickedArticleIds(
+  clickedArticleIds: string[],
+  cache: Record<string, Article>,
+  feedArticles: Article[],
+): string[] {
+  const available = new Set([
+    ...feedArticles.map((article) => article.id),
+    ...Object.keys(cache),
+  ]);
+  return clickedArticleIds.filter((id) => !available.has(id));
+}
+
+/** Continue queue — scrolled articles that were not explicitly saved for later. */
+export function resolveContinueReadingArticles(
+  clickedArticleIds: string[],
+  cache: Record<string, Article>,
+  feedArticles: Article[],
+  readLaterIds: Set<string>,
+  articleEngagement: Record<string, ArticleEngagement> = {},
+): Article[] {
+  return resolveClickedArticles(clickedArticleIds, cache, feedArticles).filter(
+    (article) =>
+      !readLaterIds.has(article.id) &&
+      qualifiesForContinueReading(articleEngagement[article.id]),
+  );
 }

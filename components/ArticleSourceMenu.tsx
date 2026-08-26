@@ -20,15 +20,23 @@ import {
 } from '@/utils/sourceMenuOpen';
 import { isSourceMenuDismissCooldownActive, markSourceMenuDismissed } from '@/utils/sourceMenuDismiss';
 
+export type ArticleSourceMenuPresentation = 'sourceLabel' | 'icon';
+
 interface ArticleSourceMenuProps {
   article: Article;
   /** Light text for title-on-image newspaper overlays */
   tone?: 'default' | 'onImage';
+  /**
+   * Feed cards use a quiet ⋯ so the headline stays primary; reader keeps the
+   * labeled source trigger for attribution at the top of the article.
+   */
+  presentation?: ArticleSourceMenuPresentation;
 }
 
 export function ArticleSourceMenu({
   article,
   tone = 'default',
+  presentation = 'sourceLabel',
 }: ArticleSourceMenuProps) {
   const { colors } = useTheme();
   const { sources } = usePreferences();
@@ -37,6 +45,7 @@ export function ArticleSourceMenu({
   const gestureStateRef = useRef(createSourceMenuGestureState());
   const isHosted = sourceMenu != null;
   const accentColor = tone === 'onImage' ? '#FFFFFF' : colors.accent;
+  const iconColor = tone === 'onImage' ? '#FFFFFF' : colors.textSecondary;
 
   const openLocal = useCallback(() => {
     if (isSourceMenuDismissCooldownActive()) return;
@@ -73,32 +82,46 @@ export function ArticleSourceMenu({
     return acquireFeedInteractionLock();
   }, [isHosted, localOpen]);
 
+  const accessibilityLabel =
+    presentation === 'icon'
+      ? `Story options for ${article.title}`
+      : `Source options for ${article.source}`;
+
   return (
     <>
       <Pressable
         onPress={handlePress}
         onPressOut={handlePressOut}
         hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-        style={({ pressed }) => [styles.trigger, pressed && styles.triggerPressed]}
+        style={({ pressed }) => [
+          presentation === 'icon' ? styles.iconTrigger : styles.trigger,
+          pressed && styles.triggerPressed,
+        ]}
         accessibilityRole="button"
-        accessibilityLabel={`Source options for ${article.source}`}
+        accessibilityLabel={accessibilityLabel}
         accessibilityHint="Hide this outlet or show fewer stories like this one">
-        <Text
-          style={[
-            styles.source,
-            tone === 'onImage' && styles.sourceOnImage,
-            { color: accentColor },
-          ]}
-          numberOfLines={1}
-          ellipsizeMode="tail">
-          {article.source}
-        </Text>
-        <Ionicons
-          name="chevron-down"
-          size={13}
-          color={accentColor}
-          style={styles.chevron}
-        />
+        {presentation === 'icon' ? (
+          <Ionicons name="ellipsis-horizontal" size={18} color={iconColor} />
+        ) : (
+          <>
+            <Text
+              style={[
+                styles.source,
+                tone === 'onImage' && styles.sourceOnImage,
+                { color: accentColor },
+              ]}
+              numberOfLines={1}
+              ellipsizeMode="tail">
+              {article.source}
+            </Text>
+            <Ionicons
+              name="chevron-down"
+              size={13}
+              color={accentColor}
+              style={styles.chevron}
+            />
+          </>
+        )}
       </Pressable>
 
       {!isHosted && localOpen ? (
@@ -119,6 +142,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     marginVertical: -6,
     marginHorizontal: -4,
+  },
+  iconTrigger: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+    marginVertical: -4,
+    marginHorizontal: -2,
   },
   triggerPressed: {
     opacity: 0.72,

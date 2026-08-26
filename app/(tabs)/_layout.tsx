@@ -63,8 +63,8 @@ function IosNativeTabs() {
         <Icon sf={{ default: 'sparkles', selected: 'sparkles' }} />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="saved">
-        <Label>Liked</Label>
-        <Icon sf={{ default: 'heart', selected: 'heart.fill' }} />
+        <Label>Reading</Label>
+        <Icon sf={{ default: 'book', selected: 'book.fill' }} />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="profile">
         <Label>Profile</Label>
@@ -153,9 +153,9 @@ function JsTabs() {
       <Tabs.Screen
         name="saved"
         options={{
-          title: 'Liked',
+          title: 'Reading',
           lazy: false,
-          tabBarIcon: ({ color }) => <Ionicons name="heart-outline" size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="book-outline" size={24} color={color} />,
         }}
       />
       <Tabs.Screen

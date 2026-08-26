@@ -1,6 +1,7 @@
 import type { ColorScheme } from '@/constants/Colors';
 import Colors from '@/constants/Colors';
 import { stripGuardianRegistrationModalHtml } from '@/catalog/guardianLiveBlogSidebar';
+import { readProgressScriptTag } from '@/utils/webviewReadProgressScript';
 
 export type WebViewReaderArticle = {
   title: string;
@@ -132,6 +133,7 @@ export function buildWebViewReaderHtml(
   ${meta ? `<p class="meta">${meta}</p>` : ''}
   <h1>${title}</h1>
   <article>${content}</article>
+  ${readProgressScriptTag()}
 </body>
 </html>`;
 }

@@ -44,6 +44,10 @@ import {
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
 import { fetchArticleById } from '@/services/articles';
 import {
+  capArticleEngagementMap,
+  mergeArticleEngagement,
+} from '@/services/articleEngagement';
+import {
   capClickedArticleIds,
   mergeClickedArticleSnapshot,
   pruneClickedArticlesCache,
@@ -93,7 +97,13 @@ interface PreferencesContextValue {
   recordFeedClick: (article: Article) => void;
   /** Log a meaningful article open (feed tap, reader, saved row, etc.). */
   recordArticleOpen: (article: Article) => void;
+  /** Record read depth and dwell time when leaving the in-app reader. */
+  recordArticleEngagement: (
+    article: Article,
+    engagement: { readPercent: number; dwellSeconds: number },
+  ) => void;
   rememberLikedArticles: (articles: Article[]) => Promise<void>;
+  rememberClickedArticles: (articles: Article[]) => Promise<void>;
   topTopics: string[];
   topSportTags: string[];
   topKeywords: string[];
@@ -335,6 +345,59 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     [user, persist],
   );
 
+  const recordArticleOpen = useCallback(
+    (article: Article) => {
+      recordFeedClick(article);
+    },
+    [recordFeedClick],
+  );
+
+  const recordArticleEngagement = useCallback(
+    (article: Article, engagement: { readPercent: number; dwellSeconds: number }) => {
+      if (!user) return;
+
+      const current = preferencesRef.current;
+      if (!current) return;
+
+      const alreadyClicked = current.clickedArticleIds?.includes(article.id) ?? false;
+      const isReadLater = current.likedArticleIds.includes(article.id);
+      let clickedArticleIds = alreadyClicked
+        ? (current.clickedArticleIds ?? [])
+        : isReadLater
+          ? (current.clickedArticleIds ?? [])
+          : capClickedArticleIds([...(current.clickedArticleIds ?? []), article.id]);
+
+      let clickedArticles = mergeClickedArticleSnapshot(
+        current.clickedArticles ?? {},
+        article,
+      );
+      clickedArticles = pruneClickedArticlesCache(clickedArticles, clickedArticleIds);
+
+      const merged = mergeArticleEngagement(current.articleEngagement?.[article.id], engagement);
+      let articleEngagement = {
+        ...(current.articleEngagement ?? {}),
+        [article.id]: merged,
+      };
+
+      const engagementIds = isReadLater
+        ? [...clickedArticleIds, ...current.likedArticleIds]
+        : clickedArticleIds;
+      articleEngagement = capArticleEngagementMap(articleEngagement, engagementIds);
+
+      const next = reconcileInterestScores({
+        ...current,
+        clickedArticleIds,
+        clickedArticles,
+        articleEngagement,
+      });
+
+      InteractionManager.runAfterInteractions(() => {
+        void persist(next);
+      });
+    },
+    [user, persist],
+  );
+
   const rememberLikedArticles = useCallback(
     async (articles: Article[]) => {
       if (!user || !preferences || articles.length === 0) return;
@@ -345,6 +408,20 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       }
 
       await persist(reconcileInterestScores({ ...preferences, likedArticles }));
+    },
+    [user, preferences, persist],
+  );
+
+  const rememberClickedArticles = useCallback(
+    async (articles: Article[]) => {
+      if (!user || !preferences || articles.length === 0) return;
+
+      let clickedArticles = preferences.clickedArticles ?? {};
+      for (const article of articles) {
+        clickedArticles = mergeClickedArticleSnapshot(clickedArticles, article);
+      }
+
+      await persist({ ...preferences, clickedArticles });
     },
     [user, preferences, persist],
   );
@@ -750,8 +827,10 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       isLiked,
       toggleLike,
       recordFeedClick,
-      recordArticleOpen: recordFeedClick,
+      recordArticleOpen,
+      recordArticleEngagement,
       rememberLikedArticles,
+      rememberClickedArticles,
       topTopics,
       topSportTags,
       topKeywords,
@@ -797,7 +876,10 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       isLiked,
       toggleLike,
       recordFeedClick,
+      recordArticleOpen,
+      recordArticleEngagement,
       rememberLikedArticles,
+      rememberClickedArticles,
       topTopics,
       topSportTags,
       topKeywords,

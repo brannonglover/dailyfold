@@ -136,7 +136,7 @@ export default function SourcesScreen() {
 
         <Text style={[styles.note, { color: colors.textSecondary }]}>
           At least one source must stay on. Changes apply immediately across Latest, For You, and
-          Liked.
+          Reading.
         </Text>
       </ScrollView>
     </>

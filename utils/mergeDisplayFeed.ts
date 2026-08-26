@@ -193,14 +193,14 @@ export function mergePaginatedDisplayFeed(
   prev: Article[],
   newOnly: Article[],
   sourceArticles: Article[],
-  orderNew: (items: Article[]) => Article[],
+  orderNew: (items: Article[], prior: Article[]) => Article[],
 ): Article[] {
   if (newOnly.length === 0) return prev;
 
   const allowedIds = new Set(sourceArticles.map((article) => article.id));
   const visiblePrev = prev.filter((article) => allowedIds.has(article.id));
   const indexById = new Map(sourceArticles.map((article, index) => [article.id, index]));
-  const orderedNew = orderNew(newOnly);
+  const orderedNew = orderNew(newOnly, visiblePrev);
   const prevMaxIndex = maxSourceIndex(visiblePrev, indexById);
   const newMinIndex = minSourceIndex(newOnly, indexById);
 

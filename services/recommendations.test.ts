@@ -595,6 +595,43 @@ test('buildLatestPersonalizationKey tracks liked and opened article ids', () => 
   assert.equal(key, JSON.stringify({ liked: ['a'], clicked: ['b', 'c'] }));
 });
 
+test('getLatestFeed diversifyTopics drops routine sports but keeps other topics near the top', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+  const old = new Date(now - 8 * 60 * 60 * 1000).toISOString();
+
+  const sports = Array.from({ length: 12 }, (_, i) =>
+    article(`sport-${i}`, `NFL recap ${i}`, {
+      topics: ['sports'],
+      source: 'ESPN NFL',
+      sportTags: ['football'],
+      publishedAt: old,
+    }),
+  );
+  const world = article('world-0', 'Election update', {
+    topics: ['world'],
+    source: 'BBC News',
+    publishedAt: recent(120_000),
+  });
+  const tech = article('tech-0', 'AI chip launch', {
+    topics: ['technology'],
+    source: 'Wired',
+    publishedAt: recent(90_000),
+  });
+
+  const ordered = getLatestFeed([...sports, world, tech], basePrefs({ likedArticleIds: [] }), {
+    diversifyTopics: true,
+    nowMs: now,
+  });
+
+  const firstFiveTopics = ordered.slice(0, 5).map((a) => a.topics[0]);
+  assert.ok(
+    firstFiveTopics.some((topic) => topic !== 'sports'),
+    `expected non-sports near the top, got ${firstFiveTopics.join(', ')}`,
+  );
+  assert.ok(!ordered.some((a) => a.id.startsWith('sport-')));
+});
+
 test('getLatestFeed falls back to chronological order without interest signals', () => {
   const now = Date.now();
   const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();

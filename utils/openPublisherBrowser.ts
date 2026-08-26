@@ -6,6 +6,7 @@ import { claimArticleOpen } from '@/utils/articleOpenLock';
 export type OpenPublisherOptions = {
   title?: string;
   source?: string;
+  articleId?: string;
 };
 
 /** True when the article has an http(s) permalink suitable for "Open on …". */
@@ -22,8 +23,10 @@ export function publisherBrowserHref(
   const params = new URLSearchParams({ url });
   const title = options?.title?.trim();
   const source = options?.source?.trim();
+  const articleId = options?.articleId?.trim();
   if (title) params.set('title', title);
   if (source) params.set('source', source);
+  if (articleId) params.set('articleId', articleId);
   return `/browser?${params.toString()}` as `/browser?${string}`;
 }
 

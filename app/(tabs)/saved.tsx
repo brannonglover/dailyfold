@@ -1,46 +1,63 @@
 import { useMemo, useState, memo } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import { CreateFolderModal } from '@/components/CreateFolderModal';
-import { FolderPickerModal } from '@/components/FolderPickerModal';
-import { LikedArticleList } from '@/components/LikedArticleList';
-import { LikedFoldersBar } from '@/components/LikedFoldersBar';
-import { TAB_BAR_HEIGHT } from '@/constants/Layout';
+import { ReadingArticleList } from '@/components/ReadingArticleList';
+import { ReadingSegment } from '@/components/ReadingSegmentBar';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useLikedArticles } from '@/hooks/useLikedArticles';
+import { useReadingHistory } from '@/hooks/useReadingHistory';
 import { useTheme } from '@/hooks/useTheme';
 
 function SavedScreenContent() {
   const { colors } = useTheme();
-  const { preferences, folders, createFolder } = usePreferences();
-  const { articles: allLiked, isLoading, isRefreshing, error, notice, refresh } =
-    useLikedArticles();
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
-  const [showCreateFolder, setShowCreateFolder] = useState(false);
-  const [organizeArticleId, setOrganizeArticleId] = useState<string | null>(null);
+  const { preferences } = usePreferences();
+  const [segment, setSegment] = useState<ReadingSegment>('continue');
+  const {
+    articles: continueArticles,
+    isLoading: isContinueLoading,
+    isRefreshing: isContinueRefreshing,
+    error: continueError,
+    notice: continueNotice,
+    refresh: refreshContinue,
+  } = useReadingHistory();
+  const {
+    articles: readLaterArticles,
+    isLoading: isReadLaterLoading,
+    isRefreshing: isReadLaterRefreshing,
+    error: readLaterError,
+    notice: readLaterNotice,
+    refresh: refreshReadLater,
+  } = useLikedArticles();
 
-  const displayed = useMemo(() => {
-    if (!selectedFolderId) return allLiked;
+  const engagementByArticleId = useMemo(() => {
+    const engagement = preferences?.articleEngagement ?? {};
+    const map: Record<string, number | undefined> = {};
+    for (const [id, entry] of Object.entries(engagement)) {
+      map[id] = entry.readPercent;
+    }
+    return map;
+  }, [preferences?.articleEngagement]);
 
-    const folder = folders.find((f) => f.id === selectedFolderId);
-    if (!folder) return allLiked;
+  const displayed =
+    segment === 'continue' ? continueArticles : readLaterArticles;
+  const isLoading = segment === 'continue' ? isContinueLoading : isReadLaterLoading;
+  const isRefreshing =
+    segment === 'continue' ? isContinueRefreshing : isReadLaterRefreshing;
+  const error = segment === 'continue' ? continueError : readLaterError;
+  const notice = segment === 'continue' ? continueNotice : readLaterNotice;
+  const refresh = segment === 'continue' ? refreshContinue : refreshReadLater;
 
-    const folderIds = new Set(folder.articleIds);
-    return allLiked.filter((a) => folderIds.has(a.id));
-  }, [allLiked, selectedFolderId, folders]);
+  const readLaterCount = preferences?.likedArticleIds.length ?? 0;
+  const continueCount = continueArticles.length;
 
-  const selectedFolder = folders.find((f) => f.id === selectedFolderId);
-  const likedCount = preferences?.likedArticleIds.length ?? 0;
-
-  const subtitle = selectedFolder
-    ? `${displayed.length} ${displayed.length === 1 ? 'article' : 'articles'} in ${selectedFolder.name}`
-    : `${allLiked.length} ${allLiked.length === 1 ? 'article' : 'articles'} saved`;
-
-  const emptyMessage = selectedFolder
-    ? `Nothing in "${selectedFolder.name}" yet. Long press a saved article to add it here.`
-    : likedCount > 0 && allLiked.length === 0
-      ? 'Loading your saved stories…'
-      : 'Like a story to save it here. Long press a saved article to add it to folders.';
+  const emptyMessage =
+    segment === 'continue'
+      ? isContinueLoading
+        ? 'Loading your reading history…'
+        : 'Start reading any story from Latest or For You — your place is saved here automatically.'
+      : readLaterCount > 0 && readLaterArticles.length === 0
+        ? 'Loading your queue…'
+        : 'Tap Read Later on any story to save it here. One queue, no folders.';
 
   if (isLoading) {
     return (
@@ -51,54 +68,19 @@ function SavedScreenContent() {
   }
 
   return (
-    <>
-      <View style={styles.flex}>
-        {error ? (
-          <Text style={[styles.error, { color: colors.accent, backgroundColor: colors.background }]}>
-            {error}
-          </Text>
-        ) : null}
-        {notice ? (
-          <Text style={[styles.notice, { color: colors.textSecondary, backgroundColor: colors.background }]}>
-            {notice}
-          </Text>
-        ) : null}
-        <LikedArticleList
-          articles={displayed}
-          title="Liked"
-          subtitle={subtitle}
-          emptyMessage={emptyMessage}
-          isRefreshing={isRefreshing}
-          onRefresh={refresh}
-          onArticleLongPress={(article) => setOrganizeArticleId(article.id)}
-          headerExtra={
-            <LikedFoldersBar
-              folders={folders}
-              selectedFolderId={selectedFolderId}
-              allCount={allLiked.length}
-              onSelectFolder={setSelectedFolderId}
-              onCreateFolder={() => setShowCreateFolder(true)}
-            />
-          }
-        />
-      </View>
-
-      <CreateFolderModal
-        visible={showCreateFolder}
-        onClose={() => setShowCreateFolder(false)}
-        onCreate={async (name) => {
-          const folder = await createFolder(name);
-          if (folder) setSelectedFolderId(folder.id);
-        }}
+    <View style={styles.flex}>
+      <ReadingArticleList
+        articles={displayed}
+        segment={segment}
+        continueCount={continueCount}
+        readLaterCount={readLaterCount}
+        onSelectSegment={setSegment}
+        engagementByArticleId={engagementByArticleId}
+        emptyMessage={notice ?? error ?? emptyMessage}
+        isRefreshing={isRefreshing}
+        onRefresh={refresh}
       />
-
-      <FolderPickerModal
-        visible={organizeArticleId !== null}
-        articleId={organizeArticleId ?? ''}
-        bottomOffset={TAB_BAR_HEIGHT}
-        onClose={() => setOrganizeArticleId(null)}
-      />
-    </>
+    </View>
   );
 }
 
@@ -112,19 +94,5 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  error: {
-    fontFamily: 'Inter',
-    fontSize: 12,
-    textAlign: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  notice: {
-    fontFamily: 'Inter',
-    fontSize: 12,
-    textAlign: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
   },
 });

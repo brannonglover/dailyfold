@@ -88,6 +88,7 @@ export default function ArticleScreen() {
       publisherBrowserHref(displayArticle.url, {
         title: displayArticle.title,
         source: displayArticle.source,
+        articleId: displayArticle.id,
       }),
     );
   }, [displayArticle, recordArticleOpen, router]);

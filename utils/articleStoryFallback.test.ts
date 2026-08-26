@@ -80,7 +80,7 @@ test('storyTitlesMatch rejects unrelated headlines on the same day', () => {
   );
 });
 
-test('articlesAreSameStory requires the same UTC calendar day', () => {
+test('articlesAreSameStory matches related headlines within 48 hours', () => {
   const early = article({
     id: 'a',
     title: 'World Cup ref from Somalia denied entry to U.S.',
@@ -101,7 +101,46 @@ test('articlesAreSameStory requires the same UTC calendar day', () => {
   });
 
   assert.equal(articlesAreSameStory(early, sameDay), true);
-  assert.equal(articlesAreSameStory(early, nextDay), false);
+  assert.equal(articlesAreSameStory(early, nextDay), true);
+});
+
+test('articlesAreSameStory ignores identical headlines after 48 hours', () => {
+  const older = article({
+    id: 'a',
+    title: 'Markets Rally',
+    source: 'CNN',
+    publishedAt: '2026-06-01T12:00:00.000Z',
+  });
+  const recent = article({
+    id: 'b',
+    title: 'Markets Rally',
+    source: 'BBC News',
+    publishedAt: '2026-06-04T12:00:00.000Z',
+  });
+
+  assert.equal(articlesAreSameStory(older, recent), false);
+});
+
+test('applyArticleStoryFallbacks collapses identical cross-outlet headlines on adjacent days', () => {
+  const espnSoccer = article({
+    id: 'espn-soccer',
+    title: 'Mbappé bags hat trick as Madrid stars shine in win',
+    source: 'ESPN Soccer',
+    topics: ['sports'],
+    imageUrl: 'https://a.espncdn.com/photo/mbappe.jpg',
+    publishedAt: '2026-08-26T22:00:00.000Z',
+  });
+  const espnUk = article({
+    id: 'espn-uk',
+    title: 'Mbappé bags hat trick as Madrid stars shine in win',
+    source: 'ESPN UK Football',
+    topics: ['sports'],
+    imageUrl: 'https://a.espncdn.com/photo/mbappe-uk.jpg',
+    publishedAt: '2026-08-27T06:00:00.000Z',
+  });
+
+  const result = applyArticleStoryFallbacks([espnSoccer, espnUk]);
+  assert.equal(result.length, 1);
 });
 
 test('applyArticleStoryFallbacks swaps imageless story for sibling with hero image', () => {

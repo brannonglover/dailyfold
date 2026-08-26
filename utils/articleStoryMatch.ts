@@ -23,6 +23,9 @@ export function normalizeStoryTitle(title: string): string {
   return normalized.replace(/\s+/g, ' ').trim();
 }
 
+/** Stories published within this window can collapse as one event across outlets. */
+export const SAME_STORY_WINDOW_MS = 48 * 60 * 60 * 1000;
+
 /** Groups likely duplicates: same normalized title on the same UTC calendar day. */
 export function articleStoryKey(article: Article): string {
   const date = article.publishedAt.slice(0, 10);
@@ -57,9 +60,13 @@ export function storyTitlesMatch(a: string, b: string): boolean {
   return overlap >= MIN_SHARED_STORY_TOKENS && overlap / minSize >= MIN_STORY_TITLE_OVERLAP_RATIO;
 }
 
-/** Same UTC calendar day and matching headline signals. */
+function publishedAtMs(article: Article): number {
+  return new Date(article.publishedAt).getTime();
+}
+
+/** Same story window and matching headline signals. */
 export function articlesAreSameStory(a: Article, b: Article): boolean {
-  if (a.publishedAt.slice(0, 10) !== b.publishedAt.slice(0, 10)) return false;
+  if (Math.abs(publishedAtMs(a) - publishedAtMs(b)) > SAME_STORY_WINDOW_MS) return false;
   return storyTitlesMatch(a.title, b.title);
 }
 
@@ -73,13 +80,8 @@ export function pickBestStoryRepresentative(candidates: Article[]): Article | nu
 /**
  * Cluster feed rows that describe the same story (union of pairwise matches).
  *
- * `articlesAreSameStory` requires an exact same-day match before ever comparing titles,
- * and `storyTitlesMatch` re-normalizes both titles (several regex passes each, including
- * Unicode-aware character classes) on every call. Calling it directly for every pair made
- * this O(n²) in comparisons *and* redundantly re-normalized the same title O(n) times —
- * with real feed sizes (hundreds to low thousands of articles) that compounds into
- * multi-second stalls. Normalizing once per article and bucketing by day first (pairs
- * across days can never match anyway) produces identical clustering with far less work.
+ * Buckets by UTC day for efficiency, then also compares adjacent days so late-night
+ * and early-morning copies of the same headline (common across ESPN outlets) collapse.
  */
 export function clusterStoryArticleIndices(articles: Article[]): number[][] {
   const n = articles.length;
@@ -134,11 +136,31 @@ export function clusterStoryArticleIndices(articles: Article[]): number[][] {
     else byDate.set(dates[i]!, [i]);
   }
 
-  for (const indices of byDate.values()) {
+  const sortedDates = [...byDate.keys()].sort();
+
+  function unionMatchingPairs(indices: number[]): void {
     for (let a = 0; a < indices.length; a += 1) {
       for (let b = a + 1; b < indices.length; b += 1) {
         const i = indices[a]!;
         const j = indices[b]!;
+        if (sameStory(i, j)) union(i, j);
+      }
+    }
+  }
+
+  for (let d = 0; d < sortedDates.length; d += 1) {
+    unionMatchingPairs(byDate.get(sortedDates[d]!)!);
+
+    const nextDate = sortedDates[d + 1];
+    if (!nextDate) continue;
+
+    const left = byDate.get(sortedDates[d]!)!;
+    const right = byDate.get(nextDate)!;
+    for (const i of left) {
+      for (const j of right) {
+        if (Math.abs(publishedAtMs(articles[i]!) - publishedAtMs(articles[j]!)) > SAME_STORY_WINDOW_MS) {
+          continue;
+        }
         if (sameStory(i, j)) union(i, j);
       }
     }

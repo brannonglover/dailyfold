@@ -1,5 +1,6 @@
 import { SPORT_TAG_LABELS } from '@/catalog/sports';
 import { CURIOSITY_LABELS } from '@/constants/curiosities';
+import { engagementSignalMultiplier } from '@/services/articleEngagement';
 import { resolveClickedArticles } from '@/services/clickedArticles';
 import {
   articleInterestKeywords,
@@ -30,6 +31,7 @@ import {
 } from '@/utils/forYouTopics';
 import { rankArticlesForSearchQuery } from '@/catalog/articleSearch';
 import { orderLatestFeed, TRENDING_WINDOW_MS, type OrderLatestFeedOptions } from '@/utils/feedOrdering';
+import { limitSportsInAllTopicsFeed } from '@/utils/limitAllTopicsSports';
 import { isBreakingTrendingArticle } from '@/utils/trendingArticles';
 
 const MIN_SOURCE_AFFINITY = CLICK_BOOST;
@@ -208,6 +210,8 @@ export function compareLatestFeedArticles(
 export type GetLatestFeedOptions = OrderLatestFeedOptions & {
   /** Test hook — defaults to Date.now(). */
   nowMs?: number;
+  /** Sports already visible — keeps pagination from exceeding the All-topics sports cap. */
+  priorSports?: Article[];
 };
 
 /** Latest feed: chronological with light spreading, boosted by open/like signals. */
@@ -216,16 +220,21 @@ export function getLatestFeed(
   prefs: UserPreferences | null,
   options?: GetLatestFeedOptions,
 ): Article[] {
+  const nowMs = options?.nowMs ?? Date.now();
+  const pool =
+    options?.diversifyTopics === true
+      ? limitSportsInAllTopicsFeed(articles, nowMs, { priorSports: options?.priorSports })
+      : articles;
+
   const profile = prefs ? buildInterestProfile(prefs, articles) : null;
   if (!profile || !hasInterestSignals(profile)) {
-    return orderLatestFeed(articles, options);
+    return orderLatestFeed(pool, options);
   }
 
-  const nowMs = options?.nowMs ?? Date.now();
   const compareWithinBucket = (left: Article, right: Article) =>
     compareLatestFeedArticles(left, right, profile, nowMs);
 
-  return orderLatestFeed(articles, { ...options, compareWithinBucket });
+  return orderLatestFeed(pool, { ...options, compareWithinBucket });
 }
 
 export type ForYouInterestKind = 'topic' | 'keyword' | 'sportTag';
@@ -402,7 +411,9 @@ function buildLikedSourceScores(
     scores[item.source] = (scores[item.source] ?? 0) + LIKE_BOOST;
   }
   for (const item of clicked) {
-    scores[item.source] = (scores[item.source] ?? 0) + CLICK_BOOST;
+    const engagement = prefs.articleEngagement?.[item.id];
+    scores[item.source] =
+      (scores[item.source] ?? 0) + CLICK_BOOST * engagementSignalMultiplier(engagement);
   }
   return scores;
 }
@@ -459,7 +470,7 @@ export function getArticleMatchReasons(
       if (BROAD_TOPICS.has(topic)) continue;
       const score = profile.topicScores[topic as Topic] ?? 0;
       if (score < MIN_TOPIC_ONLY_AFFINITY) continue;
-      addReason('Similar to articles you liked', score * TOPIC_WEIGHT);
+      addReason('Similar to articles you read', score * TOPIC_WEIGHT);
       break;
     }
   }
@@ -498,7 +509,7 @@ export function buildArticleMatchReasonsById(
 export function getPersonalizationSummary(prefs: UserPreferences | null, limit = 3): string {
   const profile = prefs ? buildInterestProfile(prefs) : null;
   if (!profile || !hasInterestSignals(profile)) {
-    return 'Like articles or tap stories on Latest to personalize your feed';
+    return 'Read stories on Latest to personalize your feed';
   }
 
   const labels = [
@@ -508,7 +519,7 @@ export function getPersonalizationSummary(prefs: UserPreferences | null, limit =
   ];
 
   const unique = [...new Set(labels)].slice(0, limit);
-  if (unique.length === 0) return 'Like articles or tap stories on Latest to personalize your feed';
+  if (unique.length === 0) return 'Read stories on Latest to personalize your feed';
   return `Based on your interest in ${unique.join(', ')}`;
 }
 

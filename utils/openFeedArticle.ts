@@ -30,6 +30,7 @@ export async function openFeedArticle(
     await openPublisherArticle(article.url, {
       title: article.title,
       source: article.source,
+      articleId: article.id,
     });
     return;
   }

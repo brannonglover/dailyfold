@@ -105,7 +105,7 @@ test('limitSportsInAllTopicsFeed keeps separate caps for different sport tags', 
   ];
 
   const result = limitSportsInAllTopicsFeed([...nfl, ...soccer], now);
-  assert.equal(result.length, ALL_TOPICS_SPORTS_PER_TAG_LIMIT * 2);
+  assert.equal(result.length, 2);
   assert.ok(result.some((a) => a.id.startsWith('nfl-')));
   assert.ok(result.some((a) => a.id.startsWith('soccer-')));
 });
@@ -145,4 +145,27 @@ test('limitSportsInAllTopicsFeed preserves input order for kept rows', () => {
 
   const result = limitSportsInAllTopicsFeed(articles, now);
   assert.deepEqual(result.map((a) => a.id), ['world', 'nfl', 'tech']);
+});
+
+test('limitSportsInAllTopicsFeed respects sports already on screen when paginating', () => {
+  const now = Date.now();
+  const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+  const prior = Array.from({ length: ALL_TOPICS_SPORTS_TOTAL_LIMIT }, (_, index) =>
+    article(`prior-${index}`, ['sports'], recent((index + 1) * 60 * 1000), {
+      source: `Outlet ${index}`,
+      sportTags: ['football'],
+      title: `Prior sports ${index}`,
+    }),
+  );
+  const incoming = article('incoming', ['sports'], recent(20 * 60 * 1000), {
+    source: 'ESPN',
+    sportTags: ['football'],
+    title: 'Incoming sports story',
+  });
+
+  const result = limitSportsInAllTopicsFeed([incoming, article('world', ['world'], recent(90_000))], now, {
+    priorSports: prior,
+  });
+
+  assert.deepEqual(result.map((a) => a.id), ['world']);
 });
