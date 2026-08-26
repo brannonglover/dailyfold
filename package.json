@@ -1,7 +1,7 @@
 {
   "name": "dailyfold",
   "main": "index.js",
-  "version": "2.16.6",
+  "version": "2.17.0",
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/lora": "^0.4.2",
