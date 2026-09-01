@@ -334,3 +334,22 @@ test('buildNotForMeOptions for Yahoo Sports avoids headline person names and fra
   assert.ok(!labels.includes('Show less Set'));
   assert.ok(!labels.includes('Show less Massimiliano'));
 });
+
+test('buildNotForMeOptions offers college football for Notre Dame camp headline', () => {
+  const options = buildNotForMeOptions(
+    {
+      ...nflArticle,
+      id: 'nd-freshman-1',
+      title: 'A pair of freshman impressing Notre Dame during fall camp',
+      excerpt: 'True freshmen Ian Premer and Devin Fitzgerald stood out at practice',
+      sportTags: ['baseball'],
+    },
+    FALLBACK_SOURCES,
+  );
+  const labels = options.map((option) => option.label);
+
+  assert.ok(labels.includes('Show less College Football'));
+  assert.ok(!labels.includes('Show less Baseball'));
+  assert.ok(!labels.includes('Show less Running'));
+  assert.ok(!labels.includes('Show less NFL'));
+});

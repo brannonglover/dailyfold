@@ -142,6 +142,8 @@ interface PreferencesContextValue {
   hideSportTagFromArticle: (article: Article, tag: SportTag) => Promise<void>;
   hideKeywordFromArticle: (article: Article, keyword: string) => Promise<void>;
   hideSimilarToArticle: (article: Article) => Promise<void>;
+  exemptReadingLearningsTopic: (topic: Topic) => Promise<void>;
+  exemptReadingLearningsSportTag: (tag: SportTag) => Promise<void>;
 }
 
 const PreferencesContext = createContext<PreferencesContextValue | null>(null);
@@ -687,6 +689,32 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     [user, preferences, persist],
   );
 
+  const exemptReadingLearningsTopic = useCallback(
+    async (topic: Topic) => {
+      if (!user || !preferences) return;
+      const current = preferences.readingLearningsExemptTopics ?? [];
+      if (current.includes(topic)) return;
+      await persist({
+        ...preferences,
+        readingLearningsExemptTopics: [...current, topic],
+      });
+    },
+    [user, preferences, persist],
+  );
+
+  const exemptReadingLearningsSportTag = useCallback(
+    async (tag: SportTag) => {
+      if (!user || !preferences) return;
+      const current = preferences.readingLearningsExemptSportTags ?? [];
+      if (current.includes(tag)) return;
+      await persist({
+        ...preferences,
+        readingLearningsExemptSportTags: [...current, tag],
+      });
+    },
+    [user, preferences, persist],
+  );
+
   const toggleTopic = useCallback(
     async (topic: Topic) => {
       if (!user || !preferences) return;
@@ -868,6 +896,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       hideSportTagFromArticle,
       hideKeywordFromArticle,
       hideSimilarToArticle,
+      exemptReadingLearningsTopic,
+      exemptReadingLearningsSportTag,
     }),
     [
       preferences,
@@ -916,6 +946,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       hideSportTagFromArticle,
       hideKeywordFromArticle,
       hideSimilarToArticle,
+      exemptReadingLearningsTopic,
+      exemptReadingLearningsSportTag,
     ],
   );
 

@@ -2,6 +2,7 @@ import { SOCCER_LEAGUE_TAGS } from '@/catalog/sports';
 import { FALLBACK_SOURCES } from '@/data/sources';
 import { filterArticlesByBlocks } from '@/services/blockPreferences';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
+import { filterArticlesByReadingLearnings } from '@/services/readingLearnings';
 import {
   buildSourcePrimaryTopicMap,
   filterArticlesBySources,
@@ -71,6 +72,11 @@ export function applyFeedFilters(
     }
 
     result = filterArticlesByBlocks(result, withoutActiveSportTagBlocks(prefs));
+
+    result = filterArticlesByReadingLearnings(result, prefs, {
+      exemptTopics: isAllTopicsEnabled(prefs.enabledTopics) ? [] : prefs.enabledTopics,
+      exemptSportTags: prefs.enabledSportTags,
+    });
   }
 
   return filterArticlesWithRealHeroImage(result);

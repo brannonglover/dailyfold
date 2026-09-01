@@ -133,6 +133,8 @@ function inheritsMtbFromSource(text: string, baseTags: SportTag[]): boolean {
 
 function matchesSportTag(tag: SportTag, text: string): boolean {
   if (tag === 'mtb') return matchesMtbTag(text);
+  if (tag === 'running') return matchesRunningTag(text);
+  if (tag === 'college-basketball') return matchesCollegeBasketballTag(text);
   const pattern = patternForTag(tag);
   return pattern ? pattern.test(text) : false;
 }
@@ -141,10 +143,53 @@ const NFL_INFERENCE_PATTERN =
   /\b(nfl|super bowl|quarterback|touchdown|linebacker|wide receiver|american football)\b/i;
 
 const COLLEGE_FOOTBALL_PATTERN =
-  /\b(college football|ncaa football|ncaa fbs|ncaa fcs|\bfbs\b|\bfcs\b|heisman|college football playoff|cf playoff|\bcfp\b|big ten football|pac-?12 football|big 12 football)\b/i;
+  /\b(college football|ncaa football|ncaa fbs|ncaa fcs|\bfbs\b|\bfcs\b|heisman|college football playoff|cf playoff|\bcfp\b|big ten football|sec football|acc football|pac-?12 football|big 12 football)\b/i;
+
+/** Programs and camp vocabulary common in CFB RSS — not exhaustive FBS, but covers syndicated headlines. */
+const CFB_SCHOOL_PATTERN =
+  /\b(notre dame|fighting irish|northwestern|ohio state|penn state|michigan state|florida state|texas a&m|texas am|oklahoma state|oregon state|washington state|iowa state|kansas state|arizona state|mississippi state|nc state|boise state|alabama|auburn|clemson|georgia|tennessee|wisconsin|nebraska|miami hurricanes|florida gators|lsu|\buc\b|\busc\b|\bucla\b)\b/i;
+
+const CFB_PRACTICE_PATTERN =
+  /\b(fall camp|spring practice|true freshman|redshirt freshman|signing day|247sports|recruiting class|pass rusher|cornerback|linebacker|running back|running backs|wide receiver|touchdown pass|freshman|freshmen)\b/i;
+
+/** "{School} football" in US feeds — not European/association-football phrasing. */
+const SCHOOL_FOOTBALL_PATTERN =
+  /\b(?!premier league |champions league |european |international |world |fantasy |association )[a-z]+(?:\s[a-z]+)*\sfootball\b/i;
 
 const COLLEGE_BASKETBALL_PATTERN =
   /\b(college basketball|ncaa basketball|ncaa tournament|march madness|final four|sweet sixteen|sweet 16|elite eight|elite 8|college hoops)\b/i;
+
+const RUNNING_PATTERN =
+  /\b(running|runner|marathon|ultramarathon|ultra running|half marathon|trail run|5k\b|10k\b|parkrun|strava run)\b/i;
+
+const RUNNING_DISQUALIFIERS = /\brunning backs?\b/i;
+
+function hasCollegeFootballSignals(text: string): boolean {
+  if (COLLEGE_FOOTBALL_PATTERN.test(text)) return true;
+  if (CFB_SCHOOL_PATTERN.test(text) && CFB_PRACTICE_PATTERN.test(text)) return true;
+  if (CFB_SCHOOL_PATTERN.test(text) && SCHOOL_FOOTBALL_PATTERN.test(text)) return true;
+  if (SCHOOL_FOOTBALL_PATTERN.test(text)) return true;
+  return false;
+}
+
+function matchesRunningTag(text: string): boolean {
+  if (!RUNNING_PATTERN.test(text)) return false;
+  if (RUNNING_DISQUALIFIERS.test(text)) return false;
+  if (hasCollegeFootballSignals(text) || NFL_INFERENCE_PATTERN.test(text)) return false;
+  return true;
+}
+
+function matchesCollegeBasketballTag(text: string): boolean {
+  if (!COLLEGE_BASKETBALL_PATTERN.test(text)) return false;
+  // Champions League draw copy uses "final four teams" — not March Madness.
+  if (
+    /\bfinal four teams\b/i.test(text) &&
+    /\b(champions league|uefa|premier league|europa league)\b/i.test(text)
+  ) {
+    return false;
+  }
+  return true;
+}
 
 const SPORT_INFERENCE_RULES: [SportTag, RegExp][] = [
   ['baseball', /\b(baseball|mlb|world series|home run|pitcher|slugger)\b/i],
@@ -174,10 +219,7 @@ const SPORT_INFERENCE_RULES: [SportTag, RegExp][] = [
     'cycling',
     /\b(cycling|cyclist|road bike|gravel bike|bike race|tour de france|giro d.?italia|vuelta|gran fondo|sportive|peloton|bikepacking|\bvelo\b)\b/i,
   ],
-  [
-    'running',
-    /\b(running|runner|marathon|ultramarathon|ultra running|half marathon|trail run|5k\b|10k\b|parkrun|strava run)\b/i,
-  ],
+  ['running', RUNNING_PATTERN],
   [
     'xc',
     /\b(cross country|cross-country|\bxc\b|nordic ski|cross-country ski|biathlon|skiathlon|faster skier)\b/i,
@@ -201,13 +243,15 @@ export function inferSportTags(text: string, baseTags: SportTag[] = []): SportTa
   // "Northwestern football" without "college football", and a second inference pass
   // would otherwise keep only soccer.
   if (/\bfootball\b/i.test(text)) {
-    if (COLLEGE_FOOTBALL_PATTERN.test(text) || baseTags.includes('college-football')) {
+    if (hasCollegeFootballSignals(text) || baseTags.includes('college-football')) {
       inferred.add('college-football');
     } else if (NFL_INFERENCE_PATTERN.test(text) || baseTags.includes('football')) {
       inferred.add('football');
     } else {
       inferred.add('soccer');
     }
+  } else if (hasCollegeFootballSignals(text)) {
+    inferred.add('college-football');
   }
 
   // Single-purpose feeds inherit their tag; multi-tag sources only when content matches.
@@ -247,6 +291,13 @@ export function inferSportTags(text: string, baseTags: SportTag[] = []): SportTa
   }
   if (inferred.has('college-basketball') && !/\b(nba|wnba)\b/i.test(text)) {
     inferred.delete('basketball');
+  }
+
+  // Camp/practice headlines should not keep unrelated feed defaults (e.g. Yahoo → baseball).
+  if (inferred.has('college-football') && hasCollegeFootballSignals(text)) {
+    for (const tag of ['baseball', 'running', 'cycling', 'mtb', 'fitness', 'xc'] as SportTag[]) {
+      if (!matchesSportTag(tag, text)) inferred.delete(tag);
+    }
   }
 
   return SPORT_TAG_ORDER.filter((tag) => inferred.has(tag));

@@ -259,6 +259,37 @@ test('inferSportTags keeps college-football for NCAA headlines that only say foo
   assert.ok(!afterSoccerPollution.includes('soccer'));
 });
 
+test('inferSportTags tags Notre Dame freshman camp headlines as college football', () => {
+  const tags = inferSportTags('A pair of freshman impressing Notre Dame during fall camp', []);
+  assert.deepEqual(tags, ['college-football']);
+});
+
+test('inferSportTags does not tag running back mentions as running', () => {
+  const tags = inferSportTags(
+    'Freshman running back impresses coaches at Notre Dame fall camp',
+    [],
+  );
+  assert.ok(tags.includes('college-football'));
+  assert.ok(!tags.includes('running'));
+});
+
+test('inferSportTags drops inherited baseball when content is clearly college football', () => {
+  const tags = inferSportTags(
+    'A pair of freshman impressing Notre Dame during fall camp',
+    ['baseball'],
+  );
+  assert.deepEqual(tags, ['college-football']);
+});
+
+test('inferSportTags does not tag Champions League final four copy as college basketball', () => {
+  const tags = inferSportTags(
+    'Seeding pots set for Champions League draw after the final four teams clinched their place',
+    [],
+  );
+  assert.ok(tags.includes('champions-league'));
+  assert.ok(!tags.includes('college-basketball'));
+});
+
 test('filterArticlesBySportTags keeps ESPN CFB football headlines on the College Football chip', () => {
   const articles: Article[] = [
     {

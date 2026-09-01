@@ -77,6 +77,22 @@ function parseBrowserWebMessage(raw: string): BrowserWebMessage | null {
   }
 }
 
+/**
+ * Injected before page content loads to force light-mode rendering.
+ * Many publisher sites partially implement prefers-color-scheme: dark, leading
+ * to dark text on a dark background when our app's dark theme leaks into the
+ * WKWebView / Android WebView.  Forcing light here matches what users see in a
+ * normal browser.
+ */
+const FORCE_LIGHT_SCHEME_JS = `(function(){
+  var m=document.createElement('meta');
+  m.name='color-scheme';m.content='light only';
+  document.head.appendChild(m);
+  var s=document.createElement('style');
+  s.textContent=':root{color-scheme:light only!important}';
+  document.head.appendChild(s);
+})();true;`;
+
 export default function PublisherBrowserScreen() {
   const router = useRouter();
   const { colors, scheme } = useTheme();
@@ -601,7 +617,7 @@ export default function PublisherBrowserScreen() {
                 allowsBackForwardNavigationGestures
                 startInLoadingState
                 renderLoading={() => (
-                  <View style={[styles.loadingOverlay, { backgroundColor: colors.background }]}>
+                  <View style={[styles.loadingOverlay, { backgroundColor: '#FFFFFF' }]}>
                     <ActivityIndicator color={colors.textSecondary} />
                   </View>
                 )}
@@ -609,6 +625,8 @@ export default function PublisherBrowserScreen() {
                 allowsInlineMediaPlayback
                 mediaPlaybackRequiresUserAction={false}
                 decelerationRate="normal"
+                forceDarkOn={false}
+                injectedJavaScriptBeforeContentLoaded={FORCE_LIGHT_SCHEME_JS}
               />
             ) : null}
 
@@ -730,7 +748,7 @@ const styles = StyleSheet.create({
   },
   webview: {
     flex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: '#FFFFFF',
   },
   readerWebview: {
     flex: 1,

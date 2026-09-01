@@ -110,5 +110,9 @@ export interface UserPreferences {
   blockedSportTags: SportTag[];
   /** Title keywords hidden via "Show less like this". */
   blockedKeywords: string[];
+  /** Topics the user has re-enabled after the reading learnings filter hid them. */
+  readingLearningsExemptTopics?: Topic[];
+  /** Sport tags the user has re-enabled after reading learnings filtered them. */
+  readingLearningsExemptSportTags?: SportTag[];
   folders: LikedFolder[];
 }

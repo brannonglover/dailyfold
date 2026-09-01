@@ -10,10 +10,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useTheme } from '@/hooks/useTheme';
 import { tabSceneBottomPadding } from '@/constants/Layout';
-import { CURIOSITY_ORDER } from '@/constants/curiosities';
+import { CURIOSITY_LABELS, CURIOSITY_ORDER } from '@/constants/curiosities';
 import { SPORT_TAG_LABELS } from '@/catalog/sports';
 import { formatInterestLabel } from '@/utils/interestKeywords';
-import { SportTag } from '@/types';
+import {
+  learnedFilteredTopics,
+  learnedFilteredSportTags,
+} from '@/services/readingLearnings';
+import { SportTag, Topic } from '@/types';
 
 /** Bar fills at this many likes per signal so growth is visible over time. */
 const SCORE_BAR_CAP = 10;
@@ -31,11 +35,17 @@ export default memo(function ProfileScreen() {
     totalSourceCount,
     trendingNotificationsEnabled,
     setTrendingNotificationsEnabled,
+    exemptReadingLearningsTopic,
+    exemptReadingLearningsSportTag,
   } = usePreferences();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
   const readLaterCount = preferences?.likedArticleIds.length ?? 0;
+
+  const filteredTopics = preferences ? learnedFilteredTopics(preferences) : [];
+  const filteredSportTags = preferences ? learnedFilteredSportTags(preferences) : [];
+  const hasFilteredItems = filteredTopics.length > 0 || filteredSportTags.length > 0;
 
   async function handleTrendingAlertsToggle(enabled: boolean) {
     const result = await setTrendingNotificationsEnabled(enabled);
@@ -235,6 +245,51 @@ export default memo(function ProfileScreen() {
                   />
                 </View>
                 <Text style={[styles.scoreValue, { color: colors.textSecondary }]}>{score}</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
+
+      {hasFilteredItems && (
+        <>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary, marginTop: 24 }]}>
+            Filtered by your reading
+          </Text>
+          <Text style={[styles.sectionHelper, { color: colors.textSecondary }]}>
+            Topics you haven't opened are hidden from Latest. Tap to show them again.
+          </Text>
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            {filteredTopics.map((topic) => (
+              <View key={topic} style={styles.filteredRow}>
+                <Text style={[styles.filteredLabel, { color: colors.textSecondary }]}>
+                  {CURIOSITY_LABELS[topic as Topic] ?? formatInterestLabel(topic)}
+                </Text>
+                <Pressable
+                  onPress={() => void exemptReadingLearningsTopic(topic)}
+                  style={({ pressed }) => [
+                    styles.showAgainButton,
+                    { backgroundColor: colors.accentMuted },
+                    pressed && { opacity: 0.7 },
+                  ]}>
+                  <Text style={[styles.showAgainText, { color: colors.accent }]}>Show again</Text>
+                </Pressable>
+              </View>
+            ))}
+            {filteredSportTags.map((tag) => (
+              <View key={tag} style={styles.filteredRow}>
+                <Text style={[styles.filteredLabel, { color: colors.textSecondary }]}>
+                  {SPORT_TAG_LABELS[tag as SportTag] ?? formatInterestLabel(tag)}
+                </Text>
+                <Pressable
+                  onPress={() => void exemptReadingLearningsSportTag(tag)}
+                  style={({ pressed }) => [
+                    styles.showAgainButton,
+                    { backgroundColor: colors.accentMuted },
+                    pressed && { opacity: 0.7 },
+                  ]}>
+                  <Text style={[styles.showAgainText, { color: colors.accent }]}>Show again</Text>
+                </Pressable>
               </View>
             ))}
           </View>
@@ -477,5 +532,26 @@ const styles = StyleSheet.create({
   deleteAccountText: {
     fontFamily: 'InterMedium',
     fontSize: 14,
+  },
+  filteredRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  filteredLabel: {
+    fontFamily: 'InterMedium',
+    fontSize: 14,
+    textTransform: 'capitalize',
+    flex: 1,
+  },
+  showAgainButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  showAgainText: {
+    fontFamily: 'InterMedium',
+    fontSize: 13,
   },
 });

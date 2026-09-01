@@ -68,6 +68,8 @@ export async function getPreferences(userId: string): Promise<UserPreferences> {
       blockedTopics: parsed.blockedTopics ?? [],
       blockedSportTags: parsed.blockedSportTags ?? [],
       blockedKeywords: parsed.blockedKeywords ?? [],
+      readingLearningsExemptTopics: parsed.readingLearningsExemptTopics ?? [],
+      readingLearningsExemptSportTags: parsed.readingLearningsExemptSportTags ?? [],
       folders: parsed.folders ?? [],
     }),
   );
