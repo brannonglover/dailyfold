@@ -33,6 +33,9 @@ import { rankArticlesForSearchQuery } from '@/catalog/articleSearch';
 import { orderLatestFeed, TRENDING_WINDOW_MS, type OrderLatestFeedOptions } from '@/utils/feedOrdering';
 import { limitSportsInAllTopicsFeed } from '@/utils/limitAllTopicsSports';
 import { isBreakingTrendingArticle } from '@/utils/trendingArticles';
+import { scoreAndRankArticles, type ScoredArticle } from '@/utils/latestFeedScoring';
+import { buildDiverseFeed } from '@/utils/latestFeedDiversity';
+import { logFeedDiagnostics, logTopScoredArticles, isLatestFeedDiagnosticsEnabled, type FeedDiagnostics } from '@/utils/latestFeedDiagnostics';
 
 const MIN_SOURCE_AFFINITY = CLICK_BOOST;
 
@@ -214,27 +217,87 @@ export type GetLatestFeedOptions = OrderLatestFeedOptions & {
   priorSports?: Article[];
 };
 
-/** Latest feed: chronological with light spreading, boosted by open/like signals. */
+/** Cached diagnostics from the last getLatestFeed run (dev only). */
+let lastFeedDiagnostics: FeedDiagnostics | null = null;
+
+/** Read the diagnostics produced by the most recent getLatestFeed call. */
+export function getLastFeedDiagnostics(): FeedDiagnostics | null {
+  return lastFeedDiagnostics;
+}
+
+/**
+ * Latest feed: scores every candidate using a multi-signal ranking system,
+ * then constructs a diversified feed using soft constraints with fallback.
+ *
+ * For All-topics mode (`diversifyTopics: true`), the new scoring pipeline runs:
+ *   1. Score every article (freshness, interest, importance, source, novelty, exploration)
+ *   2. Rank by composite score
+ *   3. Build feed with soft diversity constraints (category, source, sports cap)
+ *   4. Multi-pass fallback ensures every valid article appears in the feed
+ *
+ * For chip-specific mode, the existing interleave behavior is preserved since
+ * the user has explicitly chosen a topic/sport and the full-order slicing
+ * already provides the right ranking.
+ */
 export function getLatestFeed(
   articles: Article[],
   prefs: UserPreferences | null,
   options?: GetLatestFeedOptions,
 ): Article[] {
   const nowMs = options?.nowMs ?? Date.now();
-  const pool =
-    options?.diversifyTopics === true
-      ? limitSportsInAllTopicsFeed(articles, nowMs, { priorSports: options?.priorSports })
-      : articles;
 
+  if (options?.diversifyTopics) {
+    const candidateCount = articles.length;
+
+    const profile = prefs ? buildInterestProfile(prefs, articles) : null;
+    const affinityScores = new Map<string, number>();
+    if (profile && hasInterestSignals(profile)) {
+      for (const article of articles) {
+        affinityScores.set(article.id, articleAffinityScore(article, profile));
+      }
+    }
+
+    const scored = scoreAndRankArticles(articles, prefs, nowMs, affinityScores);
+
+    if (isLatestFeedDiagnosticsEnabled()) {
+      logTopScoredArticles(scored);
+    }
+
+    const sportsTopicScore = prefs?.topicScores?.sports ?? 0;
+    const priorSportsCount = options.priorSports?.filter(
+      (a) => a.topics.includes('sports'),
+    ).length ?? 0;
+
+    const { feed, diagnostics } = buildDiverseFeed(scored, {
+      sportsTopicScore,
+      priorSportsCount,
+    });
+
+    const fullDiagnostics: FeedDiagnostics = {
+      candidateCount,
+      duplicateCount: 0,
+      ...diagnostics,
+    };
+
+    lastFeedDiagnostics = fullDiagnostics;
+
+    if (isLatestFeedDiagnosticsEnabled()) {
+      logFeedDiagnostics(fullDiagnostics);
+    }
+
+    return feed;
+  }
+
+  // Chip-specific mode — preserve existing interleave behavior.
   const profile = prefs ? buildInterestProfile(prefs, articles) : null;
   if (!profile || !hasInterestSignals(profile)) {
-    return orderLatestFeed(pool, options);
+    return orderLatestFeed(articles, options);
   }
 
   const compareWithinBucket = (left: Article, right: Article) =>
     compareLatestFeedArticles(left, right, profile, nowMs);
 
-  return orderLatestFeed(pool, { ...options, compareWithinBucket });
+  return orderLatestFeed(articles, { ...options, compareWithinBucket });
 }
 
 export type ForYouInterestKind = 'topic' | 'keyword' | 'sportTag';

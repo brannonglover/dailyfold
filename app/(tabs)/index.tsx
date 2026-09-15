@@ -141,6 +141,19 @@ function LatestScreenContent() {
     };
   }, [preferences]);
 
+  // For All-topics mode, use the base-filtered pool (no reading learnings) so the
+  // new scoring pipeline can treat reading learnings as a soft ranking signal rather
+  // than a hard filter. For chip-specific modes, apply the full filter pipeline.
+  const filterLatestArticles = useCallback(
+    (items: Article[]) => {
+      if (orderOpts.diversifyTopics) {
+        return filterFeedArticlesBase(items);
+      }
+      return filterFeedArticles(items);
+    },
+    [orderOpts.diversifyTopics, filterFeedArticlesBase, filterFeedArticles],
+  );
+
   const orderLatest = useCallback(
     (items: Article[]) =>
       getLatestFeed(items, orderOpts.prefs, { diversifyTopics: orderOpts.diversifyTopics }),
@@ -204,7 +217,7 @@ function LatestScreenContent() {
     markUserRebuild();
 
     if (articles.length > 0) {
-      const filteredArticles = filterFeedArticles(articles);
+      const filteredArticles = filterLatestArticles(articles);
       setDisplayArticles((prevDisplay) => {
         const sliced = sliceOrderedArticles(prevDisplay, filteredArticles);
         return sliced ?? filteredArticles;
@@ -227,7 +240,7 @@ function LatestScreenContent() {
   }, [
     articles,
     chipSelectionKey,
-    filterFeedArticles,
+    filterLatestArticles,
     isFocused,
     markUserRebuild,
     preferences,
@@ -252,7 +265,7 @@ function LatestScreenContent() {
     if (isFeedInteractionLocked()) return;
     if (feedGeneration === prevFeedGenerationRef.current) return;
 
-    const filteredArticles = filterFeedArticles(articles);
+    const filteredArticles = filterLatestArticles(articles);
     shouldAllowFullRebuild(filterKey !== prevFilterKeyRef.current, prevFilterKeyRef.current, filterKey, {
       displayEmpty: displayArticles.length === 0,
       generationChanged: true,
@@ -270,7 +283,7 @@ function LatestScreenContent() {
     articles,
     displayArticles.length,
     feedGeneration,
-    filterFeedArticles,
+    filterLatestArticles,
     filterKey,
     markInitialDisplay,
     personalizationKey,
@@ -301,7 +314,7 @@ function LatestScreenContent() {
     if (!filterChanged) return;
 
     const frame = requestAnimationFrame(() => {
-      const filteredArticles = filterFeedArticles(articles);
+      const filteredArticles = filterLatestArticles(articles);
       const displayMatchesFilter = isDisplayFeedMatchingFilter(displayArticles, filteredArticles);
       // Stamp-only bail is safe when the painted rows already belong to this chip.
       // An empty Health filter vs leftover Sports/NFL rows must still swap.
@@ -337,7 +350,7 @@ function LatestScreenContent() {
   }, [
     articles,
     displayArticles,
-    filterFeedArticles,
+    filterLatestArticles,
     filterKey,
     markInitialDisplay,
     preferences,
@@ -357,7 +370,7 @@ function LatestScreenContent() {
     if (feedGeneration !== prevFeedGenerationRef.current) return;
     if (filterKey !== prevFilterKeyRef.current) return;
 
-    const filteredArticles = filterFeedArticles(articles);
+    const filteredArticles = filterLatestArticles(articles);
     const seen = new Set(displayArticles.map((article) => article.id));
     const newOnly = filteredArticles.filter((article) => !seen.has(article.id));
     if (newOnly.length === 0) {
@@ -375,7 +388,7 @@ function LatestScreenContent() {
     articles,
     displayArticles,
     feedGeneration,
-    filterFeedArticles,
+    filterLatestArticles,
     filterKey,
     orderLatestPage,
     preferences,
@@ -392,7 +405,7 @@ function LatestScreenContent() {
     if (isFeedInteractionLocked()) return;
     if (syncDisplayHandledRef.current) return;
 
-    const upstream = filterFeedArticles(articles);
+    const upstream = filterLatestArticles(articles);
     if (!isDisplayFeedUnderstocked(displayArticles.length, upstream.length)) return;
 
     const seen = new Set(displayArticles.map((article) => article.id));
@@ -412,7 +425,7 @@ function LatestScreenContent() {
     preferences,
     articles,
     displayArticles,
-    filterFeedArticles,
+    filterLatestArticles,
     orderLatestPage,
     setDisplayArticles,
     setDisplayReady,
@@ -438,7 +451,7 @@ function LatestScreenContent() {
       autoTopUpAttemptRef.current = { filterKey, filteredCount: -1, attempted: false };
     }
 
-    const upstream = filterFeedArticles(articles);
+    const upstream = filterLatestArticles(articles);
     if (upstream.length >= MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION) return;
     // Only skip once displayArticles has caught up with everything upstream has found —
     // when both are 0 (a chip with no matches yet) this must NOT bail, or a narrow filter
@@ -468,7 +481,7 @@ function LatestScreenContent() {
     displayReady,
     articles,
     displayArticles.length,
-    filterFeedArticles,
+    filterLatestArticles,
     filterKey,
     loadMore,
     preferences,
@@ -516,7 +529,7 @@ function LatestScreenContent() {
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     chipBoostKeyRef.current = `pending:${boostKey}`;
 
-    const inMemoryMatches = filterFeedArticles(articles).length;
+    const inMemoryMatches = filterLatestArticles(articles).length;
     if (inMemoryMatches === 0) setChipBoostPending(true);
     const run = (allowRetry: boolean) => {
       void boostArticlesForInterests(sourceIds, boostKey, {
@@ -668,7 +681,7 @@ function LatestScreenContent() {
         return;
       }
 
-      const filteredArticles = filterFeedArticles(articles);
+      const filteredArticles = filterLatestArticles(articles);
       const displayMatchesFilter = isDisplayFeedMatchingFilter(displayArticles, filteredArticles);
       if (isCacheFresh(feedGeneration, articles.length, filterKey)) {
         if (filterKey === prevFilterKeyRef.current && displayMatchesFilter) {
@@ -807,7 +820,7 @@ function LatestScreenContent() {
       displayArticles,
       displayReady,
       feedGeneration,
-      filterFeedArticles,
+      filterLatestArticles,
       filterFeedArticlesBase,
       filterKey,
       isCacheFresh,

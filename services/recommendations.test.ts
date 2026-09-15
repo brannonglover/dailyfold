@@ -595,7 +595,7 @@ test('buildLatestPersonalizationKey tracks liked and opened article ids', () => 
   assert.equal(key, JSON.stringify({ liked: ['a'], clicked: ['b', 'c'] }));
 });
 
-test('getLatestFeed diversifyTopics drops routine sports but keeps other topics near the top', () => {
+test('getLatestFeed diversifyTopics keeps sports in feed but prevents them from dominating the top', () => {
   const now = Date.now();
   const recent = (offsetMs: number) => new Date(now - offsetMs).toISOString();
   const old = new Date(now - 8 * 60 * 60 * 1000).toISOString();
@@ -629,7 +629,10 @@ test('getLatestFeed diversifyTopics drops routine sports but keeps other topics 
     firstFiveTopics.some((topic) => topic !== 'sports'),
     `expected non-sports near the top, got ${firstFiveTopics.join(', ')}`,
   );
-  assert.ok(!ordered.some((a) => a.id.startsWith('sport-')));
+  // Sports articles remain in the feed (soft constraint, not hard filter)
+  // but non-sports articles should appear early thanks to diversity rules
+  assert.ok(ordered.length === 14, `expected all 14 articles, got ${ordered.length}`);
+  assert.ok(ordered.some((a) => a.id.startsWith('sport-')), 'sports should still be in the feed');
 });
 
 test('getLatestFeed falls back to chronological order without interest signals', () => {
