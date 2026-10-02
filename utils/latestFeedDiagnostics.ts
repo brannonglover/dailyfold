@@ -1,21 +1,10 @@
-import { type ScoredArticle } from '@/utils/latestFeedScoring';
+import { type FeedDiagnostics, type ScoredArticle } from '@/shared/feed/types';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface FeedDiagnostics {
-  candidateCount: number;
-  duplicateCount: number;
-  rankedCount: number;
-  feedCount: number;
-  deferredForDiversity: number;
-  restoredInFallback: number;
-  sportsPercent: number;
-  sportsAffinityBand: string;
-  categoryDistribution: Record<string, number>;
-  sourceDistribution: Record<string, number>;
-}
+export type { FeedDiagnostics };
 
 export interface ArticleDiagnostic {
   title: string;

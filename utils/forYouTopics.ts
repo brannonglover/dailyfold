@@ -21,6 +21,8 @@ import {
   isSpecificInterestKeyword,
 } from '@/utils/interestKeywords';
 import { Article, SportTag, Topic, UserPreferences } from '@/types';
+import { normalizeForYouKeyword } from '@/shared/notify/explicitInterests';
+import { articleMatchesGenericInterest, isRecencyWord } from '@/utils/interestQueryParser';
 
 export function hasForYouTopicSelection(
   prefs: UserPreferences | null | undefined,
@@ -33,9 +35,8 @@ export function hasForYouTopicSelection(
   );
 }
 
-export function normalizeForYouKeyword(keyword: string): string {
-  return keyword.trim().toLowerCase().replace(/\s+/g, ' ');
-}
+/** Shared with the notification backend — see shared/notify/explicitInterests.ts. */
+export { normalizeForYouKeyword };
 
 export function articleMatchesForYouTopics(article: Article, topics: Topic[]): boolean {
   if (topics.length === 0) return false;
@@ -138,11 +139,14 @@ const BIKE_VOCAB_WORDS = new Set(BIKE_SEARCH_TERMS.flatMap((term) => term.split(
  * Words in a bike-flavored query beyond the recognized bike vocabulary (e.g. "repair" in
  * "bike repair"). A compound interest like this shouldn't collapse into generic bike/cycling
  * matching — the extra word must also appear in the article for a match.
+ *
+ * Recency words (latest, new, recent, etc.) are excluded from modifiers — they express
+ * ranking intent (prefer fresher articles) rather than topical match requirements.
  */
 function bikeQueryModifierWords(normalizedKeyword: string): string[] {
   return normalizedKeyword
     .split(' ')
-    .filter((word) => word.length >= 3 && !BIKE_VOCAB_WORDS.has(word));
+    .filter((word) => word.length >= 3 && !BIKE_VOCAB_WORDS.has(word) && !isRecencyWord(word));
 }
 
 function articleMatchesBikeForYouKeyword(article: Article, keyword: string): boolean {
@@ -166,7 +170,8 @@ function articleMatchesBikeForYouKeyword(article: Article, keyword: string): boo
   if (!hasBikeContext) return false;
   if (modifiers.length === 0) return true;
 
-  const fullText = `${headText} ${article.body ?? ''}`.toLowerCase();
+  const tagText = articleSearchTags(article).join(' ').toLowerCase();
+  const fullText = `${headText} ${article.body ?? ''} ${tagText}`.toLowerCase();
   return modifiers.every((word) => fullText.includes(word));
 }
 
@@ -176,15 +181,7 @@ export function articleMatchesForYouKeywords(article: Article, keywords: string[
     if (isBikeRelatedInterest(keyword)) {
       return articleMatchesBikeForYouKeyword(article, keyword);
     }
-    const text = articleSearchText(article);
-    const articleKeywords = new Set([
-      ...articleInterestKeywords(article),
-      ...articleSearchTags(article),
-    ]);
-    const terms = expandForYouKeywordMatchTerms(keyword);
-    if (terms.some((term) => articleKeywords.has(term))) return true;
-    if (textMatchesInterestTerms(terms, text)) return true;
-    return false;
+    return articleMatchesGenericInterest(article, keyword);
   });
 }
 

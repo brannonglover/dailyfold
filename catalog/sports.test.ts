@@ -281,6 +281,113 @@ test('inferSportTags drops inherited baseball when content is clearly college fo
   assert.deepEqual(tags, ['college-football']);
 });
 
+test('inferSportTags tags San Diego State football as college football, not soccer', () => {
+  const tags = inferSportTags(
+    'San Diego State football program dealing with mumps outbreak',
+    ['baseball'],
+  );
+  assert.deepEqual(tags, ['college-football']);
+  assert.deepEqual(
+    inferSportTags('San Diego St. football dealing with mumps outbreak ahead of Pac-12 opener', []),
+    ['college-football'],
+  );
+});
+
+test('inferSportTags tags NFL game and fantasy copy as football, not college football', () => {
+  for (const title of [
+    'Thursday Night Football live updates: how to watch Browns vs Steelers',
+    'Fantasy Football Rankings: Hayden Winks WR Blueprint for Week 4',
+    'Steelers vs. Browns: Week 4 predictions for Pittsburgh',
+    '2 Chiefs recognized by the NFL as top players of September',
+  ]) {
+    const tags = inferSportTags(title, []);
+    assert.ok(tags.includes('football'), `${title} should be NFL`);
+    assert.ok(!tags.includes('college-football'), `${title} should not be college football`);
+    assert.ok(!tags.includes('soccer'), `${title} should not be soccer`);
+  }
+});
+
+test('inferSportTags does not treat a surname Washington as college football', () => {
+  const tags = inferSportTags(
+    "Jett Washington sees Kobe Bryant's legacy as 'blessing,' not burden",
+    [],
+  );
+  assert.ok(!tags.includes('college-football'));
+});
+
+test('inferSportTags does not tag NBA recruiting copy as college football', () => {
+  const tags = inferSportTags(
+    'No. 2-ranked international NBA prospect commits to Duke for the 2027-28 season',
+    [],
+  );
+  assert.ok(!tags.includes('college-football'));
+  assert.ok(tags.includes('basketball'));
+});
+
+test('inferSportTags tags Idaho vs Montana football as college football', () => {
+  const tags = inferSportTags('Idaho vs. Montana football preview', []);
+  assert.deepEqual(tags, ['college-football']);
+});
+
+test('inferSportTags tags ranked State football headlines as college football', () => {
+  const tags = inferSportTags('No. 12 Utah football opens camp this week', []);
+  assert.deepEqual(tags, ['college-football']);
+  assert.deepEqual(
+    inferSportTags('Idaho searching for an edge against No. 1 Montana State football', []),
+    ['college-football'],
+  );
+});
+
+test('inferSportTags does not treat United States football as college football', () => {
+  const tags = inferSportTags('United States football looks ahead to the World Cup', []);
+  assert.ok(!tags.includes('college-football'));
+  assert.ok(tags.includes('soccer'));
+});
+
+test('inferSportTags does not guess soccer from a bare football mention', () => {
+  const tags = inferSportTags('Weekend football notes and injury updates', ['baseball']);
+  assert.ok(!tags.includes('soccer'));
+  assert.ok(!tags.includes('college-football'));
+  assert.ok(!tags.includes('football'));
+  assert.ok(!tags.includes('baseball'));
+});
+
+test('inferSportTags still uses a dedicated soccer feed when the headline only says football', () => {
+  const tags = inferSportTags('Weekend football notes and injury updates', ['soccer']);
+  assert.ok(tags.includes('soccer'));
+  assert.ok(!tags.includes('college-football'));
+});
+
+test('inferSportTags still uses a dedicated NFL feed when the headline only says football', () => {
+  const tags = inferSportTags('Weekend football notes and injury updates', ['football']);
+  assert.ok(tags.includes('football'));
+  assert.ok(!tags.includes('soccer'));
+});
+
+test('inferSportTags keeps association-football phrasing on soccer, not college football', () => {
+  for (const title of [
+    'Premier League football returns this weekend',
+    'Champions League football is back',
+    'Arsenal in talks over European football future',
+    'How international football changed the transfer market',
+    'World Cup football draw announced',
+    'European football nights return to midweek TV',
+    'Arsenal vs Chelsea football preview',
+  ]) {
+    const tags = inferSportTags(title, []);
+    assert.ok(tags.includes('soccer'), `${title} should be soccer`);
+    assert.ok(!tags.includes('college-football'), `${title} should not be college football`);
+  }
+});
+
+test('inferSportTags does not strip endurance tags from soccer stories mentioning football', () => {
+  const tags = inferSportTags('Premier League football stars take up marathon running', [
+    'running',
+  ]);
+  assert.ok(tags.includes('running'));
+  assert.ok(!tags.includes('college-football'));
+});
+
 test('inferSportTags does not tag Champions League final four copy as college basketball', () => {
   const tags = inferSportTags(
     'Seeding pots set for Champions League draw after the final four teams clinched their place',

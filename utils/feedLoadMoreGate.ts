@@ -21,6 +21,11 @@ export function shouldAutoTopUpFeed(visibleCount: number): boolean {
   return visibleCount > 0 && visibleCount < MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION;
 }
 
+/** One scoped POST /api/feed when the painted chip slice is thin; zero when already stocked. */
+export function shouldRequestScopedChipFeed(inMemoryMatches: number): boolean {
+  return inMemoryMatches < MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION;
+}
+
 /**
  * Page the mixed catalog only while a chip filter is gaining matches. A College
  * Football (or similar) chip with zero hits in the current pool must not keep

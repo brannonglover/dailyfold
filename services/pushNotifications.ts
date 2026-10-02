@@ -4,28 +4,12 @@ import Constants from 'expo-constants';
 import { API_URL } from '@/constants/api';
 import { supabase } from '@/lib/supabase';
 import { notificationsAvailable } from '@/services/notificationSetup';
+import { toPushPreferencesPayload } from '@/services/pushPreferencesPayload';
 import { UserPreferences } from '@/types';
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const TOKEN_CACHE_PREFIX = '@dailyfold/pushToken/';
 
-/** Subset of UserPreferences the backend's notify cron actually consumes — see
- * backend/lib/notify/types.ts:PushPreferences. Raw liked/clicked article snapshots
- * are deliberately not sent (they exist client-side only to derive these scores). */
-function toPushPreferencesPayload(prefs: UserPreferences) {
-  return {
-    topicScores: prefs.topicScores,
-    keywordScores: prefs.keywordScores,
-    sportTagScores: prefs.sportTagScores ?? {},
-    enabledTopics: prefs.enabledTopics,
-    enabledSourceIds: prefs.enabledSourceIds,
-    enabledSportTags: prefs.enabledSportTags,
-    blockedTopics: prefs.blockedTopics,
-    blockedSportTags: prefs.blockedSportTags,
-    blockedKeywords: prefs.blockedKeywords,
-    trendingNotificationsEnabled: prefs.trendingNotificationsEnabled,
-  };
-}
 
 async function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const controller = new AbortController();

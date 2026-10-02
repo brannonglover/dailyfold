@@ -140,21 +140,49 @@ function matchesSportTag(tag: SportTag, text: string): boolean {
 }
 
 const NFL_INFERENCE_PATTERN =
-  /\b(nfl|super bowl|quarterback|touchdown|linebacker|wide receiver|american football)\b/i;
+  /\b(nfl|super bowl|quarterback|touchdown|linebacker|wide receiver|american football|thursday night football|monday night football|sunday night football|fantasy football|nfl week|steelers|cowboys|chiefs|eagles|packers|49ers|\bniners\b|ravens|bills|bengals|browns|dolphins|patriots|raiders|chargers|broncos|colts|texans|jaguars|titans|commanders|bears|vikings|falcons|panthers|saints|buccaneers|cardinals|\brams\b|seahawks)\b/i;
+
+const NBA_INFERENCE_PATTERN = /\b(nba|wnba|basketball)\b/i;
 
 const COLLEGE_FOOTBALL_PATTERN =
   /\b(college football|ncaa football|ncaa fbs|ncaa fcs|\bfbs\b|\bfcs\b|heisman|college football playoff|cf playoff|\bcfp\b|big ten football|sec football|acc football|pac-?12 football|big 12 football)\b/i;
 
-/** Programs and camp vocabulary common in CFB RSS — not exhaustive FBS, but covers syndicated headlines. */
-const CFB_SCHOOL_PATTERN =
-  /\b(notre dame|fighting irish|northwestern|ohio state|penn state|michigan state|florida state|texas a&m|texas am|oklahoma state|oregon state|washington state|iowa state|kansas state|arizona state|mississippi state|nc state|boise state|alabama|auburn|clemson|georgia|tennessee|wisconsin|nebraska|miami hurricanes|florida gators|lsu|\buc\b|\busc\b|\bucla\b)\b/i;
+/**
+ * Named programs that are not "{Name} State". Keep this to names whose
+ * "{school} football" headline is unambiguously CFB in US sports RSS
+ * (not NFL city names: Washington, Miami, Dallas, …).
+ */
+const CFB_SCHOOLS =
+  'notre dame|fighting irish|northwestern|ohio state|penn state|michigan state|florida state|texas a&m|texas am|oklahoma state|oregon state|washington state|iowa state|kansas state|arizona state|mississippi state|nc state|boise state|alabama|auburn|clemson|georgia|tennessee|wisconsin|nebraska|miami hurricanes|florida gators|lsu|uc|usc|ucla|texas tech|ole miss|virginia tech|west virginia|south carolina|air force|texas|michigan|oregon|oklahoma|utah|colorado|stanford|duke|kentucky|louisville|mississippi|tcu|baylor|cincinnati|ucf|smu|pitt|pittsburgh|syracuse|rutgers|purdue|illinois|minnesota|indiana|iowa|missouri|arkansas|vanderbilt|kansas|byu|army|navy|houston|maryland';
+
+const CFB_SCHOOL_PATTERN = new RegExp(`\\b(?:${CFB_SCHOOLS})\\b`, 'i');
 
 const CFB_PRACTICE_PATTERN =
   /\b(fall camp|spring practice|true freshman|redshirt freshman|signing day|247sports|recruiting class|pass rusher|cornerback|linebacker|running back|running backs|wide receiver|touchdown pass|freshman|freshmen)\b/i;
 
-/** "{School} football" in US feeds — not European/association-football phrasing. */
-const SCHOOL_FOOTBALL_PATTERN =
-  /\b(?!premier league |champions league |european |international |world |fantasy |association )[a-z]+(?:\s[a-z]+)*\sfootball\b/i;
+const CFB_EXTRA_PATTERN =
+  /\b(transfer portal|nil (?:deal|money|collective|era)|name.?image.?likeness|bowl game|new year'?s six|college gameday|college game day|power\s*[45]|group of (?:5|five)|conference realignment)\b/i;
+
+/**
+ * "{School} football" for the named list. The school must immediately precede
+ * "football" so "Premier League football" cannot match on "League football".
+ */
+const SCHOOL_FOOTBALL_PATTERN = new RegExp(`\\b(?:${CFB_SCHOOLS})\\s+football\\b`, 'i');
+
+/**
+ * "{Proper noun} State football" — San Diego State, New Mexico State, etc. —
+ * without enumerating every FBS/FCS campus. Rejects "United States football"
+ * and "the state football".
+ */
+const STATE_FOOTBALL_PATTERN =
+  /\b(?:[a-z]{3,}\s+){0,2}(?!(?:the|and|our|this|that|united)\s)[a-z]{3,}\s+(?:state|st\.)\s+football\b/i;
+
+/** "Idaho vs. Montana football" — not "Arsenal vs Chelsea". */
+const CFB_VS_FOOTBALL_PATTERN =
+  /\b[a-z]{3,}(?:\s+[a-z]{3,})?\s+vs\.?\s+[a-z]{3,}(?:\s+[a-z]{3,})?\s+football\b/i;
+
+const CFB_RANKING_PATTERN =
+  /\b(?:no\.?\s*\d{1,2}|ranked\s+(?:no\.?\s*)?\d{1,2})\b/i;
 
 const COLLEGE_BASKETBALL_PATTERN =
   /\b(college basketball|ncaa basketball|ncaa tournament|march madness|final four|sweet sixteen|sweet 16|elite eight|elite 8|college hoops)\b/i;
@@ -164,12 +192,62 @@ const RUNNING_PATTERN =
 
 const RUNNING_DISQUALIFIERS = /\brunning backs?\b/i;
 
+const SOCCER_INFERENCE_PATTERN =
+  /\b(soccer|fifa|world cup|goalkeeper|matchday|footballer|striker|midfielder|penalty|offside|transfer window|premier league|la liga|bundesliga|serie a|champions league|uefa|european football|international football|association football)\b/i;
+
+function hasSoccerLexical(text: string): boolean {
+  if (SOCCER_INFERENCE_PATTERN.test(text)) return true;
+  for (const league of LEAGUE_TAGS) {
+    if (matchesSportTag(league, text)) return true;
+  }
+  return false;
+}
+
 function hasCollegeFootballSignals(text: string): boolean {
   if (COLLEGE_FOOTBALL_PATTERN.test(text)) return true;
-  if (CFB_SCHOOL_PATTERN.test(text) && CFB_PRACTICE_PATTERN.test(text)) return true;
-  if (CFB_SCHOOL_PATTERN.test(text) && SCHOOL_FOOTBALL_PATTERN.test(text)) return true;
   if (SCHOOL_FOOTBALL_PATTERN.test(text)) return true;
+  if (STATE_FOOTBALL_PATTERN.test(text)) return true;
+
+  const nfl = NFL_INFERENCE_PATTERN.test(text);
+  const soccer = hasSoccerLexical(text);
+  const nba = NBA_INFERENCE_PATTERN.test(text);
+
+  if (
+    !nfl &&
+    !nba &&
+    CFB_SCHOOL_PATTERN.test(text) &&
+    CFB_PRACTICE_PATTERN.test(text)
+  ) {
+    return true;
+  }
+  if (CFB_VS_FOOTBALL_PATTERN.test(text) && !soccer && !nfl) return true;
+  if (CFB_EXTRA_PATTERN.test(text) && /\bfootball\b/i.test(text) && !soccer && !nfl) {
+    return true;
+  }
+  if (
+    !nba &&
+    !nfl &&
+    !soccer &&
+    CFB_RANKING_PATTERN.test(text) &&
+    /\bfootball\b/i.test(text)
+  ) {
+    return true;
+  }
   return false;
+}
+
+/**
+ * Tiered football resolution. A bare "football" is not evidence of soccer.
+ * Dedicated feed tags win only when lexical evidence does not already decide.
+ */
+function resolveFootballTag(text: string, baseTags: SportTag[]): SportTag | null {
+  if (hasCollegeFootballSignals(text)) return 'college-football';
+  if (NFL_INFERENCE_PATTERN.test(text)) return 'football';
+  if (hasSoccerLexical(text)) return 'soccer';
+  if (baseTags.includes('college-football')) return 'college-football';
+  if (baseTags.includes('football')) return 'football';
+  if (baseTags.includes('soccer')) return 'soccer';
+  return null;
 }
 
 function matchesRunningTag(text: string): boolean {
@@ -198,7 +276,7 @@ const SPORT_INFERENCE_RULES: [SportTag, RegExp][] = [
   ['football', NFL_INFERENCE_PATTERN],
   ['college-football', COLLEGE_FOOTBALL_PATTERN],
   ['hockey', /\b(hockey|nhl|stanley cup|puck|power play|goaltender|faceoff)\b/i],
-  ['soccer', /\b(soccer|fifa|world cup|goalkeeper|matchday|footballer|striker|midfielder|penalty|offside|transfer window|premier league|la liga|bundesliga|serie a|champions league|uefa)\b/i],
+  ['soccer', SOCCER_INFERENCE_PATTERN],
   [
     'mls',
     /\b(mls\b|major league soccer|mls cup|supporters'? shield|leagues cup|inter miami|la galaxy|\blafc\b|los angeles fc|atlanta united|seattle sounders|portland timbers|new york city fc|\bnycfc\b|new york red bulls|austin fc|fc cincinnati|columbus crew|nashville sc|orlando city|minnesota united|real salt lake|sporting kc|sporting kansas city|colorado rapids|houston dynamo|fc dallas|st\.? louis city|charlotte fc|cf montr[eé]al|toronto fc|vancouver whitecaps|san jose earthquakes|san diego fc|chicago fire|d\.?c\.? united|new england revolution|philadelphia union)\b/i,
@@ -238,21 +316,10 @@ export function inferSportTags(text: string, baseTags: SportTag[] = []): SportTa
     if (matchesSportTag(tag, text)) inferred.add(tag);
   }
 
-  // "Football" alone usually means association football; NFL-specific terms route to American football.
-  // Dedicated CFB/NFL source tags win over that default — NCAA headlines often say
-  // "Northwestern football" without "college football", and a second inference pass
-  // would otherwise keep only soccer.
-  if (/\bfootball\b/i.test(text)) {
-    if (hasCollegeFootballSignals(text) || baseTags.includes('college-football')) {
-      inferred.add('college-football');
-    } else if (NFL_INFERENCE_PATTERN.test(text) || baseTags.includes('football')) {
-      inferred.add('football');
-    } else {
-      inferred.add('soccer');
-    }
-  } else if (hasCollegeFootballSignals(text)) {
-    inferred.add('college-football');
-  }
+  // Football is three sports in this catalog (CFB / NFL / soccer). Resolve from
+  // explicit evidence or a dedicated feed; never guess soccer from the word alone.
+  const footballTag = resolveFootballTag(text, baseTags);
+  if (footballTag) inferred.add(footballTag);
 
   // Single-purpose feeds inherit their tag; multi-tag sources only when content matches.
   for (const tag of baseTags) {
@@ -295,6 +362,18 @@ export function inferSportTags(text: string, baseTags: SportTag[] = []): SportTa
 
   // Camp/practice headlines should not keep unrelated feed defaults (e.g. Yahoo → baseball).
   if (inferred.has('college-football') && hasCollegeFootballSignals(text)) {
+    for (const tag of ['baseball', 'running', 'cycling', 'mtb', 'fitness', 'xc'] as SportTag[]) {
+      if (!matchesSportTag(tag, text)) inferred.delete(tag);
+    }
+  }
+
+  // Unclassified "football" should not inherit an unrelated single-purpose default.
+  if (
+    /\bfootball\b/i.test(text) &&
+    !inferred.has('college-football') &&
+    !inferred.has('football') &&
+    !inferred.has('soccer')
+  ) {
     for (const tag of ['baseball', 'running', 'cycling', 'mtb', 'fitness', 'xc'] as SportTag[]) {
       if (!matchesSportTag(tag, text)) inferred.delete(tag);
     }

@@ -29,15 +29,6 @@ export function sportTagSourceIds(tags: SportTag[]): string[] {
   ).map((entry) => entry.id);
 }
 
-/**
- * Latest chip boost IDs. Mixed soccer publishers are not included — the API
- * finds MLS (etc.) rows stored under ESPN Soccer via `sportTags`, so boosting
- * those feeds does not dump Premier League into the MLS chip.
- */
-export function chipBoostSourceIds(tags: SportTag[]): string[] {
-  return sportTagSourceIds(tags);
-}
-
 /** Publisher feeds to fetch when For You interests need content not in the main pool. */
 export function sourceIdsForForYouInterests(prefs: UserPreferences): string[] {
   const ids = new Set<string>();

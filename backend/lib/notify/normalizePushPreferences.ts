@@ -2,6 +2,7 @@ import { expandSoccerFilterTags, SPORT_TAG_ORDER } from '../../../catalog/sports
 import { CURIOSITY_ORDER } from './curiosities';
 import { SportTag, Topic } from '../types';
 import { normalizeBlockPreferences } from './blockPreferences';
+import { normalizeExplicitInterests } from '../../../shared/notify/explicitInterests';
 import { isSportsTopicActive } from './sportPreferences';
 import { isAllTopicsEnabled } from './topicPreferences';
 import type { PushPreferences } from './types';
@@ -71,13 +72,18 @@ export function normalizeFeedPreferences(prefs: PushPreferences): PushPreference
   const blockedSportTags = prefs.blockedSportTags ?? [];
   const blockedKeywords = prefs.blockedKeywords ?? [];
 
-  return normalizeBlockPreferences({
-    ...prefs,
-    enabledTopics,
-    enabledSportTags,
-    trendingNotificationsEnabled,
-    blockedTopics,
-    blockedSportTags,
-    blockedKeywords,
-  });
+  // Explicit interests are normalized separately (dedupe/validate only) — the
+  // topic-collapse and sport-tag-clearing rules above are feed-filter semantics and
+  // must not touch the user's stated interests.
+  return normalizeExplicitInterests(
+    normalizeBlockPreferences({
+      ...prefs,
+      enabledTopics,
+      enabledSportTags,
+      trendingNotificationsEnabled,
+      blockedTopics,
+      blockedSportTags,
+      blockedKeywords,
+    }),
+  );
 }

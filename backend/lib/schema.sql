@@ -24,6 +24,16 @@ CREATE TABLE IF NOT EXISTS articles (
 CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles (published_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_articles_source ON articles (source);
 CREATE INDEX IF NOT EXISTS idx_articles_search_vector ON articles USING GIN (search_vector);
+-- Chip/source feeds filter with `sport_tags && '{…}'`; GIN is the only index type that
+-- can answer array overlap.
+CREATE INDEX IF NOT EXISTS idx_articles_sport_tags ON articles USING GIN (sport_tags);
+CREATE INDEX IF NOT EXISTS idx_articles_topics ON articles USING GIN (topics);
+-- Candidate pool for the personalized feed: recent rows that have a usable hero.
+-- Feed cards without an image are dropped client-side anyway (~13% of recent rows),
+-- so excluding them from the index keeps them out of the scan and off the wire.
+CREATE INDEX IF NOT EXISTS idx_articles_recent_with_hero
+  ON articles (published_at DESC, id DESC)
+  WHERE image_url <> '';
 
 CREATE OR REPLACE FUNCTION articles_search_vector_update() RETURNS trigger AS $$
 BEGIN
@@ -65,6 +75,9 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   keyword_scores JSONB NOT NULL DEFAULT '{}',
   sport_tag_scores JSONB NOT NULL DEFAULT '{}',
   enabled_topics TEXT[] NOT NULL DEFAULT '{}',
+  for_you_topics TEXT[] NOT NULL DEFAULT '{}',
+  for_you_keywords TEXT[] NOT NULL DEFAULT '{}',
+  for_you_sport_tags TEXT[] NOT NULL DEFAULT '{}',
   enabled_source_ids TEXT[] NOT NULL DEFAULT '{}',
   enabled_sport_tags TEXT[] NOT NULL DEFAULT '{}',
   blocked_topics TEXT[] NOT NULL DEFAULT '{}',
@@ -76,6 +89,15 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Explicit For You interests, added after the table shipped. CREATE TABLE IF NOT EXISTS
+-- above is a no-op on an existing database, so existing deployments need these ALTERs.
+-- Additive, idempotent and backward-compatible: rows written before this migration keep
+-- working and read back as empty arrays via the NOT NULL DEFAULT '{}'.
+ALTER TABLE push_subscriptions
+  ADD COLUMN IF NOT EXISTS for_you_topics TEXT[] NOT NULL DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS for_you_keywords TEXT[] NOT NULL DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS for_you_sport_tags TEXT[] NOT NULL DEFAULT '{}';
 
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions (user_id);
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_enabled

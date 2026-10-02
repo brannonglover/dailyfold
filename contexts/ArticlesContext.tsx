@@ -12,27 +12,33 @@ import { AppState, AppStateStatus, InteractionManager } from 'react-native';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
-import { takeWarmArticleCache } from '@/services/articleCache';
-import { fetchArticles, ARTICLE_PAGE_SIZE, FetchArticlesResult, resolveArticleDisplayFields } from '@/services/articles';
+import { ARTICLE_PAGE_SIZE, resolveArticleDisplayFields } from '@/services/articles';
+import { fetchPersonalizedFeed, type FeedResponseMeta } from '@/services/feed';
 import { registerFeedArticles } from '@/services/articleSession';
-import { loadFeedSnapshot, MAX_FEED_SNAPSHOT_ARTICLES, saveFeedSnapshot } from '@/services/feedPersistence';
+import {
+  MAX_FEED_SNAPSHOT_ARTICLES,
+  reloadFeedSnapshotRecord,
+  saveFeedSnapshot,
+} from '@/services/feedPersistence';
+import {
+  diffFeedSnapshots,
+  newestPublishedAtFromArticles,
+  type FeedSnapshotRecord,
+} from '@/shared/feed/snapshot';
+import { decideResumeFeedSnapshot, resolveColdLaunchFeedMode } from '@/utils/feedSnapshotSession';
 import { applyFeedFilters, applyTrendingNotificationFilters } from '@/services/feedFilters';
 import { getEnabledSourceIds, isAllSourcesEnabled } from '@/services/sourcePreferences';
-import { isAllSportTagsEnabled, isSportsTopicActive } from '@/services/sportPreferences';
-import { isAllTopicsEnabled } from '@/services/topicPreferences';
 import { processHotTrendingNotifications, scheduleHotTrendingNotificationsAfterImport } from '@/services/trendingNotifications';
-import { Article } from '@/types';
+import { Article, SportTag, Topic } from '@/types';
 import { setArticleFeedPatcher } from '@/services/articleFeedPatch';
 import { ingestNoticeForFetch } from '@/utils/ingestNotice';
 import {
   FOREGROUND_FEED_POLL_INTERVAL_MS,
   isIngestPendingMeta,
   nextIngestPollDelayMs,
-  RESUME_REFRESH_AFTER_MS,
 } from '@/utils/ingestPoll';
 import { remainingPostIngestNotificationDelayMs } from '@/utils/postIngestNotificationDelay';
 import { shouldShowArticleFeedLoading } from '@/utils/feedLoadingState';
-import { chipBoostSourceIds, topicSourceIds } from '@/utils/forYouInterestSources';
 import {
   mergeArticleFeed,
   resolveSilentFeedUpdate,
@@ -49,10 +55,20 @@ import {
   resolveLoadMoreCursor,
   shouldAssumeMoreArticlesAvailable,
 } from '@/utils/articlePagination';
-import { MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION, shouldRetryFilteredFeedTopUp } from '@/utils/feedLoadMoreGate';
-import { fetchFeedUntilStocked } from '@/utils/feedInitialStock';
 import { shouldBumpPaginationRevision } from '@/utils/paginationRevision';
-import { countFilteredFeedArticles, isFilteredFeedStocked } from '@/utils/feedVisibleStock';
+import { isRenderableFeedSnapshot } from '@/utils/feedSnapshotHydration';
+import {
+  beginFeedSession,
+  logFeedUsable,
+  logFirstRenderedArticles,
+  logPendingQueued,
+  logSnapshotAdopt,
+  logSnapshotAge,
+  logSnapshotHydrationEnd,
+  logSnapshotHydrationStart,
+  logVisibleFeed,
+  type FeedOrigin,
+} from '@/utils/feedLifecycleLog';
 
 interface UseArticlesResult {
   articles: Article[];
@@ -80,7 +96,7 @@ interface UseArticlesResult {
   boostArticlesForInterests: (
     sourceIds: string[],
     boostKey: string,
-    options?: { forceRefresh?: boolean; sportTags?: string[] },
+    options?: { forceRefresh?: boolean; sportTags?: string[]; topics?: Topic[] },
   ) => Promise<boolean>;
   /** Merge fresher article fields (e.g. hero image after detail enrichment) into the visible feed. */
   patchArticle: (article: Article) => void;
@@ -128,24 +144,7 @@ function appendUniqueArticles(prev: Article[], incoming: Article[]): Article[] {
   return fresh.length > 0 ? [...prev, ...fresh] : prev;
 }
 
-async function mergeBoostedSourceArticles(
-  data: Article[],
-  sourceIds: string[],
-  sportTags?: string[],
-): Promise<Article[]> {
-  if (sourceIds.length === 0) return data;
-  try {
-    const boosted = await fetchArticles({ sourceIds, sportTags, limit: 50 });
-    if (boosted.articles.length > 0) {
-      return appendUniqueArticles(data, boosted.articles);
-    }
-  } catch {
-    // Best-effort — fall back to whatever the generic page already found.
-  }
-  return data;
-}
-
-function isIngestPending(meta?: FetchArticlesResult['meta']): boolean {
+function isIngestPending(meta?: FeedResponseMeta): boolean {
   return isIngestPendingMeta(meta);
 }
 
@@ -174,12 +173,10 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   const [hadPersistedFeed, setHadPersistedFeed] = useState(false);
   const [awaitingBackgroundFeed, setAwaitingBackgroundFeed] = useState(false);
   const appState = useRef(AppState.currentState);
-  const backgroundedAtRef = useRef<number | null>(null);
   const refreshInFlightRef = useRef(0);
   const loadMoreInFlightRef = useRef(false);
   const interestBoostInFlightRef = useRef(false);
   const interestBoostKeyRef = useRef('');
-  const warmCacheUsedRef = useRef(false);
   const articlesRef = useRef<Article[]>([]);
   const pendingArticlesRef = useRef<Article[]>([]);
   const fetchGenerationRef = useRef(0);
@@ -190,6 +187,9 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   const silentInFlightRef = useRef(false);
   const dismissedPendingIdsRef = useRef(new Set<string>());
   const paginationMetaRef = useRef({ hasMore: false, nextCursor: null as string | null });
+  const visibleOriginRef = useRef<FeedOrigin>('none');
+  const lastHydratedRevisionRef = useRef<number | null>(null);
+  const snapshotMetaRef = useRef<FeedSnapshotRecord | null>(null);
   const loadRef = useRef<
     ((mode: LoadMode, forceRefresh?: boolean, cursor?: string) => Promise<void>) | undefined
   >(undefined);
@@ -237,36 +237,76 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
 
   const feedReady = !!user && !authLoading && !preferencesLoading;
 
+  const applyPersistedSnapshot = useCallback((record: FeedSnapshotRecord, extras?: { newCount?: number }) => {
+    const resolved = record.articles.map(resolveArticleDisplayFields);
+    articlesRef.current = resolved;
+    pendingArticlesRef.current = [];
+    lastHydratedRevisionRef.current = record.snapshotRevision;
+    snapshotMetaRef.current = record;
+    setArticles(resolved);
+    setPendingArticles([]);
+    const bootstrapCursor = derivePaginationCursorFromArticles(resolved);
+    if (
+      bootstrapCursor &&
+      shouldAssumeMoreArticlesAvailable(resolved.length, MAX_FEED_SNAPSHOT_ARTICLES)
+    ) {
+      setHasMore(true);
+      setNextCursor(bootstrapCursor);
+      paginationMetaRef.current = { hasMore: true, nextCursor: bootstrapCursor };
+      setPaginationRevision((revision) => revision + 1);
+    }
+    setIsLoading(false);
+    setHadPersistedFeed(true);
+    setAwaitingBackgroundFeed(false);
+    setNotice(null);
+    setFeedGeneration((generation) => generation + 1);
+    visibleOriginRef.current = 'snapshot';
+    logFirstRenderedArticles('snapshot', resolved.length);
+    logVisibleFeed('snapshot', resolved.length, 0);
+    logFeedUsable('snapshot', resolved.length);
+    if (extras?.newCount != null) {
+      logSnapshotAdopt(record.snapshotRevision, resolved.length, extras.newCount);
+    }
+    return resolved;
+  }, []);
+
+  useEffect(() => {
+    beginFeedSession('launch');
+  }, []);
+
   const requestArticles = useCallback(
     async (mode: LoadMode, forceRefresh = false, cursor?: string) => {
-      const restrictSources =
-        preferences && !isAllSourcesEnabled(preferences.enabledSourceIds);
-
-      if (mode === 'initial' && !warmCacheUsedRef.current && !cursor) {
-        const warm = takeWarmArticleCache();
-        if (warm) {
-          warmCacheUsedRef.current = true;
-          return warm;
-        }
+      if (!preferences) {
+        return { articles: [] as Article[], meta: undefined };
       }
-
-      return fetchArticles({
-        // Silent can also force a background ingest (e.g. resume) without
-        // replacing the visible feed — newcomers land in the pending queue.
-        forceRefresh: forceRefresh && (mode === 'refresh' || mode === 'silent'),
-        sourceIds: restrictSources && sourceIds.length > 0 ? sourceIds : undefined,
-        cursor,
+      const knownArticles = [
+        ...articlesRef.current,
+        ...Object.values(preferences.likedArticles ?? {}),
+        ...Object.values(preferences.clickedArticles ?? {}),
+      ];
+      const result = await fetchPersonalizedFeed({
+        preferences,
+        knownArticles,
+        mode: 'full',
+        cursor: mode === 'append' ? cursor : undefined,
         limit: ARTICLE_PAGE_SIZE,
+        want: 20,
+        priorSportsCount:
+          mode === 'append'
+            ? articlesRef.current.filter((article) => article.topics.includes('sports')).length
+            : 0,
+        force: forceRefresh && (mode === 'refresh' || mode === 'silent'),
       });
+      return { articles: result.articles, meta: result.meta };
     },
-    [sourceIds, preferences],
+    [preferences],
   );
 
   const applyFetchResult = useCallback(
     (
       mode: LoadMode,
       data: Article[],
-      meta: FetchArticlesResult['meta'] | undefined,
+      meta: FeedResponseMeta | undefined,
       generation: number,
     ) => {
       if (generation !== fetchGenerationRef.current) return;
@@ -290,6 +330,10 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         setPendingArticles([]);
         setArticles(data);
         setFeedGeneration((g) => g + 1);
+        visibleOriginRef.current = 'network';
+        logFirstRenderedArticles('network', data.length);
+        logVisibleFeed('network', data.length, 0);
+        logFeedUsable('network', data.length);
       } else if (mode === 'silent' && articlesRef.current.length > 0) {
         const silentUpdate = resolveSilentFeedUpdate({
           prev: articlesRef.current,
@@ -300,12 +344,19 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
           promoteNewcomers: promoteIngestNewcomersRef.current,
         });
         nextArticles = silentUpdate.articles;
+        const queued = silentUpdate.pending.length - pendingArticlesRef.current.length;
         if (silentUpdate.pending !== pendingArticlesRef.current) {
           setPendingArticles(silentUpdate.pending);
+          logPendingQueued(Math.max(0, queued), silentUpdate.pending.length);
         }
         if (silentUpdate.articles !== articlesRef.current) {
           setArticles(silentUpdate.articles);
         }
+        logVisibleFeed(
+          visibleOriginRef.current,
+          silentUpdate.articles.length,
+          silentUpdate.pending.length,
+        );
       } else {
         if (mode === 'initial') {
           dismissedPendingIdsRef.current.clear();
@@ -314,6 +365,10 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         }
         nextArticles = data;
         setArticles(data);
+        visibleOriginRef.current = 'network';
+        logFirstRenderedArticles('network', data.length);
+        logVisibleFeed('network', data.length, 0);
+        logFeedUsable('network', data.length);
       }
 
       if (mode === 'silent' && !isIngestPending(meta)) {
@@ -326,7 +381,9 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         mode,
         feedArticles: feedArticlesForPagination,
         incomingCount: data.length,
-        apiMeta: meta,
+        apiMeta: meta
+          ? { hasMore: meta.hasMore ?? false, nextCursor: meta.nextCursor ?? null }
+          : undefined,
         previousMeta: paginationMetaRef.current,
         maxSnapshotArticles: MAX_FEED_SNAPSHOT_ARTICLES,
       });
@@ -392,7 +449,18 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (user && mode !== 'append' && data.length > 0) {
-        void saveFeedSnapshot(user.id, sourceIdsKey, nextArticles);
+        const feedMeta = meta as { newestPublishedAt?: string | null; rankWindowStart?: string | null } | undefined;
+        void saveFeedSnapshot(user.id, sourceIdsKey, nextArticles, {
+          lastFeedRefreshAt: new Date().toISOString(),
+          newestPublishedAt:
+            feedMeta?.newestPublishedAt ?? newestPublishedAtFromArticles(nextArticles),
+          rankWindowStart:
+            feedMeta?.rankWindowStart ?? snapshotMetaRef.current?.rankWindowStart ?? null,
+        }).then((record) => {
+          if (!record) return;
+          lastHydratedRevisionRef.current = record.snapshotRevision;
+          snapshotMetaRef.current = record;
+        });
       }
     },
     [user, preferences, sources, sourceIdsKey],
@@ -434,78 +502,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
           if (mode === 'initial' && generation !== fetchGenerationRef.current) return;
 
           try {
-            const stockOptions = {
-              isStocked: (items: Article[]) =>
-                isFilteredFeedStocked(items, preferences, sources),
-            };
-            const shouldStockFeed = (mode === 'initial' || mode === 'refresh') && !cursor;
-            // A narrow sport-tag chip (e.g. MTB) is a thin slice of the overall catalog —
-            // the generic date-ordered stocking loop below can burn through its whole page
-            // cap (10 pages, real-world measured ~35s) without ever reaching the stocked
-            // minimum. Skip straight to the sources that carry this tag instead.
-            const narrowSportTagActive =
-              !!preferences &&
-              isSportsTopicActive(preferences.enabledTopics) &&
-              !isAllSportTagsEnabled(preferences.enabledSportTags);
-            const narrowTopicActive =
-              !!preferences && !isAllTopicsEnabled(preferences.enabledTopics);
-            const scopedChipSourceIds = narrowSportTagActive
-              ? chipBoostSourceIds(preferences!.enabledSportTags)
-              : narrowTopicActive
-                ? topicSourceIds(preferences!.enabledTopics)
-                : [];
-            let data: Article[];
-            let meta: FetchArticlesResult['meta'];
-            if (shouldStockFeed && scopedChipSourceIds.length > 0) {
-              const chipPage = await fetchArticles({
-                sourceIds: scopedChipSourceIds,
-                sportTags: narrowSportTagActive ? preferences!.enabledSportTags : undefined,
-                forceRefresh: forceRefresh && (mode === 'refresh' || mode === 'silent'),
-                cursor,
-                limit: ARTICLE_PAGE_SIZE,
-              });
-              data = chipPage.articles;
-              meta = chipPage.meta;
-              if (!cursor && !stockOptions.isStocked(data)) {
-                data = await mergeBoostedSourceArticles(
-                  data,
-                  scopedChipSourceIds,
-                  narrowSportTagActive ? preferences!.enabledSportTags : undefined,
-                );
-              }
-            } else if (shouldStockFeed) {
-              ({ articles: data, meta } = await fetchFeedUntilStocked(
-                (pageCursor) => requestArticles(mode, forceRefresh, pageCursor),
-                stockOptions,
-              ));
-            } else if (mode === 'append' && scopedChipSourceIds.length > 0) {
-              const first = await requestArticles(mode, forceRefresh, cursor);
-              data = appendUniqueArticles(articlesRef.current, first.articles);
-              meta = first.meta;
-              if (!stockOptions.isStocked(data)) {
-                data = await mergeBoostedSourceArticles(
-                  data,
-                  scopedChipSourceIds,
-                  narrowSportTagActive ? preferences!.enabledSportTags : undefined,
-                );
-              }
-              data = data.slice(articlesRef.current.length);
-            } else if (mode === 'append') {
-              const first = await requestArticles(mode, forceRefresh, cursor);
-              ({ articles: data, meta } = await fetchFeedUntilStocked(
-                (pageCursor) =>
-                  pageCursor
-                    ? requestArticles(mode, forceRefresh, pageCursor)
-                    : Promise.resolve(first),
-                {
-                  ...stockOptions,
-                  startingArticles: articlesRef.current,
-                  maxPages: 5,
-                },
-              ));
-            } else {
-              ({ articles: data, meta } = await requestArticles(mode, forceRefresh, cursor));
-            }
+            const { articles: data, meta } = await requestArticles(mode, forceRefresh, cursor);
 
             if (data.length === 0 && isIngestPending(meta) && mode !== 'append') {
               if (generation === fetchGenerationRef.current) {
@@ -575,7 +572,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         if (mode === 'silent') silentInFlightRef.current = false;
       }
     },
-    [requestArticles, applyFetchResult, preferences, sources],
+    [requestArticles, applyFetchResult],
   );
 
   loadRef.current = load;
@@ -588,6 +585,8 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       setPersistedHydrated(true);
       setHadPersistedFeed(false);
       setAwaitingBackgroundFeed(false);
+      lastHydratedRevisionRef.current = null;
+      snapshotMetaRef.current = null;
       return;
     }
 
@@ -606,32 +605,38 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     }
 
     void (async () => {
-      const snapshot = await loadFeedSnapshot(user.id, sourceIdsKey);
+      const hydrateStartedAt = Date.now();
+      logSnapshotHydrationStart(sourceIdsKey);
+      const record = await reloadFeedSnapshotRecord(user.id, sourceIdsKey);
       if (cancelled) return;
 
-      if (snapshot && snapshot.length >= MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION) {
-        const resolved = snapshot.map(resolveArticleDisplayFields);
-        setArticles(resolved);
-        const bootstrapCursor = derivePaginationCursorFromArticles(resolved);
-        if (
-          bootstrapCursor &&
-          shouldAssumeMoreArticlesAvailable(resolved.length, MAX_FEED_SNAPSHOT_ARTICLES)
-        ) {
-          setHasMore(true);
-          setNextCursor(bootstrapCursor);
-          paginationMetaRef.current = { hasMore: true, nextCursor: bootstrapCursor };
-          setPaginationRevision((revision) => revision + 1);
-        }
-        setPendingArticles([]);
-        setIsLoading(false);
-        setHadPersistedFeed(true);
-        setAwaitingBackgroundFeed(false);
-        setNotice(null);
+      logSnapshotAge(record ? decideResumeFeedSnapshot(null, record, Date.now()).snapshotAgeMs : null, {
+        articleCount: record?.articles.length ?? 0,
+        revision: record?.snapshotRevision ?? 0,
+        newestPublishedAt: record?.newestPublishedAt ?? null,
+      });
+
+      if (record && isRenderableFeedSnapshot(record.articles)) {
+        const resolved = applyPersistedSnapshot(record);
+        logSnapshotHydrationEnd(
+          sourceIdsKey,
+          resolved.length,
+          Date.now() - hydrateStartedAt,
+          true,
+        );
       } else {
+        lastHydratedRevisionRef.current = null;
+        snapshotMetaRef.current = null;
         setHadPersistedFeed(false);
         if (articlesRef.current.length === 0) {
           setIsLoading(true);
         }
+        logSnapshotHydrationEnd(
+          sourceIdsKey,
+          record?.articles.length ?? 0,
+          Date.now() - hydrateStartedAt,
+          false,
+        );
       }
       setPersistedHydrated(true);
     })();
@@ -639,7 +644,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, sourceIdsKey, preferencesLoading]);
+  }, [user?.id, sourceIdsKey, preferencesLoading, applyPersistedSnapshot]);
 
   useEffect(() => {
     if (!feedReady || !persistedHydrated) return;
@@ -657,8 +662,11 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       paginationMetaRef.current = { hasMore: false, nextCursor: null };
       setPaginationRevision((revision) => revision + 1);
     }
-    if (startingWithPersistedFeed) {
-      // Restore pagination metadata immediately so load-more works before tab animations finish.
+    const launchMode = resolveColdLaunchFeedMode(startingWithPersistedFeed);
+    if (launchMode === 'silent') {
+      // The persisted snapshot is the next session's starting feed. Catch up
+      // silently for anything published since the last background run — do not
+      // reconstruct the ranking on open.
       void loadRef.current?.('silent');
       return;
     }
@@ -675,24 +683,52 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     silentRefreshListeners.add(onSilentRefresh);
 
     const onAppStateChange = (nextState: AppStateStatus) => {
-      if (appState.current === 'active' && nextState.match(/inactive|background/)) {
-        backgroundedAtRef.current = Date.now();
-      } else if (appState.current.match(/inactive|background/) && nextState === 'active') {
-        const awayMs = backgroundedAtRef.current
-          ? Date.now() - backgroundedAtRef.current
-          : 0;
-        backgroundedAtRef.current = null;
+      if (appState.current.match(/inactive|background/) && nextState === 'active') {
+        beginFeedSession('resume');
         // Allow chip/interest boosts to run again for the restored selection.
         interestBoostKeyRef.current = '';
-        if (awayMs >= RESUME_REFRESH_AFTER_MS) {
-          // Land on a fresh feed after sitting idle — don't wait for the resume
-          // animation, and promote ingest newcomers instead of the pending banner.
-          void loadRef.current?.('refresh', true);
-        } else {
+
+        const resumeAfterSnapshot = () => {
+          if (articlesRef.current.length > 0) {
+            visibleOriginRef.current = 'snapshot';
+            logFirstRenderedArticles('snapshot', articlesRef.current.length);
+            logVisibleFeed(
+              'snapshot',
+              articlesRef.current.length,
+              pendingArticlesRef.current.length,
+            );
+            logFeedUsable('snapshot', articlesRef.current.length);
+          }
           InteractionManager.runAfterInteractions(() => {
             void loadRef.current?.('silent', false);
           });
+        };
+
+        if (user) {
+          void (async () => {
+            const record = await reloadFeedSnapshotRecord(user.id, sourceIdsKey);
+            const decision = decideResumeFeedSnapshot(
+              lastHydratedRevisionRef.current,
+              record,
+              Date.now(),
+            );
+            logSnapshotAge(decision.snapshotAgeMs, {
+              articleCount: record?.articles.length ?? 0,
+              revision: record?.snapshotRevision ?? 0,
+              newestPublishedAt: record?.newestPublishedAt ?? null,
+            });
+            if (decision.adopt && record) {
+              fetchGenerationRef.current += 1;
+              const diff = diffFeedSnapshots(articlesRef.current, record.articles);
+              applyPersistedSnapshot(record, { newCount: diff.newCount });
+            }
+            resumeAfterSnapshot();
+          })();
+          appState.current = nextState;
+          return;
         }
+
+        resumeAfterSnapshot();
       }
       appState.current = nextState;
     };
@@ -702,7 +738,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       silentRefreshListeners.delete(onSilentRefresh);
       subscription.remove();
     };
-  }, [sourceIdsKey]);
+  }, [sourceIdsKey, user, applyPersistedSnapshot]);
 
   // While the app stays open, re-fetch often enough that pull-to-refresh usually
   // merges already-queued stories instead of waiting on a cold ingest.
@@ -741,7 +777,15 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     setArticles((prev) => {
       const merged = mergeArticleFeed(prev, pending);
       if (user) {
-        void saveFeedSnapshot(user.id, sourceIdsKey, merged);
+        void saveFeedSnapshot(user.id, sourceIdsKey, merged, {
+          lastFeedRefreshAt: snapshotMetaRef.current?.lastFeedRefreshAt ?? new Date().toISOString(),
+          newestPublishedAt: newestPublishedAtFromArticles(merged),
+          rankWindowStart: snapshotMetaRef.current?.rankWindowStart ?? null,
+        }).then((record) => {
+          if (!record) return;
+          lastHydratedRevisionRef.current = record.snapshotRevision;
+          snapshotMetaRef.current = record;
+        });
       }
       return merged;
     });
@@ -800,23 +844,38 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     async (
       sourceIds: string[],
       boostKey: string,
-      options?: { forceRefresh?: boolean; sportTags?: string[] },
+      options?: { forceRefresh?: boolean; sportTags?: string[]; topics?: Topic[] },
     ): Promise<boolean> => {
-      if (sourceIds.length === 0) return false;
+      if (sourceIds.length === 0 && !options?.sportTags?.length && !options?.topics?.length) {
+        return false;
+      }
+      if (!preferences) return false;
       const filteredMatches = () =>
-        countFilteredFeedArticles(articlesRef.current, preferences, sources);
+        applyFeedFilters(articlesRef.current, preferences, sources).length;
       if (interestBoostKeyRef.current === boostKey && filteredMatches() > 0) return true;
       if (interestBoostInFlightRef.current) return false;
 
       interestBoostInFlightRef.current = true;
       try {
         const generation = fetchGenerationRef.current;
-        const { articles: data } = await fetchArticles({
-          sourceIds,
-          sportTags: options?.sportTags,
-          limit: 50,
-          forceRefresh: options?.forceRefresh === true,
+        const chipTopics = options?.topics;
+        const chipTags = options?.sportTags;
+        const result = await fetchPersonalizedFeed({
+          preferences,
+          knownArticles: articlesRef.current,
+          scope:
+            (chipTags?.length ?? 0) > 0 || (chipTopics?.length ?? 0) > 0
+              ? {
+                  enabledTopics:
+                    (chipTags?.length ?? 0) > 0 ? ['sports'] : (chipTopics ?? []),
+                  enabledSportTags: (chipTags ?? []) as SportTag[],
+                }
+              : { enabledSourceIds: sourceIds },
+          limit: 100,
+          want: 20,
+          force: options?.forceRefresh === true,
         });
+        const data = result.articles;
         if (generation !== fetchGenerationRef.current) return false;
         if (data.length > 0) {
           const next = appendUniqueArticles(articlesRef.current, data);
@@ -835,53 +894,6 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     },
     [preferences, sources],
   );
-
-  const lastAutoTopUpLengthRef = useRef(-1);
-  const lastAutoTopUpFilteredRef = useRef(-1);
-  const feedStockKey = `${(preferences?.enabledTopics ?? []).join(',')}|${(preferences?.enabledSportTags ?? []).join(',')}|${sourceIdsKey}`;
-
-  useEffect(() => {
-    lastAutoTopUpLengthRef.current = -1;
-    lastAutoTopUpFilteredRef.current = -1;
-  }, [feedStockKey]);
-
-  useEffect(() => {
-    if (!feedReady || isLoading || isRefreshing || isLoadingMore || !hasMore) return;
-    const narrowSportTagActive =
-      !!preferences &&
-      isSportsTopicActive(preferences.enabledTopics) &&
-      !isAllSportTagsEnabled(preferences.enabledSportTags);
-    const narrowTopicActive =
-      !!preferences && !isAllTopicsEnabled(preferences.enabledTopics);
-    // Topic chips (Health) and league chips fetch dedicated RSS; mixed-catalog
-    // pagination will not find them and fights the chip boost.
-    if (narrowSportTagActive || narrowTopicActive) return;
-    if (isFilteredFeedStocked(articlesRef.current, preferences, sources)) return;
-    const filteredCount = countFilteredFeedArticles(articlesRef.current, preferences, sources);
-    if (
-      !shouldRetryFilteredFeedTopUp({
-        hasAttempted: lastAutoTopUpLengthRef.current !== -1,
-        previousFilteredCount: lastAutoTopUpFilteredRef.current,
-        filteredCount,
-        isStocked: false,
-      })
-    ) {
-      return;
-    }
-    lastAutoTopUpFilteredRef.current = filteredCount;
-    lastAutoTopUpLengthRef.current = articlesRef.current.length;
-    void loadMore();
-  }, [
-    articles,
-    feedReady,
-    hasMore,
-    isLoading,
-    isRefreshing,
-    isLoadingMore,
-    preferences,
-    sources,
-    loadMore,
-  ]);
 
   const dismissPendingArticles = useCallback(() => {
     for (const article of pendingArticlesRef.current) {

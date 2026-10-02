@@ -3,8 +3,8 @@ import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 
 import { useAuth } from '@/contexts/AuthContext';
+import { fetchArticleById } from '@/services/articles';
 import { getRememberedArticle, rememberOpenArticle } from '@/services/articleSession';
-import { takeWarmArticleCache, warmArticleCache } from '@/services/articleCache';
 import {
   clearLastNotificationResponse,
   getLastNotificationResponse,
@@ -37,16 +37,11 @@ const handledResponseKeys = new Set<string>();
 async function seedRememberedArticle(articleId: string): Promise<void> {
   if (getRememberedArticle(articleId)) return;
 
-  warmArticleCache();
-  const warmPromise = takeWarmArticleCache();
-  if (!warmPromise) return;
-
   try {
-    const warm = await warmPromise;
-    const article = warm.articles.find((entry) => entry.id === articleId);
+    const article = await fetchArticleById(articleId);
     if (article) rememberOpenArticle(article);
   } catch {
-    // Warm cache may still be loading on cold start.
+    // Detail route can still fetch the article.
   }
 }
 

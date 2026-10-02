@@ -44,3 +44,6 @@ yarn-error.*
 # API database
 backend/data/
 .vercel
+
+# Experiment cache (embeddings, etc.)
+.cache/

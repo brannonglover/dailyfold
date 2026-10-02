@@ -19,6 +19,11 @@ export function parsePushPreferences(body: unknown): PushPreferences | null {
   if (!isFiniteNumberRecord(b.keywordScores)) return null;
   if (!isFiniteNumberRecord(b.sportTagScores)) return null;
   if (!isStringArray(b.enabledTopics)) return null;
+  // Explicit interests are optional on the wire: subscriptions synced by an older
+  // client build predate these fields and must stay valid, defaulting to empty.
+  if (b.forYouTopics !== undefined && !isStringArray(b.forYouTopics)) return null;
+  if (b.forYouKeywords !== undefined && !isStringArray(b.forYouKeywords)) return null;
+  if (b.forYouSportTags !== undefined && !isStringArray(b.forYouSportTags)) return null;
   if (!isStringArray(b.enabledSourceIds)) return null;
   if (!isStringArray(b.enabledSportTags)) return null;
   if (!isStringArray(b.blockedTopics)) return null;
@@ -31,6 +36,9 @@ export function parsePushPreferences(body: unknown): PushPreferences | null {
     keywordScores: b.keywordScores,
     sportTagScores: b.sportTagScores,
     enabledTopics: b.enabledTopics as PushPreferences['enabledTopics'],
+    forYouTopics: (b.forYouTopics ?? []) as PushPreferences['forYouTopics'],
+    forYouKeywords: (b.forYouKeywords ?? []) as PushPreferences['forYouKeywords'],
+    forYouSportTags: (b.forYouSportTags ?? []) as PushPreferences['forYouSportTags'],
     enabledSourceIds: b.enabledSourceIds,
     enabledSportTags: b.enabledSportTags as PushPreferences['enabledSportTags'],
     blockedTopics: b.blockedTopics as PushPreferences['blockedTopics'],

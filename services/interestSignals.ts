@@ -2,12 +2,15 @@ import { engagementSignalMultiplier } from '@/services/articleEngagement';
 import { resolveClickedArticles } from '@/services/clickedArticles';
 import { resolveLikedArticles } from '@/services/likedArticles';
 import { articleSportTags } from '@/services/sportPreferences';
-import {
-  extractInterestKeywords,
-  getInterestKeywordWeight,
-  isSourceBleed,
-} from '@/utils/interestKeywords';
+import { getInterestKeywordWeight, isSourceBleed } from '@/utils/interestKeywords';
 import { Article, Topic, UserPreferences } from '@/types';
+import {
+  articleInterestKeywords,
+  hasInterestSignals,
+} from '@/shared/notify/interestSignals';
+
+/** Shared with the notification backend — see shared/notify/interestSignals.ts. */
+export { articleInterestKeywords, hasInterestSignals };
 
 export const LIKE_BOOST = 1;
 /** Weaker curiosity signal from opening a feed article without liking it. */
@@ -37,14 +40,6 @@ function adjustScoreMap(
   return next;
 }
 
-export function articleInterestKeywords(article: Article): string[] {
-  return extractInterestKeywords({
-    text: `${article.title} ${article.excerpt}`,
-    title: article.title,
-    source: article.source,
-    topics: article.topics,
-  });
-}
 
 function applyWeightedKeywordScores(
   scores: Record<string, number>,
@@ -124,16 +119,6 @@ export function applyArticleClickSignals(
   return { topicScores, keywordScores, sportTagScores };
 }
 
-export function hasInterestSignals(profile: {
-  topicScores: Record<string, number>;
-  keywordScores: Record<string, number>;
-  sportTagScores?: Record<string, number>;
-}): boolean {
-  if (Object.values(profile.topicScores).some((score) => score > 0)) return true;
-  if (Object.values(profile.keywordScores).some((score) => score > 0)) return true;
-  if (Object.values(profile.sportTagScores ?? {}).some((score) => score > 0)) return true;
-  return false;
-}
 
 export function hasPersonalizationSignals(
   prefs: UserPreferences | null | undefined,

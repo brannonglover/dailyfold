@@ -151,6 +151,7 @@ export async function fetchArticleSearch(
   return { articles: withResolvedArticleFields(data.articles) };
 }
 
+/** Shipped GET /api/articles client. The new feed constructs via POST /api/feed. */
 export async function fetchArticles(options?: FetchArticlesOptions): Promise<FetchArticlesResult> {
   const params = buildArticlesSearchParams(options);
   const isInitialPage = !options?.cursor;

@@ -1,4 +1,4 @@
-import { Topic } from '@/types';
+import { Topic } from '../types';
 
 /** Order for grouping publishers on the Sources screen (and future onboarding). */
 export const CURIOSITY_ORDER: Topic[] = [

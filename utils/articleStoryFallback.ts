@@ -1,9 +1,9 @@
-import { Article } from '@/types';
+import { Article } from '../types';
 
 import {
   clusterStoryArticleIndices,
   pickBestStoryRepresentative,
-} from '@/utils/articleStoryMatch';
+} from './articleStoryMatch';
 
 /**
  * Collapse same-story duplicates in feed order. When several rows match as one story,

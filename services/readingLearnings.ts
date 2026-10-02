@@ -1,17 +1,22 @@
-import { SPORT_TAG_ORDER } from '@/catalog/sports';
-import { articleSportTags } from '@/services/sportPreferences';
+import {
+  MIN_SPORTS_ENGAGEMENTS,
+  MIN_TOTAL_ENGAGEMENTS,
+  filterArticlesByReadingLearnings as filterByLearnings,
+  learnedFilteredSportTags as learnedFilteredSportTagsCore,
+  learnedFilteredTopics as learnedFilteredTopicsCore,
+  learnedSportTagInterests as learnedSportTagInterestsCore,
+  learnedTopicInterests as learnedTopicInterestsCore,
+  type ReadingLearningsSignals,
+} from '@/shared/feed/readingLearnings';
 import { Article, SportTag, Topic, UserPreferences } from '@/types';
 
 /**
- * Minimum total article opens (liked + clicked) before the topic-level
- * reading learnings filter activates.
+ * Client wrapper over shared/feed/readingLearnings.ts, which /api/feed also uses.
+ * The shared core works off derived counts and score maps; this derives them from
+ * the locally cached like/click snapshots.
  */
-export const MIN_TOTAL_ENGAGEMENTS = 10;
 
-/**
- * Minimum sports-article opens before the sport-tag-level filter activates.
- */
-export const MIN_SPORTS_ENGAGEMENTS = 5;
+export { MIN_SPORTS_ENGAGEMENTS, MIN_TOTAL_ENGAGEMENTS };
 
 /** Count distinct articles the user has liked or clicked (from cached snapshots). */
 export function countArticleEngagements(prefs: UserPreferences): number {
@@ -41,19 +46,21 @@ export function countSportsArticleEngagements(prefs: UserPreferences): number {
   return counted.size;
 }
 
+export function readingLearningsSignals(prefs: UserPreferences): ReadingLearningsSignals {
+  return {
+    engagementCount: countArticleEngagements(prefs),
+    sportsEngagementCount: countSportsArticleEngagements(prefs),
+    topicScores: prefs.topicScores,
+    sportTagScores: prefs.sportTagScores ?? {},
+  };
+}
+
 /**
  * Topics the user has shown interest in via reading. Returns null when
  * insufficient signal exists (below {@link MIN_TOTAL_ENGAGEMENTS}).
  */
 export function learnedTopicInterests(prefs: UserPreferences): Set<Topic> | null {
-  if (countArticleEngagements(prefs) < MIN_TOTAL_ENGAGEMENTS) return null;
-
-  const interested = new Set<Topic>();
-  for (const [topic, score] of Object.entries(prefs.topicScores)) {
-    if (score > 0) interested.add(topic as Topic);
-  }
-
-  return interested.size > 0 ? interested : null;
+  return learnedTopicInterestsCore(readingLearningsSignals(prefs));
 }
 
 /**
@@ -61,14 +68,7 @@ export function learnedTopicInterests(prefs: UserPreferences): Set<Topic> | null
  * sports-specific signal exists (below {@link MIN_SPORTS_ENGAGEMENTS}).
  */
 export function learnedSportTagInterests(prefs: UserPreferences): Set<string> | null {
-  if (countSportsArticleEngagements(prefs) < MIN_SPORTS_ENGAGEMENTS) return null;
-
-  const interested = new Set<string>();
-  for (const [tag, score] of Object.entries(prefs.sportTagScores ?? {})) {
-    if (score > 0) interested.add(tag);
-  }
-
-  return interested.size > 0 ? interested : null;
+  return learnedSportTagInterestsCore(readingLearningsSignals(prefs));
 }
 
 export interface ReadingLearningsFilterOptions {
@@ -80,47 +80,23 @@ export interface ReadingLearningsFilterOptions {
 
 /**
  * Filter out articles from topics and sport tags the user has never engaged
- * with. Only activates after enough reading behavior to establish a pattern.
- * Respects chip selections and user-cleared exemptions stored in preferences.
+ * with. Respects chip selections and user-cleared exemptions stored in preferences.
  */
 export function filterArticlesByReadingLearnings(
   articles: Article[],
   prefs: UserPreferences,
   options?: ReadingLearningsFilterOptions,
 ): Article[] {
-  const topicInterests = learnedTopicInterests(prefs);
-  const sportTagInterests = learnedSportTagInterests(prefs);
-
-  if (!topicInterests && !sportTagInterests) return articles;
-
-  const exemptTopics = new Set<Topic>([
-    ...(options?.exemptTopics ?? []),
-    ...((prefs.readingLearningsExemptTopics as Topic[]) ?? []),
-  ]);
-  const exemptSportTags = new Set<string>([
-    ...(options?.exemptSportTags ?? []),
-    ...((prefs.readingLearningsExemptSportTags as string[]) ?? []),
-  ]);
-
-  return articles.filter((article) => {
-    if (topicInterests) {
-      const hasInterestedTopic = article.topics.some(
-        (topic) => topicInterests.has(topic as Topic) || exemptTopics.has(topic as Topic),
-      );
-      if (!hasInterestedTopic) return false;
-    }
-
-    if (sportTagInterests && article.topics.includes('sports')) {
-      const tags = articleSportTags(article);
-      if (tags.length > 0) {
-        const hasInterestedTag = tags.some(
-          (tag) => sportTagInterests.has(tag) || exemptSportTags.has(tag),
-        );
-        if (!hasInterestedTag) return false;
-      }
-    }
-
-    return true;
+  return filterByLearnings(articles, {
+    ...readingLearningsSignals(prefs),
+    exemptTopics: [
+      ...(options?.exemptTopics ?? []),
+      ...((prefs.readingLearningsExemptTopics as Topic[]) ?? []),
+    ],
+    exemptSportTags: [
+      ...(options?.exemptSportTags ?? []),
+      ...((prefs.readingLearningsExemptSportTags as string[]) ?? []),
+    ],
   });
 }
 
@@ -129,28 +105,18 @@ export function filterArticlesByReadingLearnings(
  * Used by the Profile UI to let users re-enable them.
  */
 export function learnedFilteredTopics(prefs: UserPreferences): Topic[] {
-  const interests = learnedTopicInterests(prefs);
-  if (!interests) return [];
-
-  const exempt = new Set<Topic>((prefs.readingLearningsExemptTopics as Topic[]) ?? []);
-  const allTopics: Topic[] = [
-    'technology', 'culture', 'science', 'business', 'politics',
-    'health', 'design', 'world', 'sports', 'art', 'gardening', 'gaming', 'books',
-  ];
-
-  return allTopics.filter((topic) => !interests.has(topic) && !exempt.has(topic));
+  return learnedFilteredTopicsCore(
+    readingLearningsSignals(prefs),
+    (prefs.readingLearningsExemptTopics as Topic[]) ?? [],
+  );
 }
 
 /**
  * Sport tags currently being hidden by the reading learnings filter.
  */
 export function learnedFilteredSportTags(prefs: UserPreferences): SportTag[] {
-  const interests = learnedSportTagInterests(prefs);
-  if (!interests) return [];
-
-  const exempt = new Set<string>((prefs.readingLearningsExemptSportTags as string[]) ?? []);
-
-  return (SPORT_TAG_ORDER as SportTag[]).filter(
-    (tag) => !interests.has(tag) && !exempt.has(tag),
+  return learnedFilteredSportTagsCore(
+    readingLearningsSignals(prefs),
+    (prefs.readingLearningsExemptSportTags as string[]) ?? [],
   );
 }

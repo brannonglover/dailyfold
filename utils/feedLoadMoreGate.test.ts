@@ -5,6 +5,7 @@ import {
   MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION,
   shouldAllowFeedLoadMore,
   shouldAutoTopUpFeed,
+  shouldRequestScopedChipFeed,
   shouldRetryFilteredFeedTopUp,
 } from './feedLoadMoreGate';
 
@@ -28,6 +29,16 @@ test('shouldAllowFeedLoadMore allows pagination at feed end before scroll gate a
     shouldAllowFeedLoadMore(false, MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION, true),
     true,
   );
+});
+
+test('shouldRequestScopedChipFeed is zero requests when the chip is already stocked', () => {
+  assert.equal(shouldRequestScopedChipFeed(MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION), false);
+  assert.equal(shouldRequestScopedChipFeed(40), false);
+});
+
+test('shouldRequestScopedChipFeed is one scoped request when the chip is understocked', () => {
+  assert.equal(shouldRequestScopedChipFeed(0), true);
+  assert.equal(shouldRequestScopedChipFeed(MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION - 1), true);
 });
 
 test('shouldAutoTopUpFeed requests more pages while the visible feed is understocked', () => {

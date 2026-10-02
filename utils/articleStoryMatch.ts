@@ -1,7 +1,9 @@
-import { stripAndDecodeHtml } from '@/catalog/decodeHtmlText';
-import { ARTICLE_NO_IMAGE, isArticlePlaceholderImageUrl, resolveArticleImageUrl } from '@/constants/images';
-import { SOURCE_CATALOG } from '@/catalog/sources';
-import { Article } from '@/types';
+// Relative imports (not `@/`): the notification/feed backend compiles this module too,
+// and its tsconfig maps `@/*` to the backend root.
+import { stripAndDecodeHtml } from '../catalog/decodeHtmlText';
+import { ARTICLE_NO_IMAGE, isArticlePlaceholderImageUrl, resolveArticleImageUrl } from '../constants/images';
+import { SOURCE_CATALOG } from '../catalog/sources';
+import { Article } from '../types';
 
 const SOURCE_RANK = new Map(SOURCE_CATALOG.map((entry, index) => [entry.name, index]));
 

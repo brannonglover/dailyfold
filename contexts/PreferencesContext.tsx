@@ -64,7 +64,6 @@ import {
   registerPushToken,
   unregisterPushToken,
 } from '@/services/pushNotifications';
-import { warmArticleCache } from '@/services/articleCache';
 import { getPreferences, savePreferences } from '@/services/storage';
 import {
   applyArticleClickSignals,
@@ -160,7 +159,6 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   preferencesRef.current = preferences;
 
   useEffect(() => {
-    warmArticleCache();
     const task = InteractionManager.runAfterInteractions(() => {
       fetchSources().then(setSources);
     });

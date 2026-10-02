@@ -1,33 +1,19 @@
 import { Article, Topic } from '@/types';
+import {
+  articlePrimaryTopic,
+  articleSpreadBucket,
+  compareNewestFirst,
+} from '@/shared/feed/buckets';
 
 /** Articles newer than this are shown in the first trending segment. */
-export const TRENDING_WINDOW_MS = 6 * 60 * 60 * 1000;
+export { TRENDING_WINDOW_MS } from '@/shared/notify/trendingArticles';
 
-function publishedAtMs(article: Article): number {
-  return new Date(article.publishedAt).getTime();
-}
-
-function compareNewestFirst(a: Article, b: Article): number {
-  return publishedAtMs(b) - publishedAtMs(a);
-}
-
-/**
- * Spread bucket for feed diversification. Uses outlet name, with a sport facet when
- * present so mixed ESPN NFL + soccer batches interleave instead of clustering.
- */
-export function articleSpreadBucket(article: Article): string {
-  const sport = article.sportTags?.[0];
-  return sport ? `${article.source}::${sport}` : article.source;
-}
+/** Bucketing shared with the server-side ranker — see shared/feed/buckets.ts. */
+export { articlePrimaryTopic, articleSpreadBucket };
 
 type QueueOrderOptions = {
   burstCounts?: Map<string, number>;
 };
-
-/** Primary curiosity for feed ordering (first tag on the article). */
-export function articlePrimaryTopic(article: Article): Topic {
-  return article.topics[0] ?? 'world';
-}
 
 function compareTopicQueues(a: Article[], b: Article[]): number {
   return compareNewestFirst(a[0]!, b[0]!);

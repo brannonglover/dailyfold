@@ -48,23 +48,13 @@ test('shouldShowArticleFeedLoading stays true while background ingest is pending
   );
 });
 
-test('shouldShowArticleFeedLoading is false when cached articles are available', () => {
+test('shouldShowArticleFeedLoading stays hidden for a short cached snapshot even while fetching', () => {
   assert.equal(
     shouldShowArticleFeedLoading({
-      articleCount: 12,
-      isLoading: false,
+      articleCount: 6,
+      isLoading: true,
       feedReady: true,
       persistedHydrated: true,
-    }),
-    false,
-  );
-
-  assert.equal(
-    shouldShowArticleFeedLoading({
-      articleCount: 5,
-      isLoading: false,
-      feedReady: false,
-      persistedHydrated: false,
     }),
     false,
   );

@@ -34,7 +34,13 @@
     "next-env.d.ts",
     ".next/types/**/*.ts",
     "../catalog/**/*.ts",
-    "../utils/postIngestNotificationDelay.ts"
+    "../shared/**/*.ts",
+    "../types/index.ts",
+    "../constants/curiosities.ts",
+    "../constants/images.ts",
+    "../utils/postIngestNotificationDelay.ts",
+    "../utils/articleStoryMatch.ts",
+    "../utils/articleStoryFallback.ts"
   ],
   "exclude": [
     "node_modules"

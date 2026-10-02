@@ -1,6 +1,6 @@
 {
   "name": "dailyfold-api",
-  "version": "2.18.0",
+  "version": "2.19.0",
   "private": true,
   "scripts": {
     "dev": "WATCHPACK_POLLING=true CHOKIDAR_USEPOLLING=true NODE_OPTIONS='--use-system-ca' next dev -p 3001 -H 0.0.0.0",
@@ -17,7 +17,7 @@
     "test:embeddedMedia": "tsx --test lib/embeddedMedia.test.ts",
     "test:readerCache": "tsx --test lib/readerCache.test.ts",
     "test:search": "tsx --test lib/db.search.test.ts",
-    "test:notify": "tsx --test lib/notify/trendingNotificationInterest.test.ts lib/notify/trendingArticles.test.ts lib/notify/parsePushPreferences.test.ts ../utils/postIngestNotificationDelay.test.ts",
+    "test:notify": "tsx --test lib/notify/trendingNotificationInterest.test.ts lib/notify/trendingArticles.test.ts lib/notify/parsePushPreferences.test.ts lib/notify/explicitInterests.test.ts ../shared/notify/notificationScore.test.ts ../utils/postIngestNotificationDelay.test.ts",
     "test:pushSubscriptions": "tsx --env-file=.env --test lib/db.pushSubscriptions.test.ts",
     "db:migrate": "NODE_OPTIONS='--use-system-ca' tsx --env-file=.env scripts/migrate.ts"
   },

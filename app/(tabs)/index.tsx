@@ -28,8 +28,7 @@ import {
 import { getFeedEmptyMessage } from '@/utils/feedEmptyMessage';
 import { shouldShowFilteredFeedLoading } from '@/utils/feedLoadingState';
 import { isFeedInteractionLocked, subscribeFeedInteractionLock } from '@/utils/feedInteractionLock';
-import { MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION, shouldRetryFilteredFeedTopUp } from '@/utils/feedLoadMoreGate';
-import { chipBoostSourceIds, topicSourceIds } from '@/utils/forYouInterestSources';
+import { shouldRequestScopedChipFeed } from '@/utils/feedLoadMoreGate';
 import { prewarmForYouDisplayCache } from '@/utils/forYouPrewarm';
 import { readTabDisplayCache, resolveTabDisplayFeed, hasShowableTabDisplayCache, isDisplayFeedUnderstocked, isDisplayFeedMatchingFilter } from '@/utils/tabDisplayCache';
 import { MIN_PENDING_ARTICLES_FOR_BANNER } from '@/utils/pendingFeedArticles';
@@ -72,7 +71,6 @@ function LatestScreenContent() {
   const wasFocusedOnTabPressRef = useRef(false);
   const chipBoostKeyRef = useRef('');
   const prevChipSelectionKeyRef = useRef<string | null>(null);
-  const autoTopUpAttemptRef = useRef({ filterKey: '', filteredCount: -1, attempted: false });
   const appStateRef = useRef(AppState.currentState);
   const backgroundedAtRef = useRef<number | null>(null);
   const pendingResumeRefreshRef = useRef(false);
@@ -199,7 +197,7 @@ function LatestScreenContent() {
   );
 
   // New chip → top of that feed. Skip first paint and prefs hydrate. Do not
-  // ingest the whole catalog; the chip-boost effect below pulls dedicated RSS.
+  // walk generic article pages; an understocked chip makes one scoped /api/feed.
   // Slice out rows this chip would hide before the next paint (cheap — no
   // getLatestFeed) so Health cannot keep showing All-topics stories.
   useLayoutEffect(() => {
@@ -433,66 +431,9 @@ function LatestScreenContent() {
     feedInteractionEpoch,
   ]);
 
-  useEffect(() => {
-    if (!isFocused || isLoading || isLoadingMore || !hasMore || !preferences) return;
-    // Allow top-up while display is still catching up when the painted list is empty
-    // (resume / chip restore) — gating on displayReady alone left the heart stuck.
-    if (!displayReady && displayArticles.length > 0) return;
-
-    const { enabledTopics, enabledSportTags } = preferences;
-    const narrowSportTagActive =
-      isSportsTopicActive(enabledTopics) && !isAllSportTagsEnabled(enabledSportTags);
-    // League/sport chips fetch dedicated RSS via boostArticlesForInterests. Paging the
-    // mixed Latest catalog never finds College Football and flashes the loader forever.
-    // Topic chips like Health still top up from the mixed catalog (and boost separately).
-    if (narrowSportTagActive) return;
-
-    if (autoTopUpAttemptRef.current.filterKey !== filterKey) {
-      autoTopUpAttemptRef.current = { filterKey, filteredCount: -1, attempted: false };
-    }
-
-    const upstream = filterLatestArticles(articles);
-    if (upstream.length >= MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION) return;
-    // Only skip once displayArticles has caught up with everything upstream has found —
-    // when both are 0 (a chip with no matches yet) this must NOT bail, or a narrow filter
-    // with zero current matches never triggers the fetch that could find more.
-    if (upstream.length > 0 && upstream.length <= displayArticles.length) return;
-    if (
-      !shouldRetryFilteredFeedTopUp({
-        hasAttempted: autoTopUpAttemptRef.current.attempted,
-        previousFilteredCount: autoTopUpAttemptRef.current.filteredCount,
-        filteredCount: upstream.length,
-        isStocked: upstream.length >= MIN_FEED_STORIES_BEFORE_SCROLL_PAGINATION,
-      })
-    ) {
-      return;
-    }
-    autoTopUpAttemptRef.current = {
-      filterKey,
-      filteredCount: upstream.length,
-      attempted: true,
-    };
-    void loadMore();
-  }, [
-    isFocused,
-    isLoading,
-    isLoadingMore,
-    hasMore,
-    displayReady,
-    articles,
-    displayArticles.length,
-    filterLatestArticles,
-    filterKey,
-    loadMore,
-    preferences,
-  ]);
-
   // Selecting a chip (topic or sport tag) should feel like a deliberate pull for that
-  // content, not something the reader has to manually pull-to-refresh into. A narrow
-  // selection can be a thin slice of the overall feed — generic date-ordered pagination
-  // can take many pages to surface enough matches — so fetch directly from the sources
-  // for the current selection every time it changes, rather than waiting on an
-  // understock check that only fires when the existing pool already looks thin.
+  // content, not something the reader has to manually pull-to-refresh into. A stocked
+  // in-memory slice makes zero requests; an understocked chip makes one scoped /api/feed.
   useEffect(() => {
     if (!isFocused || !preferences) {
       setChipBoostPending(false);
@@ -504,12 +445,9 @@ function LatestScreenContent() {
     const narrowSportTagActive =
       isSportsTopicActive(enabledTopics) && !isAllSportTagsEnabled(enabledSportTags);
 
-    const sourceIds = narrowSportTagActive
-      ? chipBoostSourceIds(enabledSportTags)
-      : !isAllTopicsEnabled(enabledTopics)
-        ? topicSourceIds(enabledTopics)
-        : [];
-    if (sourceIds.length === 0) {
+    const narrowTopicActive = !isAllTopicsEnabled(enabledTopics);
+    const chipActive = narrowSportTagActive || narrowTopicActive;
+    if (!chipActive) {
       // Leaving the chip must not keep the last boost key, or All → College Football
       // would skip the fetch and stay empty after ingest.
       chipBoostKeyRef.current = '';
@@ -518,23 +456,32 @@ function LatestScreenContent() {
     }
 
     // Keyed on the selection + feedGeneration (bumped by every initial/refresh load), not
-    // articles.length — a pull-to-refresh replaces the article list wholesale (services/
-    // articles.ts) and can coincidentally land on the same length, which would wrongly
+    // articles.length — a pull-to-refresh replaces the article list wholesale
+    // and can coincidentally land on the same length, which would wrongly
     // look like "already pulled for this selection".
     const boostKey = `chip\0${enabledTopics.join(',')}\0${enabledSportTags.join(',')}\0${feedGeneration}`;
     if (chipBoostKeyRef.current === boostKey) return;
     if (chipBoostKeyRef.current === `pending:${boostKey}`) return;
 
+    const inMemoryMatches = filterLatestArticles(articles).length;
+    // Instant chip paint comes from fullOrderRef. A stocked in-memory slice does not
+    // need a second candidate-pool request.
+    if (!shouldRequestScopedChipFeed(inMemoryMatches)) {
+      chipBoostKeyRef.current = boostKey;
+      setChipBoostPending(false);
+      return;
+    }
+
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     chipBoostKeyRef.current = `pending:${boostKey}`;
 
-    const inMemoryMatches = filterLatestArticles(articles).length;
     if (inMemoryMatches === 0) setChipBoostPending(true);
     const run = (allowRetry: boolean) => {
-      void boostArticlesForInterests(sourceIds, boostKey, {
+      void boostArticlesForInterests([], boostKey, {
         forceRefresh: !allowRetry,
         sportTags: narrowSportTagActive ? enabledSportTags : undefined,
+        topics: narrowTopicActive && !narrowSportTagActive ? enabledTopics : undefined,
       }).then(
         (didMerge) => {
           if (cancelled) return;

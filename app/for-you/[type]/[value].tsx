@@ -1,8 +1,10 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
-import { InteractionManager } from 'react-native';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { InteractionManager, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ArticleFeedScreen } from '@/components/ArticleFeedScreen';
+import { InterestSettingsModal } from '@/components/InterestSettingsModal';
 import { SPORT_TAG_LABELS } from '@/catalog/sports';
 import { CURIOSITY_LABELS } from '@/constants/curiosities';
 import { usePreferences } from '@/contexts/PreferencesContext';
@@ -53,6 +55,18 @@ function interestTitle(kind: ForYouInterestKind, value: string): string {
   }
 }
 
+function interestDescription(kind: ForYouInterestKind, value: string): string {
+  const label = interestTitle(kind, value);
+  switch (kind) {
+    case 'topic':
+      return `Stories and news related to ${label.toLowerCase()}.`;
+    case 'keyword':
+      return `Articles, news, and stories related to ${label.toLowerCase()}.`;
+    case 'sportTag':
+      return `The latest stories and updates for ${label}.`;
+  }
+}
+
 function syntheticPrefsForInterest(
   prefs: UserPreferences,
   kind: ForYouInterestKind,
@@ -66,6 +80,37 @@ function syntheticPrefsForInterest(
   };
 }
 
+function InterestFeedHeader({
+  title,
+  description,
+  onSettingsPress,
+}: {
+  title: string;
+  description: string;
+  onSettingsPress: () => void;
+}) {
+  const { colors } = useTheme();
+
+  return (
+    <View style={[headerStyles.container, { borderBottomColor: colors.border }]}>
+      <View style={headerStyles.titleRow}>
+        <Text style={[headerStyles.title, { color: colors.text }]}>{title}</Text>
+        <Pressable
+          onPress={onSettingsPress}
+          accessibilityRole="button"
+          accessibilityLabel="Interest settings"
+          hitSlop={12}
+          style={({ pressed }) => pressed && headerStyles.pressed}>
+          <Ionicons name="ellipsis-horizontal" size={22} color={colors.textSecondary} />
+        </Pressable>
+      </View>
+      <Text style={[headerStyles.description, { color: colors.textSecondary }]}>
+        {description}
+      </Text>
+    </View>
+  );
+}
+
 export default function ForYouInterestFeedScreen() {
   const { type, value: rawValue } = useLocalSearchParams<{
     type: string | string[];
@@ -74,6 +119,7 @@ export default function ForYouInterestFeedScreen() {
   const { colors } = useTheme();
   const kind = parseInterestKind(type);
   const value = parseInterestValue(rawValue);
+  const [settingsVisible, setSettingsVisible] = useState(false);
   const { preferences, filterForYouFeedArticles, recordFeedClick } = usePreferences();
   const {
     articles,
@@ -92,6 +138,7 @@ export default function ForYouInterestFeedScreen() {
   } = useArticles();
 
   const title = kind && value ? interestTitle(kind, value) : 'For You';
+  const description = kind && value ? interestDescription(kind, value) : '';
   const cacheKey =
     kind && value ? buildForYouInterestFeedCacheKey(kind, value) : '';
   const interestBoostKeyRef = useRef('');
@@ -99,7 +146,6 @@ export default function ForYouInterestFeedScreen() {
     null,
   );
 
-  // Paint cached rows on first frame — resolve reads module cache before ranking finishes.
   const [rankedArticles, setRankedArticles] = useState<Article[]>([]);
   const [isRevalidating, setIsRevalidating] = useState(false);
   const [emptyMessage, setEmptyMessage] = useState<string | undefined>();
@@ -217,18 +263,22 @@ export default function ForYouInterestFeedScreen() {
     const task = InteractionManager.runAfterInteractions(() => {
       if (cancelled) return;
       const filtered = filterForYouFeedArticles(articles);
+      const noStories = feedArticles.length === 0 && !isLoading;
       setEmptyMessage(
-        getForYouEmptyMessage({
-          error,
-          totalCount: articles.length,
-          filteredCount: feedArticles.length,
-          sourceFilteredCount: filtered.length,
-          enabledTopics: preferences?.enabledTopics,
-          enabledSportTags: preferences?.enabledSportTags,
-          sourcesRestricted: !!preferences && !isAllSourcesEnabled(preferences.enabledSourceIds),
-          usingDemoArticles,
-          hasForYouTopics: true,
-        }),
+        noStories
+          ? `Nothing worth showing yet.\nWe'll keep looking for stories about ${title}.`
+          : getForYouEmptyMessage({
+              error,
+              totalCount: articles.length,
+              filteredCount: feedArticles.length,
+              sourceFilteredCount: filtered.length,
+              enabledTopics: preferences?.enabledTopics,
+              enabledSportTags: preferences?.enabledSportTags,
+              sourcesRestricted:
+                !!preferences && !isAllSourcesEnabled(preferences.enabledSourceIds),
+              usingDemoArticles,
+              hasForYouTopics: true,
+            }),
       );
     });
 
@@ -239,8 +289,10 @@ export default function ForYouInterestFeedScreen() {
   }, [
     kind,
     value,
+    title,
     error,
     articles,
+    isLoading,
     feedArticles.length,
     filterForYouFeedArticles,
     preferences?.enabledTopics,
@@ -252,11 +304,25 @@ export default function ForYouInterestFeedScreen() {
 
   const showFeedLoading = isLoading && feedArticles.length === 0;
 
+  const openSettings = useCallback(() => setSettingsVisible(true), []);
+  const closeSettings = useCallback(() => setSettingsVisible(false), []);
+
+  const headerExtra = useMemo(() => {
+    if (!kind || !value) return null;
+    return (
+      <InterestFeedHeader
+        title={title}
+        description={description}
+        onSettingsPress={openSettings}
+      />
+    );
+  }, [kind, value, title, description, openSettings]);
+
   return (
     <>
       <Stack.Screen
         options={{
-          title,
+          title: '',
           headerStyle: { backgroundColor: colors.background },
           headerShadowVisible: false,
           headerTintColor: colors.text,
@@ -282,8 +348,47 @@ export default function ForYouInterestFeedScreen() {
         loadMoreCursor={articles.length}
         loadMoreEpoch={paginationRevision}
         onFeedClick={recordFeedClick}
-        layout="snap"
+        layout="fold"
+        headerExtra={headerExtra}
       />
+      {kind && value ? (
+        <InterestSettingsModal
+          visible={settingsVisible}
+          onClose={closeSettings}
+          kind={kind}
+          value={value}
+        />
+      ) : null}
     </>
   );
 }
+
+const headerStyles = StyleSheet.create({
+  container: {
+    paddingHorizontal: 24,
+    paddingTop: 4,
+    paddingBottom: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  title: {
+    flex: 1,
+    fontFamily: 'LoraBold',
+    fontSize: 24,
+    letterSpacing: -0.3,
+  },
+  description: {
+    fontFamily: 'Inter',
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  pressed: {
+    opacity: 0.6,
+  },
+});

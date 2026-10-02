@@ -289,34 +289,59 @@ export async function listArticles(options?: ListArticlesOptions): Promise<ListA
   const decoded = options?.cursor ? decodeArticleCursor(options.cursor) : null;
   const fetchLimit = limit + 1;
 
-  const rows = decoded
-    ? await sql<ArticleRow[]>`
-        SELECT * FROM articles
-        WHERE (
-          (${hasSources}::boolean AND source = ANY(${sources}::text[]))
-          OR (${hasTags}::boolean AND sport_tags && ${sportTags}::text[])
-          OR (NOT ${hasSources}::boolean AND NOT ${hasTags}::boolean)
-        )
-          AND (published_at, id) < (${decoded.publishedAt}::timestamptz, ${decoded.id})
-        ORDER BY
-          CASE WHEN ${hasTags}::boolean AND sport_tags && ${sportTags}::text[] THEN 0 ELSE 1 END,
-          published_at DESC,
-          id DESC
+  // Branch per filter shape instead of one query with boolean params. A combined
+  // `(${hasSources} AND …) OR (${hasTags} AND …)` WHERE is not sargable — the planner
+  // can't prove which arm applies — and a `CASE … END` leading the ORDER BY discards
+  // idx_articles_published_at, so both forced a seq scan + sort of the whole table.
+  const olderThanCursor = decoded
+    ? sql`AND (published_at, id) < (${decoded.publishedAt}::timestamptz, ${decoded.id})`
+    : sql``;
+
+  let rows: ArticleRow[];
+  if (hasSources && hasTags) {
+    // Tag matches rank ahead of source-only matches. Expressed as two index-ordered
+    // top-N scans rather than a sort key: bucket 0 fully precedes bucket 1, so taking
+    // `fetchLimit` from each and then `fetchLimit` of the concatenation is exact.
+    rows = await sql<ArticleRow[]>`
+      (
+        SELECT 0 AS bucket, articles.* FROM articles
+        WHERE sport_tags && ${sportTags}::text[] ${olderThanCursor}
+        ORDER BY published_at DESC, id DESC
         LIMIT ${fetchLimit}
-      `
-    : await sql<ArticleRow[]>`
-        SELECT * FROM articles
-        WHERE (
-          (${hasSources}::boolean AND source = ANY(${sources}::text[]))
-          OR (${hasTags}::boolean AND sport_tags && ${sportTags}::text[])
-          OR (NOT ${hasSources}::boolean AND NOT ${hasTags}::boolean)
-        )
-        ORDER BY
-          CASE WHEN ${hasTags}::boolean AND sport_tags && ${sportTags}::text[] THEN 0 ELSE 1 END,
-          published_at DESC,
-          id DESC
+      )
+      UNION ALL
+      (
+        SELECT 1 AS bucket, articles.* FROM articles
+        WHERE source = ANY(${sources}::text[])
+          AND NOT (sport_tags && ${sportTags}::text[]) ${olderThanCursor}
+        ORDER BY published_at DESC, id DESC
         LIMIT ${fetchLimit}
-      `;
+      )
+      ORDER BY bucket, published_at DESC, id DESC
+      LIMIT ${fetchLimit}
+    `;
+  } else if (hasTags) {
+    rows = await sql<ArticleRow[]>`
+      SELECT * FROM articles
+      WHERE sport_tags && ${sportTags}::text[] ${olderThanCursor}
+      ORDER BY published_at DESC, id DESC
+      LIMIT ${fetchLimit}
+    `;
+  } else if (hasSources) {
+    rows = await sql<ArticleRow[]>`
+      SELECT * FROM articles
+      WHERE source = ANY(${sources}::text[]) ${olderThanCursor}
+      ORDER BY published_at DESC, id DESC
+      LIMIT ${fetchLimit}
+    `;
+  } else {
+    rows = await sql<ArticleRow[]>`
+      SELECT * FROM articles
+      WHERE true ${olderThanCursor}
+      ORDER BY published_at DESC, id DESC
+      LIMIT ${fetchLimit}
+    `;
+  }
 
   const hasMore = rows.length > limit;
   const pageRows = hasMore ? rows.slice(0, limit) : rows;
@@ -464,6 +489,100 @@ export async function listArticlesSince(sinceIso: string, limit = 500): Promise<
   return rows.map(rowToArticle);
 }
 
+export interface FeedCandidateOptions {
+  /** Outlet display names; omit for "all sources". */
+  sources?: string[];
+  /** Enabled curiosities; omit for "all topics". */
+  topics?: string[];
+  /** Outlet names whose catalog primary topic is enabled — matches the client's fallback. */
+  topicSourceNames?: string[];
+  /** Enabled sport tags; omit for "all sports". */
+  sportTags?: string[];
+  blockedTopics?: string[];
+  blockedSportTags?: string[];
+  /** Oldest publish time to consider; omit to search the whole catalog. */
+  since?: Date;
+  limit?: number;
+  /** Opaque cursor from a prior page (`publishedAt|id`). */
+  cursor?: string;
+}
+
+/**
+ * Candidate pool for the personalized feed.
+ *
+ * Only the filters Postgres can answer directly. Sport-tag and topic matching are
+ * *prefilters*: `rowToArticle` re-infers sport tags from title and excerpt, and the
+ * client's topic filter also consults the source catalog, so the backend finalizes
+ * both in JS. Everything here is index-served — `idx_articles_recent_with_hero` for
+ * the recency scan, and the GIN indexes on `topics` / `sport_tags` when a narrow
+ * chip makes the array overlap the selective predicate.
+ */
+export async function selectFeedCandidates(
+  options: FeedCandidateOptions = {},
+): Promise<ListArticlesResult> {
+  const sql = getSql();
+  const limit = Math.min(Math.max(1, options.limit ?? 1000), 3000);
+  const fetchLimit = limit + 1;
+
+  const sources = options.sources?.filter(Boolean) ?? [];
+  const topics = options.topics?.filter(Boolean) ?? [];
+  const topicSourceNames = options.topicSourceNames?.filter(Boolean) ?? [];
+  const sportTags = options.sportTags?.filter(Boolean) ?? [];
+  const blockedTopics = options.blockedTopics?.filter(Boolean) ?? [];
+  const blockedSportTags = options.blockedSportTags?.filter(Boolean) ?? [];
+  const decoded = options.cursor ? decodeArticleCursor(options.cursor) : null;
+
+  const sinceClause = options.since
+    ? sql`AND published_at > ${options.since}`
+    : sql``;
+  const cursorClause = decoded
+    ? sql`AND (published_at, id) < (${decoded.publishedAt}::timestamptz, ${decoded.id})`
+    : sql``;
+  const sourceClause = sources.length > 0
+    ? sql`AND source = ANY(${sources}::text[])`
+    : sql``;
+  // Sports outlets carry a secondary `world` tag, so the client also admits an article
+  // whose outlet's primary curiosity is enabled. Mirrored here so the prefilter can't
+  // drop a row the client would have kept.
+  const topicClause = topics.length > 0
+    ? topicSourceNames.length > 0
+      ? sql`AND (topics && ${topics}::text[] OR source = ANY(${topicSourceNames}::text[]))`
+      : sql`AND topics && ${topics}::text[]`
+    : sql``;
+  const sportTagClause = sportTags.length > 0
+    ? sql`AND sport_tags && ${sportTags}::text[]`
+    : sql``;
+  const blockedTopicsClause = blockedTopics.length > 0
+    ? sql`AND NOT (topics && ${blockedTopics}::text[])`
+    : sql``;
+  const blockedSportTagsClause = blockedSportTags.length > 0
+    ? sql`AND NOT (sport_tags && ${blockedSportTags}::text[])`
+    : sql``;
+
+  const rows = await sql<ArticleRow[]>`
+    SELECT * FROM articles
+    WHERE image_url <> ''
+    ${sinceClause}
+    ${cursorClause}
+    ${sourceClause}
+    ${topicClause}
+    ${sportTagClause}
+    ${blockedTopicsClause}
+    ${blockedSportTagsClause}
+    ORDER BY published_at DESC, id DESC
+    LIMIT ${fetchLimit}
+  `;
+
+  const hasMore = rows.length > limit;
+  const pageRows = hasMore ? rows.slice(0, limit) : rows;
+  const articles = pageRows.map(rowToArticle);
+  const last = pageRows[pageRows.length - 1];
+  const nextCursor =
+    hasMore && last ? encodeArticleCursor(last.published_at.toISOString(), last.id) : null;
+
+  return { articles, hasMore, nextCursor };
+}
+
 export interface PushSubscription {
   expoPushToken: string;
   userId: string;
@@ -479,6 +598,9 @@ interface PushSubscriptionRow {
   keyword_scores: Record<string, number>;
   sport_tag_scores: Record<string, number>;
   enabled_topics: string[];
+  for_you_topics: string[] | null;
+  for_you_keywords: string[] | null;
+  for_you_sport_tags: string[] | null;
   enabled_source_ids: string[];
   enabled_sport_tags: string[];
   blocked_topics: string[];
@@ -500,6 +622,9 @@ function rowToPushSubscription(row: PushSubscriptionRow): PushSubscription {
       keywordScores: row.keyword_scores ?? {},
       sportTagScores: row.sport_tag_scores ?? {},
       enabledTopics: (row.enabled_topics ?? []) as PushPreferences['enabledTopics'],
+      forYouTopics: (row.for_you_topics ?? []) as PushPreferences['forYouTopics'],
+      forYouKeywords: row.for_you_keywords ?? [],
+      forYouSportTags: (row.for_you_sport_tags ?? []) as PushPreferences['forYouSportTags'],
       enabledSourceIds: row.enabled_source_ids ?? [],
       enabledSportTags: (row.enabled_sport_tags ?? []) as PushPreferences['enabledSportTags'],
       blockedTopics: (row.blocked_topics ?? []) as PushPreferences['blockedTopics'],
@@ -522,13 +647,16 @@ export async function upsertPushSubscription(input: {
   await sql`
     INSERT INTO push_subscriptions (
       expo_push_token, user_id, topic_scores, keyword_scores, sport_tag_scores,
-      enabled_topics, enabled_source_ids, enabled_sport_tags,
+      enabled_topics, for_you_topics, for_you_keywords, for_you_sport_tags,
+      enabled_source_ids, enabled_sport_tags,
       blocked_topics, blocked_sport_tags, blocked_keywords,
       trending_notifications_enabled
     ) VALUES (
       ${expoPushToken}, ${userId},
       ${sql.json(prefs.topicScores)}, ${sql.json(prefs.keywordScores)}, ${sql.json(prefs.sportTagScores)},
-      ${prefs.enabledTopics}::text[], ${prefs.enabledSourceIds}::text[], ${prefs.enabledSportTags}::text[],
+      ${prefs.enabledTopics}::text[],
+      ${prefs.forYouTopics}::text[], ${prefs.forYouKeywords}::text[], ${prefs.forYouSportTags}::text[],
+      ${prefs.enabledSourceIds}::text[], ${prefs.enabledSportTags}::text[],
       ${prefs.blockedTopics}::text[], ${prefs.blockedSportTags}::text[], ${prefs.blockedKeywords}::text[],
       ${prefs.trendingNotificationsEnabled}
     )
@@ -538,6 +666,9 @@ export async function upsertPushSubscription(input: {
       keyword_scores = excluded.keyword_scores,
       sport_tag_scores = excluded.sport_tag_scores,
       enabled_topics = excluded.enabled_topics,
+      for_you_topics = excluded.for_you_topics,
+      for_you_keywords = excluded.for_you_keywords,
+      for_you_sport_tags = excluded.for_you_sport_tags,
       enabled_source_ids = excluded.enabled_source_ids,
       enabled_sport_tags = excluded.enabled_sport_tags,
       blocked_topics = excluded.blocked_topics,

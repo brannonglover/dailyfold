@@ -1,4 +1,4 @@
-import type { SportTag } from '@/catalog/sports';
+import type { SportTag } from '../catalog/sports';
 
 export type Topic =
   | 'technology'
@@ -15,7 +15,7 @@ export type Topic =
   | 'gaming'
   | 'books';
 
-export type { SportTag } from '@/catalog/sports';
+export type { SportTag } from '../catalog/sports';
 
 export interface FeedSource {
   id: string;

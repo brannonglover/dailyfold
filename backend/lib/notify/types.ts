@@ -22,6 +22,15 @@ export interface PushPreferences {
   keywordScores: Record<string, number>;
   sportTagScores: Record<string, number>;
   enabledTopics: Topic[];
+  /**
+   * Explicit interests the user set in the For You UI. Carried raw: unlike
+   * enabledTopics/enabledSportTags these are not feed filters, they are the
+   * user's stated interests, so feed normalization must never broaden them
+   * (e.g. collapsing a full selection to the "All" sentinel) or clear them.
+   */
+  forYouTopics: Topic[];
+  forYouKeywords: string[];
+  forYouSportTags: SportTag[];
   enabledSourceIds: string[];
   enabledSportTags: SportTag[];
   blockedTopics: Topic[];

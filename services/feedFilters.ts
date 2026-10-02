@@ -2,21 +2,21 @@ import { SOCCER_LEAGUE_TAGS } from '@/catalog/sports';
 import { FALLBACK_SOURCES } from '@/data/sources';
 import { filterArticlesByBlocks } from '@/services/blockPreferences';
 import { normalizeFeedPreferences } from '@/services/feedPreferences';
-import { filterArticlesByReadingLearnings } from '@/services/readingLearnings';
+import { toFeedPreferencesPayload } from '@/services/feedPreferencesPayload';
 import {
   buildSourcePrimaryTopicMap,
   filterArticlesBySources,
 } from '@/services/sourcePreferences';
 import { filterArticlesBySportTags } from '@/services/sportPreferences';
 import { filterArticlesByTopics, isAllTopicsEnabled } from '@/services/topicPreferences';
+import {
+  filterArticlesWithRealHeroImage,
+  filterFeedCandidates,
+} from '@/shared/feed/filters';
 import { Article, FeedSource, UserPreferences } from '@/types';
 import { applyArticleStoryFallbacks } from '@/utils/articleStoryFallback';
-import { hasRealHeroImage } from '@/utils/articleStoryMatch';
 
-/** Drop feed rows without a real hero image (after story dedupe at fetch). */
-export function filterArticlesWithRealHeroImage(articles: Article[]): Article[] {
-  return articles.filter(hasRealHeroImage);
-}
+export { filterArticlesWithRealHeroImage };
 
 /**
  * Picking a sport chip is an explicit request for that league's stories — a prior
@@ -47,7 +47,7 @@ function withoutActiveSportTagBlocks(prefs: UserPreferences): UserPreferences {
 }
 
 /**
- * Client-side feed filter pipeline.
+ * Client-side feed filter pipeline, running the same shared stages as /api/feed.
  * Source toggles always apply. All topics (`enabledTopics: []`) bypasses topic and
  * sport filters so the feed is not stuck on sports-only outlets from a prior category
  * or Profile selection.
@@ -57,29 +57,14 @@ export function applyFeedFilters(
   preferences: UserPreferences | null | undefined,
   sources: FeedSource[],
 ): Article[] {
-  let result = applyArticleStoryFallbacks(articles);
+  const result = applyArticleStoryFallbacks(articles);
 
-  if (preferences) {
-    const prefs = normalizeFeedPreferences(preferences);
-    const catalogSources = sources.length > 0 ? sources : FALLBACK_SOURCES;
+  if (!preferences) return filterArticlesWithRealHeroImage(result);
 
-    result = filterArticlesBySources(result, catalogSources, prefs.enabledSourceIds);
+  const prefs = normalizeFeedPreferences(preferences);
+  const catalogSources = sources.length > 0 ? sources : FALLBACK_SOURCES;
 
-    if (!isAllTopicsEnabled(prefs.enabledTopics)) {
-      const sourcePrimaryByName = buildSourcePrimaryTopicMap(catalogSources);
-      result = filterArticlesByTopics(result, prefs.enabledTopics, sourcePrimaryByName);
-      result = filterArticlesBySportTags(result, prefs.enabledSportTags, prefs.enabledTopics);
-    }
-
-    result = filterArticlesByBlocks(result, withoutActiveSportTagBlocks(prefs));
-
-    result = filterArticlesByReadingLearnings(result, prefs, {
-      exemptTopics: isAllTopicsEnabled(prefs.enabledTopics) ? [] : prefs.enabledTopics,
-      exemptSportTags: prefs.enabledSportTags,
-    });
-  }
-
-  return filterArticlesWithRealHeroImage(result);
+  return filterFeedCandidates(result, toFeedPreferencesPayload(prefs), catalogSources);
 }
 
 /**

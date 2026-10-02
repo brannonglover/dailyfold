@@ -2,9 +2,18 @@ import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 
-import { fetchArticles } from '@/services/articles';
+import { FALLBACK_SOURCES } from '@/data/sources';
 import { getSessionUser } from '@/services/auth';
+import { fetchPersonalizedFeed } from '@/services/feed';
+import {
+  runBackgroundFeedRefreshWithDeps,
+  type BackgroundFeedRefreshResult,
+} from '@/services/feedBackgroundRefresh';
 import { applyTrendingNotificationFilters } from '@/services/feedFilters';
+import {
+  reloadFeedSnapshotRecord,
+  saveFeedSnapshot,
+} from '@/services/feedPersistence';
 import {
   getNotificationPermissionGranted,
   notificationsAvailable,
@@ -12,47 +21,77 @@ import {
 import { fetchSources } from '@/services/sources';
 import { getPreferences } from '@/services/storage';
 import { processHotTrendingNotifications } from '@/services/trendingNotifications';
-import { isIngestPendingMeta } from '@/utils/ingestPoll';
-import { remainingPostIngestNotificationDelayMs } from '@/utils/postIngestNotificationDelay';
 
 export const TRENDING_NOTIFICATION_TASK = 'dailyfold-trending-notifications';
 
-/** Minimum background interval (minutes). Android WorkManager floor is 15. */
+/** Requested interval only — the OS decides when we actually run. */
 export const TRENDING_NOTIFICATION_INTERVAL_MINUTES = 15;
 
-export async function runTrendingNotificationCheck(): Promise<void> {
-  if (Platform.OS === 'web' || !notificationsAvailable()) return;
+let backgroundTaskExpired = false;
 
-  const user = await getSessionUser();
-  if (!user) return;
+function markBackgroundTaskExpired(): void {
+  backgroundTaskExpired = true;
+}
 
-  const preferences = await getPreferences(user.id);
-  if (!preferences.trendingNotificationsEnabled) return;
-  if (!(await getNotificationPermissionGranted())) return;
+async function runBackgroundFeedMaintenance(): Promise<BackgroundFeedRefreshResult> {
+  return runBackgroundFeedRefreshWithDeps({
+    nowMs: () => Date.now(),
+    isExpired: () => backgroundTaskExpired,
+    loadUser: getSessionUser,
+    loadPreferences: getPreferences,
+    loadRecord: reloadFeedSnapshotRecord,
+    saveRecord: saveFeedSnapshot,
+    fetchFeed: (preferences, knownArticles) =>
+      fetchPersonalizedFeed({
+        preferences,
+        knownArticles,
+        mode: 'full',
+        limit: 100,
+        want: 20,
+      }),
+    fetchSources: async () => {
+      try {
+        return await fetchSources();
+      } catch {
+        return FALLBACK_SOURCES;
+      }
+    },
+    evaluateNotifications: async (userId, articles, preferences, sources) => {
+      const filtered = applyTrendingNotificationFilters(articles, preferences, sources);
+      await processHotTrendingNotifications(userId, filtered, true, preferences);
+    },
+    notificationsEligible: async (preferences) => {
+      if (!preferences.trendingNotificationsEnabled) return false;
+      if (!notificationsAvailable()) return false;
+      if (!(await getNotificationPermissionGranted())) return false;
+      return true;
+    },
+  });
+}
 
-  const [sources, { articles, meta }] = await Promise.all([fetchSources(), fetchArticles()]);
-  if (isIngestPendingMeta(meta)) return;
-
-  const lastIngestAtMs = meta?.lastIngestAt ? Date.parse(meta.lastIngestAt) : Number.NaN;
-  if (
-    remainingPostIngestNotificationDelayMs(
-      Number.isFinite(lastIngestAtMs) ? lastIngestAtMs : null,
-      Date.now(),
-    ) > 0
-  ) {
-    return;
-  }
-
-  const filtered = applyTrendingNotificationFilters(articles, preferences, sources);
-  await processHotTrendingNotifications(user.id, filtered, true, preferences);
+/**
+ * Single Expo background worker: refresh the persisted feed snapshot, then
+ * evaluate trending notifications against that same article set.
+ */
+export async function runTrendingNotificationCheck(): Promise<BackgroundFeedRefreshResult> {
+  return runBackgroundFeedMaintenance();
 }
 
 TaskManager.defineTask(TRENDING_NOTIFICATION_TASK, async () => {
+  backgroundTaskExpired = false;
+  const expiration = (
+    BackgroundTask as { addExpirationListener?: (listener: () => void) => { remove: () => void } }
+  ).addExpirationListener?.(markBackgroundTaskExpired);
+
   try {
-    await runTrendingNotificationCheck();
-    return BackgroundTask.BackgroundTaskResult.Success;
+    const result = await runBackgroundFeedMaintenance();
+    return result.status === 'failed'
+      ? BackgroundTask.BackgroundTaskResult.Failed
+      : BackgroundTask.BackgroundTaskResult.Success;
   } catch {
     return BackgroundTask.BackgroundTaskResult.Failed;
+  } finally {
+    expiration?.remove();
   }
 });
 
