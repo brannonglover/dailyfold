@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 
 import { corsHeaders, jsonResponse } from '@/lib/cors';
-import { getIngestStatus } from '@/lib/db';
+import { getArticleBodies, getIngestStatus } from '@/lib/db';
 import { buildPersonalizedFeed } from '@/lib/feedRanking';
 import { scheduleGuardianHeroRepair } from '@/lib/ingest';
 import { ensureFreshArticles } from '@/lib/ingest-scheduler';
@@ -95,7 +95,12 @@ export async function POST(request: NextRequest) {
 
     // The ranked pool can be an order of magnitude larger than the page; only the
     // returned articles' scores are useful to the client's merge.
-    const articles = result.articles.slice(0, limit);
+    let articles = result.articles.slice(0, limit);
+    if (include.includes('body') && articles.length > 0) {
+      // Candidate reads leave `body` out (egress); fetch it for just the returned page.
+      const bodies = await getArticleBodies(articles.map((a) => a.id));
+      articles = articles.map((a) => ({ ...a, body: bodies.get(a.id) ?? a.body }));
+    }
     const scores: Record<string, number> = {};
     for (const article of articles) {
       const score = result.scores[article.id];

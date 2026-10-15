@@ -60,6 +60,24 @@ interface ArticleRow {
   url: string;
 }
 
+/**
+ * Column list for feed, search and trending reads. Deliberately omits `body` (up to 8 KB
+ * per row) and `search_vector` (only used by the GIN index): both are billed as Supabase
+ * egress on every row, and the feed card needs neither. `body` is selected as an empty
+ * string so ArticleRow stays one shape; callers that truly need it use `getArticleById`
+ * or `getArticleBodies`.
+ */
+function articleListColumns(sql: ReturnType<typeof getSql>) {
+  return sql`id, title, excerpt, '' AS body, source, image_url, topics, sport_tags,
+    search_tags, requires_subscription, read_time_minutes, published_at, url`;
+}
+
+/** Full row for single-article reads (reader view): everything except `search_vector`. */
+function articleFullColumns(sql: ReturnType<typeof getSql>) {
+  return sql`id, title, excerpt, body, source, image_url, topics, sport_tags,
+    search_tags, requires_subscription, read_time_minutes, published_at, url`;
+}
+
 function rowToArticle(row: ArticleRow): Article {
   const topics = row.topics as Topic[];
   const storedTags: SportTag[] = (row.sport_tags ?? []) as SportTag[];
@@ -268,9 +286,10 @@ export async function searchArticles(query: string, options?: SearchArticlesOpti
 
   const limit = Math.min(Math.max(1, options?.limit ?? 25), 50);
   const sql = getSql();
+  const cols = articleListColumns(sql);
 
   const rows = await sql<ArticleRow[]>`
-    SELECT * FROM articles
+    SELECT ${cols} FROM articles
     WHERE search_vector @@ to_tsquery('english', ${tsQueryText})
     ORDER BY ts_rank_cd(search_vector, to_tsquery('english', ${tsQueryText})) DESC, published_at DESC
     LIMIT ${limit}
@@ -281,6 +300,7 @@ export async function searchArticles(query: string, options?: SearchArticlesOpti
 
 export async function listArticles(options?: ListArticlesOptions): Promise<ListArticlesResult> {
   const sql = getSql();
+  const cols = articleListColumns(sql);
   const limit = Math.min(Math.max(1, options?.limit ?? 200), 100);
   const sources = options?.sources?.filter(Boolean) ?? [];
   const sportTags = options?.sportTags?.filter(Boolean) ?? [];
@@ -304,14 +324,14 @@ export async function listArticles(options?: ListArticlesOptions): Promise<ListA
     // `fetchLimit` from each and then `fetchLimit` of the concatenation is exact.
     rows = await sql<ArticleRow[]>`
       (
-        SELECT 0 AS bucket, articles.* FROM articles
+        SELECT 0 AS bucket, ${cols} FROM articles
         WHERE sport_tags && ${sportTags}::text[] ${olderThanCursor}
         ORDER BY published_at DESC, id DESC
         LIMIT ${fetchLimit}
       )
       UNION ALL
       (
-        SELECT 1 AS bucket, articles.* FROM articles
+        SELECT 1 AS bucket, ${cols} FROM articles
         WHERE source = ANY(${sources}::text[])
           AND NOT (sport_tags && ${sportTags}::text[]) ${olderThanCursor}
         ORDER BY published_at DESC, id DESC
@@ -322,21 +342,21 @@ export async function listArticles(options?: ListArticlesOptions): Promise<ListA
     `;
   } else if (hasTags) {
     rows = await sql<ArticleRow[]>`
-      SELECT * FROM articles
+      SELECT ${cols} FROM articles
       WHERE sport_tags && ${sportTags}::text[] ${olderThanCursor}
       ORDER BY published_at DESC, id DESC
       LIMIT ${fetchLimit}
     `;
   } else if (hasSources) {
     rows = await sql<ArticleRow[]>`
-      SELECT * FROM articles
+      SELECT ${cols} FROM articles
       WHERE source = ANY(${sources}::text[]) ${olderThanCursor}
       ORDER BY published_at DESC, id DESC
       LIMIT ${fetchLimit}
     `;
   } else {
     rows = await sql<ArticleRow[]>`
-      SELECT * FROM articles
+      SELECT ${cols} FROM articles
       WHERE true ${olderThanCursor}
       ORDER BY published_at DESC, id DESC
       LIMIT ${fetchLimit}
@@ -363,8 +383,25 @@ export async function setArticleRequiresSubscription(
 
 export async function getArticleById(id: string): Promise<Article | undefined> {
   const sql = getSql();
-  const rows = await sql<ArticleRow[]>`SELECT * FROM articles WHERE id = ${id}`;
+  const rows = await sql<ArticleRow[]>`
+    SELECT ${articleFullColumns(sql)} FROM articles WHERE id = ${id}
+  `;
   return rows[0] ? rowToArticle(rows[0]) : undefined;
+}
+
+/**
+ * Bodies for a small, already-selected set of articles. List reads leave `body` out to
+ * save egress; callers that rank or match on body text (trending notification relevance,
+ * `include: ['body']` feed requests) hydrate just the rows they actually keep.
+ */
+export async function getArticleBodies(ids: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return new Map();
+  const sql = getSql();
+  const rows = await sql<{ id: string; body: string }[]>`
+    SELECT id, body FROM articles WHERE id = ANY(${unique}::text[])
+  `;
+  return new Map(rows.map((row) => [row.id, row.body]));
 }
 
 /** Guardian rows missing a usable hero (empty, placeholder, broken, or tiny signed CDN URL). */
@@ -480,8 +517,9 @@ export async function saveReaderContent(
  * too low for a full trending window across ~20 sources on a busy day. */
 export async function listArticlesSince(sinceIso: string, limit = 500): Promise<Article[]> {
   const sql = getSql();
+  const cols = articleListColumns(sql);
   const rows = await sql<ArticleRow[]>`
-    SELECT * FROM articles
+    SELECT ${cols} FROM articles
     WHERE published_at >= ${sinceIso}::timestamptz
     ORDER BY published_at DESC
     LIMIT ${limit}
@@ -521,6 +559,7 @@ export async function selectFeedCandidates(
   options: FeedCandidateOptions = {},
 ): Promise<ListArticlesResult> {
   const sql = getSql();
+  const cols = articleListColumns(sql);
   const limit = Math.min(Math.max(1, options.limit ?? 1000), 3000);
   const fetchLimit = limit + 1;
 
@@ -560,7 +599,7 @@ export async function selectFeedCandidates(
     : sql``;
 
   const rows = await sql<ArticleRow[]>`
-    SELECT * FROM articles
+    SELECT ${cols} FROM articles
     WHERE image_url <> ''
     ${sinceClause}
     ${cursorClause}

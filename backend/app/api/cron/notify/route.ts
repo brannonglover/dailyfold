@@ -5,6 +5,7 @@ import { jsonResponse } from '@/lib/cors';
 import {
   deletePushReceipts,
   deletePushSubscription,
+  getArticleBodies,
   getLastIngestAt,
   insertPushReceiptTickets,
   listActivePushSubscriptions,
@@ -159,28 +160,41 @@ async function handleNotifyCron(): Promise<Response> {
     );
   }
 
-  const sinceIso = new Date(Date.now() - TRENDING_WINDOW_MS).toISOString();
-  const articles = await listArticlesSince(sinceIso, 500);
-  const candidates = findHotTrendingCandidates(articles, Date.now());
-
-  if (candidates.length === 0) {
-    return jsonResponse(
-      { candidatesConsidered: 0, subscribersConsidered: 0, notificationsSent: 0, staleTokensRemoved },
-      null,
-    );
-  }
-
+  // Subscribers first: with nobody to notify there is no reason to read the article window.
   const subscribers = await listActivePushSubscriptions();
   if (subscribers.length === 0) {
     return jsonResponse(
       {
-        candidatesConsidered: candidates.length,
+        candidatesConsidered: 0,
         subscribersConsidered: 0,
         notificationsSent: 0,
         staleTokensRemoved,
       },
       null,
     );
+  }
+
+  const sinceIso = new Date(Date.now() - TRENDING_WINDOW_MS).toISOString();
+  const articles = await listArticlesSince(sinceIso, 500);
+  const candidates = findHotTrendingCandidates(articles, Date.now());
+
+  if (candidates.length === 0) {
+    return jsonResponse(
+      {
+        candidatesConsidered: 0,
+        subscribersConsidered: subscribers.length,
+        notificationsSent: 0,
+        staleTokensRemoved,
+      },
+      null,
+    );
+  }
+
+  // The window read leaves `body` out (egress); relevance scoring uses it as a weak
+  // fallback, so hydrate it for the handful of trending candidates only.
+  const bodies = await getArticleBodies(candidates.map((c) => c.article.id));
+  for (const candidate of candidates) {
+    candidate.article.body = bodies.get(candidate.article.id) ?? candidate.article.body;
   }
 
   const sources = listSources();
