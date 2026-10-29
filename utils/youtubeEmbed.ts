@@ -105,6 +105,84 @@ export function buildYouTubeEmbedHtml(
 </html>`;
 }
 
+/**
+ * Chromeless, looping player page for the Videos feed. Starts paused (the app plays the active
+ * one) and reports back over the React Native bridge: `ready`, `playing`, `p:<0..1>`.
+ */
+export function buildYouTubeShortHtml(
+  videoId: string,
+  muted: boolean,
+  origin = YOUTUBE_EMBED_ORIGIN,
+): string {
+  const playerVars = {
+    playsinline: 1,
+    controls: 0,
+    rel: 0,
+    modestbranding: 1,
+    disablekb: 1,
+    fs: 0,
+    iv_load_policy: 3,
+    loop: 1,
+    playlist: videoId,
+    origin,
+    autoplay: 0,
+    enablejsapi: 1,
+  };
+
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <style>
+      html, body, #player { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+    </style>
+    <script src="https://www.youtube.com/iframe_api"></script>
+  </head>
+  <body>
+    <div id="player"></div>
+    <script>
+      function post(message) {
+        if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(message);
+      }
+      function onYouTubeIframeAPIReady() {
+        window.ytPlayer = new YT.Player('player', {
+          videoId: '${videoId}',
+          playerVars: ${JSON.stringify(playerVars)},
+          events: {
+            onReady: function() {
+              ${muted ? 'ytPlayer.mute();' : ''}
+              post('ready');
+              setInterval(function() {
+                var d = ytPlayer.getDuration();
+                if (d > 0 && ytPlayer.getPlayerState() === YT.PlayerState.PLAYING) {
+                  post('p:' + Math.min(1, ytPlayer.getCurrentTime() / d));
+                }
+              }, 250);
+            },
+            onStateChange: function(event) {
+              if (event.data === YT.PlayerState.PLAYING) post('playing');
+              if (event.data === YT.PlayerState.ENDED) { ytPlayer.seekTo(0, true); ytPlayer.playVideo(); }
+            }
+          }
+        });
+      }
+    </script>
+  </body>
+</html>`;
+}
+
+export function buildYouTubeShortSource(
+  videoId: string,
+  muted: boolean,
+): { html: string; baseUrl: string } {
+  return {
+    html: buildYouTubeShortHtml(videoId, muted),
+    baseUrl: YOUTUBE_EMBED_ORIGIN,
+  };
+}
+
 export function buildYouTubeEmbedSource(
   url: string,
   options: EmbedHtmlOptions = {},

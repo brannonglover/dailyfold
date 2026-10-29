@@ -43,7 +43,7 @@ const INITIAL_FETCH_TIMEOUT_MS = 60_000;
 const EMPTY_FEED_MESSAGE =
   'No stories are available yet. Pull to refresh, or try again in a moment.';
 
-async function fetchWithTimeout(
+export async function fetchWithTimeout(
   url: string,
   init?: RequestInit,
   timeoutMs = FETCH_TIMEOUT_MS,
@@ -73,7 +73,7 @@ async function parseApiError(response: Response): Promise<string> {
   return `API error: ${response.status}`;
 }
 
-async function parseJson<T>(response: Response): Promise<T> {
+export async function parseJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
       throw new Error(
@@ -92,7 +92,7 @@ async function parseJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function apiUnreachableMessage(): string {
+export function apiUnreachableMessage(): string {
   return `Cannot reach the API at ${API_URL}. Run "npm run api" (see DEV.md), verify with "npm run api:check", and on a physical device set EXPO_PUBLIC_API_URL in .env to your computer's LAN address (e.g. http://192.168.1.94:3001).`;
 }
 

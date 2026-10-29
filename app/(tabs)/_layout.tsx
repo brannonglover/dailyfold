@@ -62,6 +62,10 @@ function IosNativeTabs() {
         <Label>For You</Label>
         <Icon sf={{ default: 'sparkles', selected: 'sparkles' }} />
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="videos">
+        <Label>Videos</Label>
+        <Icon sf={{ default: 'play.rectangle', selected: 'play.rectangle.fill' }} />
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="saved">
         <Label>Reading</Label>
         <Icon sf={{ default: 'book', selected: 'book.fill' }} />
@@ -148,6 +152,14 @@ function JsTabs() {
           title: 'For You',
           lazy: false,
           tabBarIcon: ({ color }) => <Ionicons name="sparkles-outline" size={24} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="videos"
+        options={{
+          title: 'Videos',
+          lazy: false,
+          tabBarIcon: ({ color }) => <Ionicons name="play-circle-outline" size={24} color={color} />,
         }}
       />
       <Tabs.Screen

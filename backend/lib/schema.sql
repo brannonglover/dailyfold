@@ -111,3 +111,46 @@ CREATE TABLE IF NOT EXISTS push_receipts (
   expo_push_token TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Direct-file (MP4/WebM/MOV) videos found inside articles, for the app's Videos tab.
+-- Populated by lib/videoIndex.ts after ingest; one playable video per article.
+-- published_at is denormalized from articles so the feed pages off this index alone.
+CREATE TABLE IF NOT EXISTS article_videos (
+  article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+  video_url TEXT NOT NULL,
+  poster_url TEXT NOT NULL DEFAULT '',
+  caption TEXT NOT NULL DEFAULT '',
+  published_at TIMESTAMPTZ NOT NULL,
+  detected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_article_videos_published_at
+  ON article_videos (published_at DESC, article_id DESC);
+-- Publishers (ESPN especially) reuse one clip across several stories; show each clip once.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_article_videos_video_url ON article_videos (video_url);
+
+-- Articles whose page has been checked for video (hit or miss), so each page is fetched once.
+CREATE TABLE IF NOT EXISTS article_video_scans (
+  article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+  scanned_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- YouTube Shorts from the curated channels in lib/videoChannels.ts, for the Videos tab.
+-- Populated by lib/youtubeShorts.ts from each channel's Shorts RSS feed. embeddable=false
+-- rows are kept so a video the owner blocked from embedding isn't re-checked every run.
+CREATE TABLE IF NOT EXISTS youtube_shorts (
+  video_id TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL,
+  channel_name TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  title TEXT NOT NULL,
+  thumbnail_url TEXT NOT NULL DEFAULT '',
+  embeddable BOOLEAN NOT NULL,
+  published_at TIMESTAMPTZ NOT NULL,
+  detected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_youtube_shorts_published_at
+  ON youtube_shorts (published_at DESC, video_id DESC);
+CREATE INDEX IF NOT EXISTS idx_youtube_shorts_channel
+  ON youtube_shorts (channel_id, published_at DESC);

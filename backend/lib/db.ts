@@ -787,3 +787,299 @@ export async function deletePushReceipts(ticketIds: string[]): Promise<void> {
   const sql = getSql();
   await sql`DELETE FROM push_receipts WHERE ticket_id = ANY(${ticketIds}::text[])`;
 }
+
+export interface ArticleVideo {
+  kind: 'article';
+  articleId: string;
+  videoUrl: string;
+  posterUrl?: string;
+  caption?: string;
+  article: Article;
+}
+
+export interface YouTubeShort {
+  kind: 'youtube';
+  videoId: string;
+  title: string;
+  channelName: string;
+  topic: string;
+  posterUrl?: string;
+  publishedAt: string;
+}
+
+export type FeedVideo = ArticleVideo | YouTubeShort;
+
+export interface YouTubeShortRecord {
+  videoId: string;
+  channelId: string;
+  channelName: string;
+  topic: string;
+  title: string;
+  thumbnailUrl: string;
+  embeddable: boolean;
+  publishedAt: string;
+}
+
+export interface VideoScanResult {
+  article: Article;
+  video?: { url: string; poster?: string; caption?: string };
+}
+
+/**
+ * Recent, free-to-read articles with a hero that haven't been checked for video yet,
+ * newest first. Same candidate shape as the feed pool (idx_articles_recent_with_hero).
+ */
+export async function listArticlesNeedingVideoScan(
+  sinceHours: number,
+  limit: number,
+): Promise<Article[]> {
+  const sql = getSql();
+  const cols = articleListColumns(sql);
+  const rows = await sql<ArticleRow[]>`
+    SELECT ${cols} FROM articles a
+    WHERE a.published_at > now() - (${sinceHours}::text || ' hours')::interval
+      AND a.image_url <> ''
+      AND a.requires_subscription = false
+      AND NOT EXISTS (SELECT 1 FROM article_video_scans s WHERE s.article_id = a.id)
+    ORDER BY a.published_at DESC, a.id DESC
+    LIMIT ${limit}
+  `;
+  return rows.map(rowToArticle);
+}
+
+/**
+ * Marks every scanned article as checked and indexes the ones that had a video. A clip
+ * already indexed under another article is skipped (first article to carry it wins).
+ */
+export async function recordVideoScans(results: VideoScanResult[]): Promise<number> {
+  if (results.length === 0) return 0;
+  const sql = getSql();
+
+  await sql`
+    INSERT INTO article_video_scans ${sql(
+      results.map((r) => ({ article_id: r.article.id })),
+      'article_id',
+    )}
+    ON CONFLICT (article_id) DO NOTHING
+  `;
+
+  const hits = results.filter((r) => r.video);
+  if (hits.length === 0) return 0;
+
+  await sql`
+    INSERT INTO article_videos ${sql(
+      hits.map((r) => ({
+        article_id: r.article.id,
+        video_url: r.video!.url,
+        poster_url: r.video!.poster ?? '',
+        caption: r.video!.caption ?? '',
+        published_at: r.article.publishedAt,
+      })),
+      'article_id',
+      'video_url',
+      'poster_url',
+      'caption',
+      'published_at',
+    )}
+    ON CONFLICT DO NOTHING
+  `;
+  return hits.length;
+}
+
+interface ArticleVideoRow extends ArticleRow {
+  video_url: string;
+  poster_url: string;
+  caption: string;
+}
+
+interface YouTubeShortRow {
+  video_id: string;
+  channel_name: string;
+  topic: string;
+  title: string;
+  thumbnail_url: string;
+  published_at: Date;
+}
+
+export interface ListVideosOptions {
+  limit?: number;
+  /** Return only videos on at least one of these topics. */
+  topics?: string[];
+  /** Opaque cursor from a prior page (`publishedAt|id`). */
+  cursor?: string;
+}
+
+export interface ListVideosResult {
+  videos: FeedVideo[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+/** Shorts older than this drop out of the feed. */
+const SHORTS_WINDOW_DAYS = 45;
+/** Newest Shorts shown per channel, so one prolific channel can't fill the feed. */
+const SHORTS_PER_CHANNEL = 4;
+
+export async function listVideos(options?: ListVideosOptions): Promise<ListVideosResult> {
+  const sql = getSql();
+  const limit = Math.min(Math.max(1, options?.limit ?? 20), 50);
+  const topics = options?.topics?.filter(Boolean) ?? [];
+  const decoded = options?.cursor ? decodeArticleCursor(options.cursor) : null;
+  const fetchLimit = limit + 1;
+
+  const olderThanCursor = decoded
+    ? sql`WHERE (published_at, id) < (${decoded.publishedAt}::timestamptz, ${decoded.id})`
+    : sql``;
+  const articleTopicFilter = topics.length > 0 ? sql`AND a.topics && ${topics}::text[]` : sql``;
+  const shortTopicFilter = topics.length > 0 ? sql`AND s.topic = ANY(${topics}::text[])` : sql``;
+
+  // One ordered list of article clips and Shorts; the page is then hydrated per kind.
+  const page = await sql<{ kind: 'article' | 'youtube'; id: string; published_at: Date }[]>`
+    WITH feed AS (
+      SELECT 'article'::text AS kind, v.article_id AS id, v.published_at
+      FROM article_videos v
+      JOIN articles a ON a.id = v.article_id
+      WHERE true ${articleTopicFilter}
+      UNION ALL
+      SELECT 'youtube'::text, r.video_id, r.published_at
+      FROM (
+        SELECT s.video_id, s.published_at,
+          row_number() OVER (PARTITION BY s.channel_id ORDER BY s.published_at DESC) AS rn
+        FROM youtube_shorts s
+        WHERE s.embeddable
+          AND s.published_at > now() - (${SHORTS_WINDOW_DAYS}::text || ' days')::interval
+          ${shortTopicFilter}
+      ) r
+      WHERE r.rn <= ${SHORTS_PER_CHANNEL}
+    )
+    SELECT kind, id, published_at FROM feed
+    ${olderThanCursor}
+    ORDER BY published_at DESC, id DESC
+    LIMIT ${fetchLimit}
+  `;
+
+  const hasMore = page.length > limit;
+  const pageRows = hasMore ? page.slice(0, limit) : page;
+  const last = pageRows[pageRows.length - 1];
+
+  const articleIds = pageRows.filter((row) => row.kind === 'article').map((row) => row.id);
+  const shortIds = pageRows.filter((row) => row.kind === 'youtube').map((row) => row.id);
+
+  const [articleRows, shortRows] = await Promise.all([
+    articleIds.length === 0
+      ? Promise.resolve([] as ArticleVideoRow[])
+      : // Explicit a.* list (no body / search_vector) — see articleListColumns for why.
+        sql<ArticleVideoRow[]>`
+          SELECT a.id, a.title, a.excerpt, '' AS body, a.source, a.image_url, a.topics, a.sport_tags,
+            a.search_tags, a.requires_subscription, a.read_time_minutes, a.published_at, a.url,
+            v.video_url, v.poster_url, v.caption
+          FROM article_videos v
+          JOIN articles a ON a.id = v.article_id
+          WHERE v.article_id = ANY(${articleIds}::text[])
+        `,
+    shortIds.length === 0
+      ? Promise.resolve([] as YouTubeShortRow[])
+      : sql<YouTubeShortRow[]>`
+          SELECT s.video_id, s.channel_name, s.topic, s.title, s.thumbnail_url, s.published_at
+          FROM youtube_shorts s
+          WHERE s.video_id = ANY(${shortIds}::text[])
+        `,
+  ]);
+
+  const articlesById = new Map(articleRows.map((row) => [row.id, row]));
+  const shortsById = new Map(shortRows.map((row) => [row.video_id, row]));
+
+  const videos: FeedVideo[] = [];
+  for (const entry of pageRows) {
+    if (entry.kind === 'article') {
+      const row = articlesById.get(entry.id);
+      if (!row) continue;
+      videos.push({
+        kind: 'article',
+        articleId: row.id,
+        videoUrl: row.video_url,
+        posterUrl: row.poster_url || undefined,
+        caption: row.caption || undefined,
+        article: rowToArticle(row),
+      });
+    } else {
+      const row = shortsById.get(entry.id);
+      if (!row) continue;
+      videos.push({
+        kind: 'youtube',
+        videoId: row.video_id,
+        title: row.title,
+        channelName: row.channel_name,
+        topic: row.topic,
+        posterUrl: row.thumbnail_url || undefined,
+        publishedAt: row.published_at.toISOString(),
+      });
+    }
+  }
+
+  return {
+    videos,
+    hasMore,
+    nextCursor:
+      hasMore && last ? encodeArticleCursor(last.published_at.toISOString(), last.id) : null,
+  };
+}
+
+/** Topics that have at least one video, most videos first (drives the filter chips). */
+export async function listVideoTopics(): Promise<string[]> {
+  const sql = getSql();
+  const rows = await sql<{ topic: string }[]>`
+    SELECT topic FROM (
+      SELECT t AS topic
+      FROM article_videos v
+      JOIN articles a ON a.id = v.article_id
+      CROSS JOIN LATERAL unnest(a.topics) AS t
+      UNION ALL
+      SELECT s.topic
+      FROM youtube_shorts s
+      WHERE s.embeddable
+        AND s.published_at > now() - (${SHORTS_WINDOW_DAYS}::text || ' days')::interval
+    ) x
+    GROUP BY topic
+    ORDER BY count(*) DESC, topic
+  `;
+  return rows.map((row) => row.topic);
+}
+
+/** Which of these Shorts we've already recorded (embeddable or not). */
+export async function listKnownShortIds(videoIds: string[]): Promise<Set<string>> {
+  if (videoIds.length === 0) return new Set();
+  const sql = getSql();
+  const rows = await sql<{ video_id: string }[]>`
+    SELECT video_id FROM youtube_shorts WHERE video_id = ANY(${videoIds}::text[])
+  `;
+  return new Set(rows.map((row) => row.video_id));
+}
+
+export async function recordYouTubeShorts(shorts: YouTubeShortRecord[]): Promise<void> {
+  if (shorts.length === 0) return;
+  const sql = getSql();
+  await sql`
+    INSERT INTO youtube_shorts ${sql(
+      shorts.map((short) => ({
+        video_id: short.videoId,
+        channel_id: short.channelId,
+        channel_name: short.channelName,
+        topic: short.topic,
+        title: short.title,
+        thumbnail_url: short.thumbnailUrl,
+        embeddable: short.embeddable,
+        published_at: short.publishedAt,
+      })),
+      'video_id',
+      'channel_id',
+      'channel_name',
+      'topic',
+      'title',
+      'thumbnail_url',
+      'embeddable',
+      'published_at',
+    )}
+    ON CONFLICT (video_id) DO NOTHING
+  `;
+}

@@ -46,6 +46,29 @@ export interface Article {
   requiresSubscription?: boolean;
 }
 
+/** A playable clip pulled from an article (direct MP4/WebM/MOV only). */
+export interface ArticleVideo {
+  kind: 'article';
+  articleId: string;
+  videoUrl: string;
+  posterUrl?: string;
+  caption?: string;
+  article: Article;
+}
+
+/** A YouTube Short from a curated channel (no article behind it). */
+export interface YouTubeShort {
+  kind: 'youtube';
+  videoId: string;
+  title: string;
+  channelName: string;
+  topic: Topic;
+  posterUrl?: string;
+  publishedAt: string;
+}
+
+export type FeedVideo = ArticleVideo | YouTubeShort;
+
 export interface User {
   id: string;
   name: string;

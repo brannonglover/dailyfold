@@ -1,6 +1,6 @@
 {
   "name": "dailyfold-api",
-  "version": "2.19.0",
+  "version": "2.20.0",
   "private": true,
   "scripts": {
     "dev": "WATCHPACK_POLLING=true CHOKIDAR_USEPOLLING=true NODE_OPTIONS='--use-system-ca' next dev -p 3001 -H 0.0.0.0",
@@ -8,6 +8,7 @@
     "start": "NODE_OPTIONS='--use-system-ca' next start -p 3001",
     "ingest": "NODE_OPTIONS='--use-system-ca' tsx --env-file=.env scripts/ingest.ts",
     "ingest:watch": "NODE_OPTIONS='--use-system-ca' tsx --env-file=.env scripts/ingest-watch.ts",
+    "videos:scan": "NODE_OPTIONS='--use-system-ca' tsx --env-file=.env scripts/scan-videos.ts",
     "test:subscription": "tsx lib/subscription.detect.test.ts",
     "test:image": "tsx lib/normalize.image.test.ts",
     "test:feedMedia": "tsx --test lib/feedMedia.test.ts",
@@ -15,6 +16,7 @@
     "test:publishedAt": "tsx --test lib/normalize.publishedAt.test.ts",
     "test:excerpt": "tsx lib/normalize.excerpt.test.ts",
     "test:embeddedMedia": "tsx --test lib/embeddedMedia.test.ts",
+    "test:videoRelevance": "tsx --test lib/videoRelevance.test.ts",
     "test:readerCache": "tsx --test lib/readerCache.test.ts",
     "test:search": "tsx --test lib/db.search.test.ts",
     "test:notify": "tsx --test lib/notify/trendingNotificationInterest.test.ts lib/notify/trendingArticles.test.ts lib/notify/parsePushPreferences.test.ts lib/notify/explicitInterests.test.ts ../shared/notify/notificationScore.test.ts ../utils/postIngestNotificationDelay.test.ts",
