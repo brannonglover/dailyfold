@@ -22,6 +22,8 @@ interface VideoFeedItemProps {
   muted: boolean;
   onToggleMuted: () => void;
   onOpenArticle: (video: ArticleVideo) => void;
+  /** Called once the active video is showing frames. */
+  onActiveReady?: () => void;
 }
 
 /** Mounted only while `shouldLoad`, so at most two native players exist at a time. */
@@ -89,6 +91,7 @@ export const VideoFeedItem = memo(function VideoFeedItem({
   muted,
   onToggleMuted,
   onOpenArticle,
+  onActiveReady,
 }: VideoFeedItemProps) {
   const [ready, setReady] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -109,6 +112,10 @@ export const VideoFeedItem = memo(function VideoFeedItem({
       });
     }
   };
+
+  useEffect(() => {
+    if (isActive && ready) onActiveReady?.();
+  }, [isActive, ready, onActiveReady]);
 
   useEffect(() => {
     if (!shouldLoad) {

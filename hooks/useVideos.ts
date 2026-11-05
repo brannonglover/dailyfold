@@ -1,7 +1,16 @@
+import { Image } from 'expo-image';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { feedVideoKey, fetchVideos } from '@/services/videos';
 import { FeedVideo, Topic } from '@/types';
+
+function prefetchPosters(videos: FeedVideo[], count: number) {
+  const urls = videos
+    .slice(0, count)
+    .map((video) => (video.kind === 'article' ? (video.posterUrl ?? video.article.imageUrl) : video.posterUrl))
+    .filter((url): url is string => Boolean(url));
+  if (urls.length > 0) void Image.prefetch(urls);
+}
 
 export function useVideos() {
   const [topic, setTopicState] = useState<Topic | null>(null);
@@ -32,6 +41,7 @@ export function useVideos() {
       const page = await fetchVideos({ topic: nextTopic });
       if (requestId !== requestIdRef.current) return;
       setVideos(page.videos);
+      prefetchPosters(page.videos, 4);
       if (page.availableTopics) setAvailableTopics(page.availableTopics);
       cursorRef.current = page.nextCursor;
       hasMoreRef.current = page.hasMore;
@@ -55,6 +65,36 @@ export function useVideos() {
   useEffect(() => {
     void loadFirstPage(null, 'initial');
   }, [loadFirstPage]);
+
+  // Once the topic chips are known, quietly fetch every topic's first page (and its first
+  // posters) so tapping a chip doesn't wait on the network.
+  useEffect(() => {
+    if (availableTopics.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (const next of availableTopics) {
+        if (cancelled) return;
+        if (cacheRef.current.has(next)) continue;
+        try {
+          const page = await fetchVideos({ topic: next });
+          if (cancelled) return;
+          if (!cacheRef.current.has(next)) {
+            cacheRef.current.set(next, {
+              videos: page.videos,
+              cursor: page.nextCursor,
+              hasMore: page.hasMore,
+            });
+          }
+          prefetchPosters(page.videos, 3);
+        } catch {
+          // Best effort: tapping the chip fetches it normally.
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [availableTopics]);
 
   const setTopic = useCallback(
     (next: Topic | null) => {

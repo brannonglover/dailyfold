@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { NativeTabs, Icon, Label } from 'expo-router/unstable-native-tabs';
 import { Tabs } from 'expo-router';
-import { Platform, View } from 'react-native';
+import { View } from 'react-native';
 
+import TabBarBackground from '@/components/TabBarBackground';
 import Colors from '@/constants/Colors';
 import { TAB_BAR_HEIGHT, TAB_BAR_PADDING_BOTTOM, TAB_BAR_PADDING_TOP } from '@/constants/Layout';
 import { TOUR_DE_FRANCE_TAB_ENABLED } from '@/constants/tourDeFrance';
@@ -11,74 +11,6 @@ import { WORLD_CUP_TAB_ENABLED } from '@/constants/worldCup';
 const colors = Colors.dark;
 
 export default function TabLayout() {
-  if (Platform.OS === 'ios') {
-    return <IosNativeTabs />;
-  }
-
-  return <JsTabs />;
-}
-
-/**
- * System UITabBarController — Liquid Glass on iOS 26+ (Xcode 26), classic
- * translucent material on earlier iOS. JS tabs stay on Android/web.
- */
-function IosNativeTabs() {
-  return (
-    <NativeTabs
-      minimizeBehavior="never"
-      disableTransparentOnScrollEdge
-      backgroundColor={null}
-      blurEffect="systemChromeMaterialDark"
-      tintColor={colors.tabIconSelected}
-      iconColor={{
-        default: colors.tabIconDefault,
-        selected: colors.tabIconSelected,
-      }}
-      labelStyle={{
-        default: {
-          fontFamily: 'InterMedium',
-          fontSize: 11,
-          color: colors.tabIconDefault,
-        },
-        selected: {
-          fontFamily: 'InterMedium',
-          fontSize: 11,
-          color: colors.tabIconSelected,
-        },
-      }}>
-      <NativeTabs.Trigger name="index">
-        <Label>Latest</Label>
-        <Icon sf={{ default: 'newspaper', selected: 'newspaper.fill' }} />
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="tour-de-france" hidden={!TOUR_DE_FRANCE_TAB_ENABLED}>
-        <Label>Tour</Label>
-        <Icon sf={{ default: 'bicycle', selected: 'bicycle' }} />
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="world-cup" hidden={!WORLD_CUP_TAB_ENABLED}>
-        <Label>World Cup</Label>
-        <Icon sf={{ default: 'trophy', selected: 'trophy.fill' }} />
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="for-you">
-        <Label>For You</Label>
-        <Icon sf={{ default: 'sparkles', selected: 'sparkles' }} />
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="videos">
-        <Label>Videos</Label>
-        <Icon sf={{ default: 'play.rectangle', selected: 'play.rectangle.fill' }} />
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="saved">
-        <Label>Reading</Label>
-        <Icon sf={{ default: 'book', selected: 'book.fill' }} />
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="profile">
-        <Label>Profile</Label>
-        <Icon sf={{ default: 'person.circle', selected: 'person.circle.fill' }} />
-      </NativeTabs.Trigger>
-    </NativeTabs>
-  );
-}
-
-function JsTabs() {
   return (
     <Tabs
       screenOptions={{
@@ -88,9 +20,13 @@ function JsTabs() {
         lazy: false,
         tabBarActiveTintColor: colors.tabIconSelected,
         tabBarInactiveTintColor: colors.tabIconDefault,
+        // Float over the scene (content scrolls under it) so the blur has something to show.
+        tabBarBackground: () => <TabBarBackground />,
         tabBarStyle: {
-          backgroundColor: colors.background,
-          borderTopColor: colors.border,
+          position: 'absolute',
+          backgroundColor: 'transparent',
+          borderTopWidth: 0,
+          elevation: 0,
           height: TAB_BAR_HEIGHT,
           paddingBottom: TAB_BAR_PADDING_BOTTOM,
           paddingTop: TAB_BAR_PADDING_TOP,

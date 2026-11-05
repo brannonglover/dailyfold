@@ -98,8 +98,8 @@ function getCardImageHeight(cardHeight: number): number {
   return Math.max(0, budgeted);
 }
 
+/** Accessibility label only; the badge itself renders as a lock icon with no visible text. */
 const SUBSCRIPTION_BADGE_LABEL = 'May need subscription';
-const SUBSCRIPTION_BADGE_SHORT_LABEL = 'May need sub';
 
 function MatchReasonText({ reasons }: { reasons: string[] }) {
   const { colors } = useTheme();
@@ -127,15 +127,7 @@ function SubscriptionBadge({ compact }: { compact?: boolean }) {
       ]}
       accessibilityRole="text"
       accessibilityLabel={SUBSCRIPTION_BADGE_LABEL}>
-      <Ionicons name="lock-closed" size={compact ? 12 : 13} color={colors.accent} />
-      <Text
-        style={[
-          styles.subBadgeText,
-          compact && styles.subBadgeTextCompact,
-          { color: colors.accent },
-        ]}>
-        {compact ? SUBSCRIPTION_BADGE_SHORT_LABEL : SUBSCRIPTION_BADGE_LABEL}
-      </Text>
+      <Ionicons name="lock-closed" size={compact ? 12 : 14} color={colors.accent} />
     </View>
   );
 }
@@ -640,25 +632,15 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   subBadge: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    justifyContent: 'center',
+    width: 28,
+    height: 28,
     borderRadius: 999,
   },
   subBadgeCompact: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    gap: 4,
-  },
-  subBadgeText: {
-    fontFamily: 'InterSemiBold',
-    fontSize: 12,
-    letterSpacing: 0.15,
-  },
-  subBadgeTextCompact: {
-    fontSize: 11,
+    width: 24,
+    height: 24,
   },
   storyPageSubBadge: {
     position: 'absolute',

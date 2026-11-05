@@ -1,5 +1,5 @@
 import { useIsFocused } from '@react-navigation/native';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -26,9 +26,15 @@ const VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 60 };
  * Native players are heavy (large MP4s), so only the next clip is queued. A YouTube web view
  * is slow to start (page, player script, first bytes), so two are queued ahead.
  */
-function shouldLoadVideo(video: FeedVideo, index: number, activeIndex: number): boolean {
+function shouldLoadVideo(
+  video: FeedVideo,
+  index: number,
+  activeIndex: number,
+  warmAhead: boolean,
+): boolean {
+  if (index === activeIndex) return true;
   const ahead = video.kind === 'youtube' ? 2 : 1;
-  return index >= activeIndex && index <= activeIndex + ahead;
+  return warmAhead && index > activeIndex && index <= activeIndex + ahead;
 }
 
 /** Full-screen, swipe-up feed of article videos (TikTok / Reels style paging). */
@@ -61,6 +67,18 @@ export function VideoFeed() {
     if (first?.index != null) setActiveIndex(first.index);
   }).current;
 
+  // The video on screen gets the network and CPU to itself first; the ones queued behind it
+  // start loading once it's playing (or after a short wait). Swiping doesn't reset this, so
+  // already-loaded neighbours stay mounted; a new topic or refresh does.
+  const [warmAhead, setWarmAhead] = useState(false);
+  const firstKey = videos.length > 0 ? feedVideoKey(videos[0]) : null;
+  useEffect(() => {
+    setWarmAhead(false);
+    const timer = setTimeout(() => setWarmAhead(true), 2500);
+    return () => clearTimeout(timer);
+  }, [firstKey]);
+  const onActiveReady = useCallback(() => setWarmAhead(true), []);
+
   const toggleMuted = useCallback(() => setMuted((current) => !current), []);
   const openArticle = useCallback((video: ArticleVideo) => {
     void openFeedArticle(video.article);
@@ -81,13 +99,14 @@ export function VideoFeed() {
         video={item}
         height={pageHeight}
         isActive={isFocused && index === activeIndex}
-        shouldLoad={shouldLoadVideo(item, index, activeIndex)}
+        shouldLoad={shouldLoadVideo(item, index, activeIndex, warmAhead)}
+        onActiveReady={onActiveReady}
         muted={muted}
         onToggleMuted={toggleMuted}
         onOpenArticle={openArticle}
       />
     ),
-    [pageHeight, isFocused, activeIndex, muted, toggleMuted, openArticle],
+    [pageHeight, isFocused, activeIndex, warmAhead, onActiveReady, muted, toggleMuted, openArticle],
   );
 
   const getItemLayout = useMemo(
@@ -107,7 +126,7 @@ export function VideoFeed() {
         <FlatList
           ref={listRef}
           data={videos}
-          extraData={`${activeIndex}:${muted}:${isFocused}`}
+          extraData={`${activeIndex}:${muted}:${isFocused}:${warmAhead}`}
           keyExtractor={feedVideoKey}
           renderItem={renderItem}
           getItemLayout={getItemLayout}

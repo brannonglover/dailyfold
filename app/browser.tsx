@@ -164,6 +164,10 @@ export default function PublisherBrowserScreen() {
   const [canGoBack, setCanGoBack] = useState(false);
   const [progress, setProgress] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  // The WebView's own `load` event waits on every ad/tracker/video a publisher page pulls in,
+  // which can take far longer than the article text. This flag lifts our spinner as soon as the
+  // page has made real progress, so a slow-to-finish page is readable while it finishes.
+  const [contentVisible, setContentVisible] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [readerArticle, setReaderArticle] = useState<WebViewReaderArticle | null>(null);
   const [isConvertingReader, setIsConvertingReader] = useState(false);
@@ -311,9 +315,17 @@ export default function PublisherBrowserScreen() {
     [closeOverflowMenu],
   );
 
+  // Safety net: never keep the spinner over the page for more than a few seconds per navigation.
+  useEffect(() => {
+    if (contentVisible) return;
+    const timer = setTimeout(() => setContentVisible(true), 4000);
+    return () => clearTimeout(timer);
+  }, [contentVisible, currentUrl]);
+
   const handleRetry = useCallback(() => {
     setHasError(false);
     setIsLoading(true);
+    setContentVisible(false);
     setProgress(0);
     exitReaderMode();
     webRef.current?.reload();
@@ -590,9 +602,13 @@ export default function PublisherBrowserScreen() {
                 // on top of siblings on iOS and was leaving a black band over Reader content.
                 style={styles.webview}
                 onNavigationStateChange={handleNavChange}
-                onLoadProgress={({ nativeEvent }) => setProgress(nativeEvent.progress)}
+                onLoadProgress={({ nativeEvent }) => {
+                  setProgress(nativeEvent.progress);
+                  if (nativeEvent.progress >= 0.7) setContentVisible(true);
+                }}
                 onLoadStart={() => {
                   setIsLoading(true);
+                  setContentVisible(false);
                   setHasError(false);
                   // Fresh navigation — drop any Reader snapshot from the previous page.
                   setReaderArticle(null);
@@ -600,6 +616,7 @@ export default function PublisherBrowserScreen() {
                 }}
                 onLoadEnd={() => {
                   setIsLoading(false);
+                  setContentVisible(true);
                   setProgress(1);
                   injectReadProgress(webRef.current);
                 }}
@@ -615,12 +632,6 @@ export default function PublisherBrowserScreen() {
                 }}
                 onMessage={handleWebMessage}
                 allowsBackForwardNavigationGestures
-                startInLoadingState
-                renderLoading={() => (
-                  <View style={[styles.loadingOverlay, { backgroundColor: '#FFFFFF' }]}>
-                    <ActivityIndicator color={colors.textSecondary} />
-                  </View>
-                )}
                 setSupportMultipleWindows={false}
                 allowsInlineMediaPlayback
                 mediaPlaybackRequiresUserAction={false}
@@ -628,6 +639,14 @@ export default function PublisherBrowserScreen() {
                 forceDarkOn={false}
                 injectedJavaScriptBeforeContentLoaded={FORCE_LIGHT_SCHEME_JS}
               />
+            ) : null}
+
+            {!readerMode && !contentVisible ? (
+              <View
+                pointerEvents="none"
+                style={[styles.loadingOverlay, { backgroundColor: '#FFFFFF' }]}>
+                <ActivityIndicator color={colors.textSecondary} />
+              </View>
             ) : null}
 
             {readerMode && readerHtml ? (
