@@ -292,3 +292,81 @@ test('applyArticleStoryFallbacks uses best alternate when only one imageless cop
     ['bbc'],
   );
 });
+
+test('applyArticleStoryFallbacks reuses the result for the same pool array', () => {
+  const pool = [
+    article({ id: 'a', title: 'Markets Rally On Rate Cut Hopes', source: 'BBC News', imageUrl: 'https://cdn.example.com/a.jpg' }),
+    article({ id: 'b', title: 'Wildfire Spreads Near Town', source: 'CNN', imageUrl: 'https://cdn.example.com/b.jpg' }),
+  ];
+  assert.equal(applyArticleStoryFallbacks(pool), applyArticleStoryFallbacks(pool));
+});
+
+test('applyArticleStoryFallbacks recomputes when the pool array grows in place', () => {
+  const pool = [
+    article({ id: 'a', title: 'Markets Rally On Rate Cut Hopes', source: 'BBC News', imageUrl: 'https://cdn.example.com/a.jpg' }),
+    article({ id: 'b', title: 'Wildfire Spreads Near Town', source: 'CNN', imageUrl: 'https://cdn.example.com/b.jpg' }),
+  ];
+  const first = applyArticleStoryFallbacks(pool);
+  pool.push(article({ id: 'c', title: 'Local Team Wins Championship Final', source: 'ESPN', imageUrl: 'https://cdn.example.com/c.jpg' }));
+  const second = applyArticleStoryFallbacks(pool);
+  assert.notEqual(first, second);
+  assert.equal(second.length, first.length + 1);
+});
+
+// ---- Incremental clustering must match a from-scratch pass exactly ------------------
+
+import { clusterStoryArticleIndices, clusterStoryArticleIndicesFull } from '@/utils/articleStoryMatch';
+
+function seededRandom(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 1664525 + 1013904223) % 4294967296;
+    return state / 4294967296;
+  };
+}
+
+const VOCAB = [
+  'senate', 'budget', 'deal', 'storm', 'coast', 'market', 'rally', 'election', 'result',
+  'champions', 'final', 'launch', 'rocket', 'strike', 'union', 'climate', 'summit',
+  'vaccine', 'trial', 'merger', 'earnings', 'outage', 'cyber', 'attack', 'verdict',
+];
+
+function randomPool(random: () => number, count: number, dayRange: number[]): Article[] {
+  return Array.from({ length: count }, (_, index) => {
+    const words = Array.from({ length: 3 + Math.floor(random() * 5) }, () =>
+      VOCAB[Math.floor(random() * VOCAB.length)]!,
+    );
+    // Occasionally repeat a word so token-overlap orientation matters.
+    if (random() < 0.2) words.push(words[0]!);
+    const day = dayRange[Math.floor(random() * dayRange.length)]!;
+    const hour = Math.floor(random() * 24);
+    return article({
+      id: `r${index}`,
+      title: words.join(' '),
+      source: 'Wire',
+      imageUrl: 'https://cdn.example.com/x.jpg',
+      publishedAt: new Date(Date.UTC(2026, 5, day, hour)).toISOString(),
+    });
+  });
+}
+
+test('incremental clustering equals a full pass across growing pools', () => {
+  for (let seed = 1; seed <= 25; seed += 1) {
+    const random = seededRandom(seed);
+    // Appended rows mostly land on existing/edge days; some seeds also add in-between days.
+    const base = randomPool(random, 80, [10, 11, 13, 14]);
+    const growth = randomPool(random, 60, seed % 2 === 0 ? [9, 10, 14, 15, 16] : [9, 10, 11, 12, 13, 14, 15]);
+    growth.forEach((item, i) => { (item as { id: string }).id = `g${i}`; });
+
+    let pool = base;
+    assert.deepEqual(clusterStoryArticleIndices(pool), clusterStoryArticleIndicesFull(pool), `seed ${seed} base`);
+    for (let step = 0; step < growth.length; step += 15) {
+      pool = [...pool, ...growth.slice(step, step + 15)];
+      assert.deepEqual(
+        clusterStoryArticleIndices(pool),
+        clusterStoryArticleIndicesFull(pool),
+        `seed ${seed} step ${step}`,
+      );
+    }
+  }
+});

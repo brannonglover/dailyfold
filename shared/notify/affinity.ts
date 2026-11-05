@@ -53,9 +53,21 @@ export function topicAffinityScore(article: Article, profile: InterestScores): n
   );
 }
 
+/**
+ * Compiled word-boundary matchers by term. Ranking checks every profile keyword against
+ * every candidate headline, so building a RegExp per check dominated the ranking cost for
+ * readers with a long keyword history. No `g` flag, so a cached RegExp has no state.
+ */
+const keywordRegexCache = new Map<string, RegExp>();
+
 export function keywordMatchesInText(keyword: string, text: string): boolean {
-  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`\\b${escaped}\\b`).test(text);
+  let pattern = keywordRegexCache.get(keyword);
+  if (!pattern) {
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    pattern = new RegExp(`\\b${escaped}\\b`);
+    keywordRegexCache.set(keyword, pattern);
+  }
+  return pattern.test(text);
 }
 
 export function keywordMatchesArticle(
@@ -80,7 +92,52 @@ export function keywordMatchesArticle(
   return text.includes(keyword);
 }
 
+/**
+ * Keyword affinity checks every profile keyword against each headline (hundreds of
+ * keywords for a long reading history × the whole candidate pool, ~250ms per ranking).
+ * The result depends only on the article's text and the profile's keyword scores, and
+ * both are stable across the many re-ranks a session does (chip taps, pagination,
+ * refresh), so score each article once per distinct keyword profile.
+ */
+const MAX_CACHED_KEYWORD_PROFILES = 4;
+const keywordScoreCaches = new Map<string, WeakMap<Article, number>>();
+const keywordSignatures = new WeakMap<object, string>();
+
+function keywordProfileSignature(keywordScores: Record<string, number>): string {
+  let signature = keywordSignatures.get(keywordScores);
+  if (signature === undefined) {
+    signature = Object.entries(keywordScores)
+      .filter(([, score]) => score > 0)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([keyword, score]) => `${keyword}:${score}`)
+      .join('|');
+    keywordSignatures.set(keywordScores, signature);
+  }
+  return signature;
+}
+
+function keywordScoreCache(profile: InterestScores): WeakMap<Article, number> {
+  const signature = keywordProfileSignature(profile.keywordScores);
+  let cache = keywordScoreCaches.get(signature);
+  if (cache) {
+    // Refresh recency so the active profile is the last one evicted.
+    keywordScoreCaches.delete(signature);
+  } else {
+    cache = new WeakMap();
+    if (keywordScoreCaches.size >= MAX_CACHED_KEYWORD_PROFILES) {
+      const oldest = keywordScoreCaches.keys().next().value;
+      if (oldest !== undefined) keywordScoreCaches.delete(oldest);
+    }
+  }
+  keywordScoreCaches.set(signature, cache);
+  return cache;
+}
+
 export function keywordAffinityScore(article: Article, profile: InterestScores): number {
+  const cache = keywordScoreCache(profile);
+  const cached = cache.get(article);
+  if (cached !== undefined) return cached;
+
   const text = `${article.title} ${article.excerpt}`.toLowerCase();
   const articleKeywords = new Set(articleInterestKeywords(article));
   let raw = 0;
@@ -88,7 +145,9 @@ export function keywordAffinityScore(article: Article, profile: InterestScores):
     if (score <= 0) continue;
     if (keywordMatchesArticle(keyword, articleKeywords, text)) raw += score;
   }
-  return raw * KEYWORD_WEIGHT;
+  const result = raw * KEYWORD_WEIGHT;
+  cache.set(article, result);
+  return result;
 }
 
 export function sportTagAffinityScore(article: Article, profile: InterestScores): number {

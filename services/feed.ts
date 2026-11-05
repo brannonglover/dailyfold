@@ -52,6 +52,8 @@ export interface FetchFeedOptions {
   scope?: FeedRequestScope;
   /** Kick a background ingest, same as GET /api/articles?refresh=true. */
   force?: boolean;
+  /** Override the abort timeout (chip prewarm must not hang for a minute on a slow server). */
+  timeoutMs?: number;
 }
 
 const FETCH_TIMEOUT_MS = 20_000;
@@ -95,7 +97,7 @@ export async function fetchPersonalizedFeed(
   const controller = new AbortController();
   const timeoutId = setTimeout(
     () => controller.abort(),
-    options.cursor ? FETCH_TIMEOUT_MS : INITIAL_FETCH_TIMEOUT_MS,
+    options.timeoutMs ?? (options.cursor ? FETCH_TIMEOUT_MS : INITIAL_FETCH_TIMEOUT_MS),
   );
 
   let response: Response;

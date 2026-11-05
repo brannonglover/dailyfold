@@ -7,6 +7,7 @@ import { memo, useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
+import { SplashGate } from '@/components/SplashGate';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { ArticlesProvider } from '@/contexts/ArticlesContext';
 import { PreferencesProvider } from '@/contexts/PreferencesContext';
@@ -59,10 +60,7 @@ export default function RootLayout() {
     if (error) throw error;
   }, [error]);
 
-  useEffect(() => {
-    if (loaded) SplashScreen.hideAsync();
-  }, [loaded]);
-
+  // The splash is released by <SplashGate /> once the first feed screen is ready.
   if (!loaded) return null;
 
   return (
@@ -89,6 +87,7 @@ const RootLayoutNav = memo(function RootLayoutNav() {
     <ThemeProvider value={DarkNavTheme}>
       <AuthGate>
         <StatusBar style="light" />
+        <SplashGate />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(tabs)" />

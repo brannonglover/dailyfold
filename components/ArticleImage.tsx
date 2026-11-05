@@ -10,6 +10,7 @@ import {
   resolveArticleImageUrl,
 } from '@/constants/images';
 import { useTheme } from '@/hooks/useTheme';
+import { isFeedImageCached } from '@/services/feedImagePrefetch';
 import { resolveArticleSourceLogo } from '@/utils/sourceLogo';
 import { sourceHeroGradientColors } from '@/utils/sourceHeroBackground';
 
@@ -155,7 +156,8 @@ export function ArticleImage({
         source={{ uri: loadUri }}
         style={styles.image}
         contentFit="cover"
-        transition={200}
+        // A prefetched image is already in cache — fading it in just reads as a late pop.
+        transition={isFeedImageCached(loadUri) ? 0 : 200}
         cachePolicy="memory-disk"
         recyclingKey={recyclingKey}
         onError={() => setLoadFailed(true)}

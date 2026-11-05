@@ -15,6 +15,10 @@ import { usePreferences } from '@/contexts/PreferencesContext';
 import { ARTICLE_PAGE_SIZE, resolveArticleDisplayFields } from '@/services/articles';
 import { fetchPersonalizedFeed, type FeedResponseMeta } from '@/services/feed';
 import { registerFeedArticles } from '@/services/articleSession';
+import { chipPrewarmKey, loadChipArticles, readChipPrewarm } from '@/services/chipPrewarm';
+import { shouldRequestScopedChipFeed } from '@/utils/feedLoadMoreGate';
+import { CURIOSITY_ORDER } from '@/constants/curiosities';
+import { prefetchFeedImages } from '@/services/feedImagePrefetch';
 import {
   MAX_FEED_SNAPSHOT_ARTICLES,
   reloadFeedSnapshotRecord,
@@ -115,6 +119,17 @@ type LoadMode = 'initial' | 'refresh' | 'silent' | 'append';
 const USER_INGEST_POLL_MS = 1_000;
 const INITIAL_RETRY_DELAYS_MS = [2_000, 4_000, 8_000] as const;
 
+/** Candidates per scoped chip request — enough to stock a chip, small enough for cellular. */
+const CHIP_FETCH_LIMIT = 40;
+/** Chip prewarm starts after the first screen has settled, then paces its requests. */
+const CHIP_PREWARM_START_DELAY_MS = 1_500;
+/** Chip requests in flight at once — each is ~0.5–1s on the server, so serial warming took ~10s. */
+const CHIP_PREWARM_CONCURRENCY = 3;
+/** A chip request this slow is not worth waiting on; a tap falls back to its own retry. */
+const CHIP_FETCH_TIMEOUT_MS = 15_000;
+/** Top-of-chip images warmed per chip. */
+const CHIP_PREWARM_IMAGE_COUNT = 8;
+
 const silentRefreshListeners = new Set<() => void>();
 let backgroundIngestRefetchTimer: ReturnType<typeof setTimeout> | null = null;
 let ingestPollAttempt = 0;
@@ -213,6 +228,12 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (articles.length > 0) registerFeedArticles(articles);
+  }, [articles]);
+
+  // Warm the image cache for the top of the feed as soon as stories exist (persisted
+  // snapshot or network), so cards paint with their image already decoded-ready.
+  useEffect(() => {
+    if (articles.length > 0) void prefetchFeedImages(articles);
   }, [articles]);
 
   const pendingCount = useMemo(() => {
@@ -900,22 +921,34 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         const generation = fetchGenerationRef.current;
         const chipTopics = options?.topics;
         const chipTags = options?.sportTags;
-        const result = await fetchPersonalizedFeed({
-          preferences,
-          knownArticles: articlesRef.current,
-          scope:
-            (chipTags?.length ?? 0) > 0 || (chipTopics?.length ?? 0) > 0
-              ? {
-                  enabledTopics:
-                    (chipTags?.length ?? 0) > 0 ? ['sports'] : (chipTopics ?? []),
-                  enabledSportTags: (chipTags ?? []) as SportTag[],
-                }
-              : { enabledSourceIds: sourceIds },
-          limit: 100,
-          want: 20,
-          force: options?.forceRefresh === true,
-        });
-        const data = result.articles;
+        const chipScope =
+          (chipTags?.length ?? 0) > 0 || (chipTopics?.length ?? 0) > 0
+            ? {
+                enabledTopics: ((chipTags?.length ?? 0) > 0 ? ['sports'] : (chipTopics ?? [])) as Topic[],
+                enabledSportTags: (chipTags ?? []) as SportTag[],
+              }
+            : null;
+        const fetchScoped = async () =>
+          (
+            await fetchPersonalizedFeed({
+              preferences,
+              knownArticles: articlesRef.current,
+              scope: chipScope ?? { enabledSourceIds: sourceIds },
+              limit: CHIP_FETCH_LIMIT,
+              want: 20,
+              force: options?.forceRefresh === true,
+              timeoutMs: chipScope ? CHIP_FETCH_TIMEOUT_MS : undefined,
+            })
+          ).articles;
+        // A chip may already have been prewarmed (or be mid-flight) — join that instead of
+        // paying a request on tap. Force refresh is an explicit pull and always hits the network.
+        const data = chipScope
+          ? ((await loadChipArticles(
+              chipPrewarmKey(chipScope.enabledTopics, chipScope.enabledSportTags),
+              fetchScoped,
+              { bypassCache: options?.forceRefresh === true },
+            )) ?? [])
+          : await fetchScoped();
         if (generation !== fetchGenerationRef.current) return false;
         if (data.length > 0) {
           const next = appendUniqueArticles(articlesRef.current, data);
@@ -978,6 +1011,79 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     persistedHydrated,
     awaitingBackgroundFeed,
   });
+
+  const preferencesRef = useRef(preferences);
+  const sourcesRef = useRef(sources);
+  preferencesRef.current = preferences;
+  sourcesRef.current = sources;
+  const chipPrewarmedGenerationRef = useRef(-1);
+  const hasArticles = articles.length > 0;
+
+  // Topic chips: once the first screen has settled, quietly fetch the candidates for
+  // every thin chip and warm its top images, so a tap paints from memory instead of a
+  // skeleton + request. Results sit in the chipPrewarm cache and only join the feed pool
+  // when the reader selects the chip — prewarming never reshuffles what is on screen.
+  useEffect(() => {
+    if (!feedReady || !persistedHydrated || showLoading || !hasArticles) return;
+    if (chipPrewarmedGenerationRef.current === feedGeneration) return;
+
+    let cancelled = false;
+    const run = async () => {
+      const prefs = preferencesRef.current;
+      if (!prefs) return;
+      const scores = prefs.topicScores ?? {};
+      // Chips the reader leans toward first, so the likeliest taps are ready soonest.
+      const topics = [...CURIOSITY_ORDER].sort(
+        (a, b) => (scores[b] ?? 0) - (scores[a] ?? 0),
+      );
+
+      // Stocked chips only need their images warmed; thin ones need a scoped request.
+      const toFetch: Topic[] = [];
+      for (const topic of topics) {
+        if (prefs.blockedTopics?.includes(topic)) continue;
+        const topicPrefs = { ...prefs, enabledTopics: [topic], enabledSportTags: [] };
+        const inPool = applyFeedFilters(articlesRef.current, topicPrefs, sourcesRef.current);
+        if (shouldRequestScopedChipFeed(inPool.length)) toFetch.push(topic);
+        else void prefetchFeedImages(inPool.slice(0, CHIP_PREWARM_IMAGE_COUNT));
+      }
+
+      const queue = [...toFetch];
+      const worker = async () => {
+        for (let topic = queue.shift(); topic; topic = queue.shift()) {
+          if (cancelled || AppState.currentState !== 'active') return;
+          const data = await loadChipArticles(chipPrewarmKey([topic], []), async () =>
+            (
+              await fetchPersonalizedFeed({
+                preferences: prefs,
+                knownArticles: articlesRef.current,
+                scope: { enabledTopics: [topic], enabledSportTags: [] },
+                limit: CHIP_FETCH_LIMIT,
+                want: 20,
+                timeoutMs: CHIP_FETCH_TIMEOUT_MS,
+              })
+            ).articles,
+          );
+          if (cancelled) return;
+          if (data) void prefetchFeedImages(data.slice(0, CHIP_PREWARM_IMAGE_COUNT));
+        }
+      };
+      await Promise.all(Array.from({ length: CHIP_PREWARM_CONCURRENCY }, worker));
+      if (cancelled) return;
+      // Only a completed pass counts — an interrupted one resumes (cached chips are free).
+      chipPrewarmedGenerationRef.current = feedGeneration;
+    };
+
+    const timer = setTimeout(() => {
+      InteractionManager.runAfterInteractions(() => {
+        if (!cancelled) void run();
+      });
+    }, CHIP_PREWARM_START_DELAY_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [feedReady, persistedHydrated, showLoading, hasArticles, feedGeneration, sourceIdsKey]);
 
   const value = useMemo(
     () => ({
