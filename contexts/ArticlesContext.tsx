@@ -25,7 +25,13 @@ import {
   newestPublishedAtFromArticles,
   type FeedSnapshotRecord,
 } from '@/shared/feed/snapshot';
-import { decideResumeFeedSnapshot, resolveColdLaunchFeedMode } from '@/utils/feedSnapshotSession';
+import {
+  decideResumeFeedSnapshot,
+  launchCatchUpDeadline,
+  resolveColdLaunchFeedMode,
+  shouldPromoteSilentNewcomers,
+  snapshotArticlesForSilentFetch,
+} from '@/utils/feedSnapshotSession';
 import { applyFeedFilters, applyTrendingNotificationFilters } from '@/services/feedFilters';
 import { getEnabledSourceIds, isAllSourcesEnabled } from '@/services/sourcePreferences';
 import { processHotTrendingNotifications, scheduleHotTrendingNotificationsAfterImport } from '@/services/trendingNotifications';
@@ -36,6 +42,7 @@ import {
   FOREGROUND_FEED_POLL_INTERVAL_MS,
   isIngestPendingMeta,
   nextIngestPollDelayMs,
+  RESUME_REFRESH_AFTER_MS,
 } from '@/utils/ingestPoll';
 import { remainingPostIngestNotificationDelayMs } from '@/utils/postIngestNotificationDelay';
 import { shouldShowArticleFeedLoading } from '@/utils/feedLoadingState';
@@ -184,6 +191,13 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   const suppressSilentFeedMutationRef = useRef(false);
   /** Pull/resume kicked off ingest — merge the next silent newcomers into the live feed. */
   const promoteIngestNewcomersRef = useRef(false);
+  /**
+   * Launch / long-absence catch-up: until this timestamp, silent newcomers merge into the
+   * feed rather than raising the "More stories available" banner (the reader has not
+   * started reading yet). 0 = inactive.
+   */
+  const launchCatchUpUntilRef = useRef(0);
+  const backgroundedAtRef = useRef<number | null>(null);
   const silentInFlightRef = useRef(false);
   const dismissedPendingIdsRef = useRef(new Set<string>());
   const paginationMetaRef = useRef({ hasMore: false, nextCursor: null as string | null });
@@ -311,6 +325,10 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     ) => {
       if (generation !== fetchGenerationRef.current) return;
 
+      // What the next launch should start from. Differs from the visible feed when a
+      // silent fetch queues newcomers behind the banner — those must still be persisted.
+      let snapshotSource: Article[] | null = null;
+
       if (mode === 'silent' && articlesRef.current.length === 0) {
         dismissedPendingIdsRef.current.clear();
         setPendingArticles([]);
@@ -341,9 +359,17 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
           pending: pendingArticlesRef.current,
           dismissedIds: dismissedPendingIdsRef.current,
           suppressFeedMutation: suppressSilentFeedMutationRef.current,
-          promoteNewcomers: promoteIngestNewcomersRef.current,
+          promoteNewcomers: shouldPromoteSilentNewcomers({
+            explicitPromote: promoteIngestNewcomersRef.current,
+            nowMs: Date.now(),
+            catchUpUntilMs: launchCatchUpUntilRef.current,
+          }),
         });
         nextArticles = silentUpdate.articles;
+        snapshotSource = snapshotArticlesForSilentFetch(
+          silentUpdate.articles,
+          silentUpdate.pending,
+        );
         const queued = silentUpdate.pending.length - pendingArticlesRef.current.length;
         if (silentUpdate.pending !== pendingArticlesRef.current) {
           setPendingArticles(silentUpdate.pending);
@@ -450,10 +476,11 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
 
       if (user && mode !== 'append' && data.length > 0) {
         const feedMeta = meta as { newestPublishedAt?: string | null; rankWindowStart?: string | null } | undefined;
-        void saveFeedSnapshot(user.id, sourceIdsKey, nextArticles, {
+        const persistedArticles = snapshotSource ?? nextArticles;
+        void saveFeedSnapshot(user.id, sourceIdsKey, persistedArticles, {
           lastFeedRefreshAt: new Date().toISOString(),
           newestPublishedAt:
-            feedMeta?.newestPublishedAt ?? newestPublishedAtFromArticles(nextArticles),
+            feedMeta?.newestPublishedAt ?? newestPublishedAtFromArticles(persistedArticles),
           rankWindowStart:
             feedMeta?.rankWindowStart ?? snapshotMetaRef.current?.rankWindowStart ?? null,
         }).then((record) => {
@@ -546,7 +573,9 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
                   setError(e instanceof Error ? e.message : 'Failed to load articles');
                   setNotice(null);
                 } else {
-                  scheduleGlobalSilentRefresh(0);
+                  // Back off (3s → 20s). An immediate retry spun a request loop,
+                  // hundreds per second, whenever the API was unreachable.
+                  scheduleGlobalSilentRefresh();
                 }
               }
               return;
@@ -666,7 +695,9 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     if (launchMode === 'silent') {
       // The persisted snapshot is the next session's starting feed. Catch up
       // silently for anything published since the last background run — do not
-      // reconstruct the ranking on open.
+      // reconstruct the ranking on open. The reader has not started yet, so anything
+      // newer than the snapshot merges in rather than raising the pending banner.
+      launchCatchUpUntilRef.current = launchCatchUpDeadline(Date.now());
       void loadRef.current?.('silent');
       return;
     }
@@ -683,8 +714,17 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     silentRefreshListeners.add(onSilentRefresh);
 
     const onAppStateChange = (nextState: AppStateStatus) => {
+      if (appState.current === 'active' && nextState.match(/inactive|background/)) {
+        backgroundedAtRef.current = Date.now();
+      }
       if (appState.current.match(/inactive|background/) && nextState === 'active') {
         beginFeedSession('resume');
+        const awayMs = backgroundedAtRef.current ? Date.now() - backgroundedAtRef.current : 0;
+        backgroundedAtRef.current = null;
+        if (awayMs >= RESUME_REFRESH_AFTER_MS) {
+          // Same as a cold launch: they are coming back to the feed, not mid-read.
+          launchCatchUpUntilRef.current = launchCatchUpDeadline(Date.now());
+        }
         // Allow chip/interest boosts to run again for the restored selection.
         interestBoostKeyRef.current = '';
 

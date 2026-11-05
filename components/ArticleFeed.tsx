@@ -657,7 +657,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
   const renderListItem = useCallback(
     ({ item, index }: ListRenderItemInfo<Article>) => (
-      <Animated.View style={styles.listStoryRow} entering={FadeIn.duration(280)}>
+      <Animated.View style={styles.listStoryRow}>
         {index > 0 ? <FeedArticleSeparator color={colors.feedDivider} /> : null}
         <ArticleCard
           article={item}
@@ -679,7 +679,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
 
       if (slot.kind === 'lead') {
         return (
-          <Animated.View style={styles.listStoryRow} entering={FadeIn.duration(280)}>
+          <Animated.View style={styles.listStoryRow}>
             <ArticleCard article={item} variant="storyLead" onFeedClick={onFeedClick} />
           </Animated.View>
         );
@@ -693,14 +693,14 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
         const rightItem = articles[index + 1];
         if (!rightItem) {
           return (
-            <Animated.View style={styles.listStoryRow} entering={FadeIn.duration(280)}>
+            <Animated.View style={styles.listStoryRow}>
               <FeedArticleSeparator color={colors.feedDivider} />
               <ArticleCard article={item} variant="storyRow" onFeedClick={onFeedClick} />
             </Animated.View>
           );
         }
         return (
-          <Animated.View style={styles.listStoryRow} entering={FadeIn.duration(280)}>
+          <Animated.View style={styles.listStoryRow}>
             <FeedArticleSeparator color={colors.feedDivider} />
             <View style={styles.gridPairRow}>
               <ArticleCard article={item} variant="storyGrid" onFeedClick={onFeedClick} />
@@ -712,7 +712,7 @@ export const ArticleFeed = forwardRef<ArticleFeedHandle, ArticleFeedProps>(funct
       }
 
       return (
-        <Animated.View style={styles.listStoryRow} entering={FadeIn.duration(280)}>
+        <Animated.View style={styles.listStoryRow}>
           <FeedArticleSeparator color={colors.feedDivider} />
           <ArticleCard article={item} variant="storyRow" onFeedClick={onFeedClick} />
         </Animated.View>
