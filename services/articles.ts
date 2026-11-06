@@ -126,7 +126,11 @@ function buildArticlesSearchParams(options?: FetchArticlesOptions): URLSearchPar
 
 export async function fetchArticleSearch(
   query: string,
-  options?: { limit?: number },
+  options?: {
+    limit?: number;
+    /** `interest`: strict matching for a saved For You interest, newest first. */
+    mode?: 'interest';
+  },
 ): Promise<FetchArticlesResult> {
   const trimmed = query.trim();
   if (!trimmed) return { articles: [] };
@@ -134,6 +138,7 @@ export async function fetchArticleSearch(
   const params = new URLSearchParams();
   params.set('q', trimmed);
   params.set('limit', String(options?.limit ?? 25));
+  if (options?.mode) params.set('mode', options.mode);
 
   let response: Response;
   try {

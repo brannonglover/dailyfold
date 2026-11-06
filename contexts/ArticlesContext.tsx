@@ -12,7 +12,11 @@ import { AppState, AppStateStatus, InteractionManager } from 'react-native';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
-import { ARTICLE_PAGE_SIZE, resolveArticleDisplayFields } from '@/services/articles';
+import {
+  ARTICLE_PAGE_SIZE,
+  fetchArticleSearch,
+  resolveArticleDisplayFields,
+} from '@/services/articles';
 import { fetchPersonalizedFeed, type FeedResponseMeta } from '@/services/feed';
 import { registerFeedArticles } from '@/services/articleSession';
 import { chipPrewarmKey, loadChipArticles, readChipPrewarm } from '@/services/chipPrewarm';
@@ -109,6 +113,12 @@ interface UseArticlesResult {
     boostKey: string,
     options?: { forceRefresh?: boolean; sportTags?: string[]; topics?: Topic[] },
   ) => Promise<boolean>;
+  /**
+   * Fetch archive matches for saved keyword interests and merge them into the pool. The pool
+   * only holds the latest window of stories, so a niche interest (e.g. "Fantasy Books") has
+   * nothing to match until this pulls its stories in. Resolves true when new stories arrived.
+   */
+  boostArticlesForKeywords: (keywords: string[]) => Promise<boolean>;
   /** Merge fresher article fields (e.g. hero image after detail enrichment) into the visible feed. */
   patchArticle: (article: Article) => void;
 }
@@ -121,6 +131,8 @@ const INITIAL_RETRY_DELAYS_MS = [2_000, 4_000, 8_000] as const;
 
 /** Candidates per scoped chip request — enough to stock a chip, small enough for cellular. */
 const CHIP_FETCH_LIMIT = 40;
+/** Archive matches pulled per saved keyword interest (server caps at 50). */
+const KEYWORD_FETCH_LIMIT = 40;
 /** Chip prewarm starts after the first screen has settled, then paces its requests. */
 const CHIP_PREWARM_START_DELAY_MS = 1_500;
 /** Chip requests in flight at once — each is ~0.5–1s on the server, so serial warming took ~10s. */
@@ -968,6 +980,41 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     [preferences, sources],
   );
 
+  // Keywords already searched for the current feed generation. A refresh replaces the pool,
+  // so the generation is part of the key and the same keyword is fetched again afterwards.
+  const keywordBoostDoneRef = useRef(new Set<string>());
+
+  const boostArticlesForKeywords = useCallback(async (keywords: string[]): Promise<boolean> => {
+    const generation = fetchGenerationRef.current;
+    const pending = keywords
+      .map((keyword) => keyword.trim())
+      .filter(
+        (keyword) =>
+          keyword.length > 0 && !keywordBoostDoneRef.current.has(`${generation}\0${keyword}`),
+      );
+    if (pending.length === 0) return false;
+
+    const results = await Promise.all(
+      pending.map(async (keyword) => {
+        const { articles: found } = await fetchArticleSearch(keyword, {
+          limit: KEYWORD_FETCH_LIMIT,
+          mode: 'interest',
+        });
+        // fetchArticleSearch swallows network errors as "no results"; only remember
+        // keywords that returned something so an offline attempt is retried.
+        if (found.length > 0) keywordBoostDoneRef.current.add(`${generation}\0${keyword}`);
+        return found;
+      }),
+    );
+    if (generation !== fetchGenerationRef.current) return false;
+
+    const next = appendUniqueArticles(articlesRef.current, results.flat());
+    if (next === articlesRef.current) return false;
+    articlesRef.current = next;
+    setArticles(next);
+    return true;
+  }, []);
+
   const dismissPendingArticles = useCallback(() => {
     for (const article of pendingArticlesRef.current) {
       dismissedPendingIdsRef.current.add(article.id);
@@ -1106,6 +1153,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       loadMore,
       dismissPendingArticles,
       boostArticlesForInterests,
+      boostArticlesForKeywords,
       patchArticle,
     }),
     [
@@ -1128,6 +1176,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       loadMore,
       dismissPendingArticles,
       boostArticlesForInterests,
+      boostArticlesForKeywords,
       patchArticle,
     ],
   );

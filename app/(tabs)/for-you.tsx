@@ -8,6 +8,7 @@ import { ArticleFeedScreen } from '@/components/ArticleFeedScreen';
 import { ForYouInterestCards } from '@/components/ForYouInterestCards';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useArticles } from '@/hooks/useArticles';
+import { useKeywordInterestBoost } from '@/hooks/useKeywordInterestBoost';
 import { useTabDisplayState } from '@/hooks/useTabDisplayState';
 import { useTheme } from '@/hooks/useTheme';
 import { getForYouFeed } from '@/services/recommendations';
@@ -49,6 +50,9 @@ function ForYouScreenContent() {
 
   const preferencesReady = preferences != null;
   const hasInterests = preferencesReady && hasForYouTopicSelection(preferences);
+
+  // Pull archive stories for saved keywords; the shared pool only holds the latest window.
+  useKeywordInterestBoost(preferences?.forYouKeywords, isFocused);
 
   const { feedFilterKey, personalizationKey } = useMemo(
     () =>

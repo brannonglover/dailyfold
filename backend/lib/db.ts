@@ -4,6 +4,7 @@ import {
 } from '../../catalog/articleSearch';
 import { inferSportTags, type SportTag } from '../../catalog/sports';
 import { repairBrokenGuardianImageUrl } from '../../catalog/guardianImageUrl';
+import { parseInterestQuery } from '../../shared/notify/interestQueryParser';
 
 import { getSql, resetSqlConnectionForTests } from './postgres';
 import type { ReaderBlock } from './extract';
@@ -292,6 +293,88 @@ export async function searchArticles(query: string, options?: SearchArticlesOpti
     SELECT ${cols} FROM articles
     WHERE search_vector @@ to_tsquery('english', ${tsQueryText})
     ORDER BY ts_rank_cd(search_vector, to_tsquery('english', ${tsQueryText})) DESC, published_at DESC
+    LIMIT ${limit}
+  `;
+
+  return rows.map(rowToArticle);
+}
+
+/** Longer interests are truncated so the k-of-n expansion below stays small (C(6,4) = 15). */
+const MAX_INTEREST_QUERY_TERMS = 6;
+
+function combinations<T>(items: T[], size: number): T[][] {
+  if (size <= 0) return [[]];
+  if (size > items.length) return [];
+  const out: T[][] = [];
+  const walk = (start: number, picked: T[]) => {
+    if (picked.length === size) {
+      out.push(picked);
+      return;
+    }
+    for (let i = start; i < items.length; i++) walk(i + 1, [...picked, items[i]]);
+  };
+  walk(0, []);
+  return out;
+}
+
+/** A word or phrase as a tsquery operand. Prefix-matches the last word only when it is long enough to be selective. */
+function tsPhrase(text: string): string | null {
+  const words = text
+    .split(/[\s-]+/)
+    .map(tsLexeme)
+    .filter(Boolean);
+  if (words.length === 0) return null;
+  return words
+    .map((word, i) => (i === words.length - 1 && word.length >= 4 ? `${word}:*` : word))
+    .join(' <-> ');
+}
+
+/**
+ * `to_tsquery` text for a free-form For You interest, mirroring the client matcher
+ * (`scoreArticleForInterest`): each parsed term is satisfied by itself or a synonym, and at
+ * least ceil(0.6 × terms) terms must match. "Fantasy Books" therefore requires both
+ * "fantasy" and a book word, rather than the OR-of-everything the search box uses — which
+ * floods the result limit with fantasy-football stories the client would then discard.
+ */
+export function buildInterestTsQueryText(interest: string): string | null {
+  const parsed = parseInterestQuery(interest);
+  const clauses = parsed.terms
+    .slice(0, MAX_INTEREST_QUERY_TERMS)
+    .map((term) => {
+      const operands = (parsed.expandedTerms.get(term) ?? [term])
+        .map(tsPhrase)
+        .filter((operand): operand is string => !!operand);
+      return operands.length > 0 ? `(${operands.join(' | ')})` : null;
+    })
+    .filter((clause): clause is string => !!clause);
+  if (clauses.length === 0) return null;
+
+  const required = Math.max(1, Math.ceil(clauses.length * 0.6));
+  return combinations(clauses, required)
+    .map((group) => `(${group.join(' & ')})`)
+    .join(' | ');
+}
+
+/**
+ * Newest articles matching a free-form interest anywhere in the archive. The client's feed
+ * pool only covers the most recent window, so a niche interest ("Fantasy Books") is
+ * otherwise invisible until a matching story happens to land in that window.
+ */
+export async function searchArticlesForInterest(
+  interest: string,
+  options?: SearchArticlesOptions,
+): Promise<Article[]> {
+  const tsQueryText = buildInterestTsQueryText(interest);
+  if (!tsQueryText) return [];
+
+  const limit = Math.min(Math.max(1, options?.limit ?? 40), 50);
+  const sql = getSql();
+  const cols = articleListColumns(sql);
+
+  const rows = await sql<ArticleRow[]>`
+    SELECT ${cols} FROM articles
+    WHERE search_vector @@ to_tsquery('english', ${tsQueryText})
+    ORDER BY published_at DESC
     LIMIT ${limit}
   `;
 

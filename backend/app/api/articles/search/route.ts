@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 
 import { corsHeaders, jsonResponse } from '@/lib/cors';
-import { searchArticles } from '@/lib/db';
+import { searchArticles, searchArticlesForInterest } from '@/lib/db';
 
 export const maxDuration = 30;
 
@@ -21,8 +21,14 @@ export async function GET(request: NextRequest) {
     return jsonResponse({ articles: [] }, origin);
   }
 
+  // mode=interest: strict term matching for a saved For You interest, newest first.
+  const search =
+    request.nextUrl.searchParams.get('mode') === 'interest'
+      ? searchArticlesForInterest
+      : searchArticles;
+
   try {
-    const articles = await searchArticles(query, {
+    const articles = await search(query, {
       limit: Number.isFinite(limit) ? limit : 25,
     });
     return jsonResponse({ articles }, origin);

@@ -9,6 +9,7 @@ import { SPORT_TAG_LABELS } from '@/catalog/sports';
 import { CURIOSITY_LABELS } from '@/constants/curiosities';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useArticles } from '@/hooks/useArticles';
+import { useKeywordInterestBoost } from '@/hooks/useKeywordInterestBoost';
 import { useTheme } from '@/hooks/useTheme';
 import {
   ForYouInterestKind,
@@ -145,6 +146,13 @@ export default function ForYouInterestFeedScreen() {
   const rankTaskRef = useRef<ReturnType<typeof InteractionManager.runAfterInteractions> | null>(
     null,
   );
+
+  // Deep links (e.g. notifications) can land here before the For You tab ever ran.
+  const keywordInterest = useMemo(
+    () => (kind === 'keyword' && value ? [value] : undefined),
+    [kind, value],
+  );
+  useKeywordInterestBoost(keywordInterest);
 
   const [rankedArticles, setRankedArticles] = useState<Article[]>([]);
   const [isRevalidating, setIsRevalidating] = useState(false);
