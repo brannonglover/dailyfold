@@ -50,7 +50,7 @@ module.exports = {
     scheme: "dailyfold",
     userInterfaceStyle: "dark",
     ios: {
-      supportsTablet: true,
+      supportsTablet: false,
       bundleIdentifier: "com.brannonglover.dailyfold",
       buildNumber,
       infoPlist: {
