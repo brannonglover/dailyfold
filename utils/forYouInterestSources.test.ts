@@ -118,3 +118,16 @@ test('sportTagSourceIds includes NCAA football feeds for college-football', () =
   assert.ok(ids.includes('fox-sports-cfb'));
   assert.ok(!ids.includes('espn-nfl'));
 });
+
+test('bike keyword with a modifier fetches the dedicated feeds, not all cycling news', () => {
+  const ids = sourceIdsForForYouInterests(basePrefs({ forYouKeywords: ['bicycle repair'] }));
+  assert.ok(ids.includes('reddit-bikewrench'));
+  assert.ok(ids.includes('bicycles-stackexchange'));
+  assert.ok(ids.includes('bicycling-repair'));
+  assert.ok(!ids.includes('cyclingnews'), 'race news must not crowd out the capped fetch');
+});
+
+test('bike keyword no dedicated feed covers falls back to all cycling feeds', () => {
+  const ids = sourceIdsForForYouInterests(basePrefs({ forYouKeywords: ['bike saddles'] }));
+  assert.ok(ids.includes('cyclingnews'));
+});

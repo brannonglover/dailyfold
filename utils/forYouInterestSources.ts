@@ -1,13 +1,24 @@
-import { SOURCE_CATALOG } from '@/catalog/sources';
+import { SOURCE_CATALOG, interestFocusForSourceName } from '@/catalog/sources';
 import { type SportTag } from '@/catalog/sports';
 import type { Topic, UserPreferences } from '@/types';
 
 import { isBikeRelatedInterest, normalizeForYouKeyword } from '@/utils/forYouTopics';
+import { bikeFocusCoversModifiers, bikeInterestModifierWords } from '@/utils/interestQueryParser';
 
 function cyclingSourceIds(): string[] {
   return SOURCE_CATALOG.filter(
     (entry) =>
       entry.sportTags?.includes('cycling') || entry.sportTags?.includes('mtb'),
+  ).map((entry) => entry.id);
+}
+
+/** Feeds dedicated to what a bike keyword asks for (e.g. r/bikewrench for "bike repair"). */
+export function bikeFocusSourceIds(keyword: string): string[] {
+  const modifiers = bikeInterestModifierWords(normalizeForYouKeyword(keyword));
+  // A plain "bikes" wants general cycling coverage, not just the niche feeds.
+  if (modifiers.length === 0) return [];
+  return SOURCE_CATALOG.filter((entry) =>
+    bikeFocusCoversModifiers(interestFocusForSourceName(entry.name), modifiers),
   ).map((entry) => entry.id);
 }
 
@@ -34,11 +45,24 @@ export function sourceIdsForForYouInterests(prefs: UserPreferences): string[] {
   const ids = new Set<string>();
 
   const keywords = prefs.forYouKeywords ?? [];
-  const hasBikeInterest =
-    keywords.some((keyword) => isBikeRelatedInterest(normalizeForYouKeyword(keyword))) ||
-    (prefs.forYouSportTags ?? []).some((tag) => tag === 'cycling' || tag === 'mtb');
+  let needsCyclingFeeds = (prefs.forYouSportTags ?? []).some(
+    (tag) => tag === 'cycling' || tag === 'mtb',
+  );
 
-  if (hasBikeInterest) {
+  for (const keyword of keywords) {
+    const normalized = normalizeForYouKeyword(keyword);
+    if (!isBikeRelatedInterest(normalized)) continue;
+    // Prefer feeds dedicated to this interest over the whole news-heavy cycling set: the
+    // fetch is capped, and race coverage would crowd out the few repair posts.
+    const focused = bikeFocusSourceIds(normalized);
+    if (focused.length > 0) {
+      for (const id of focused) ids.add(id);
+    } else {
+      needsCyclingFeeds = true;
+    }
+  }
+
+  if (needsCyclingFeeds) {
     for (const id of cyclingSourceIds()) ids.add(id);
   }
 

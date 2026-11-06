@@ -320,3 +320,67 @@ test('articleMatchesForYouKeywords still matches road.cc cycling reviews', () =>
 
   assert.equal(articleMatchesForYouKeywords(bikeReview, ['bikes']), true);
 });
+
+test('bike interest modifier is satisfied by its synonyms, not just the literal word', () => {
+  const bikeStory = (id: string, title: string) =>
+    article(id, 'sports', '2026-11-01T00:00:00.000Z', {
+      title,
+      excerpt: 'Notes from the workshop bench',
+      sportTags: ['cycling'],
+    });
+
+  // "Bicycle Repair" should cover fix / service / maintenance wording
+  assert.equal(
+    articleMatchesForYouKeywords(bikeStory('fix', 'How to fix a slipping bike chain'), ['bicycle repair']),
+    true,
+  );
+  assert.equal(
+    articleMatchesForYouKeywords(bikeStory('svc', 'Bike maintenance checklist for winter'), ['bicycle repair']),
+    true,
+  );
+  // still requires some repair-flavored word — plain race news does not qualify
+  assert.equal(
+    articleMatchesForYouKeywords(bikeStory('race', 'Ineos reveals its 2027 bike team lineup'), ['bicycle repair']),
+    false,
+  );
+  // "service" is NOT a repair word for bike content ("National Park Service")
+  assert.equal(
+    articleMatchesForYouKeywords(bikeStory('nps', 'National Park Service opens more trails to bikes'), ['bicycle repair']),
+    false,
+  );
+  // short synonyms match whole words only ("fix" must not match "prefix")
+  assert.equal(
+    articleMatchesForYouKeywords(bikeStory('prefix', 'The prefix on this bike model number'), ['bicycle repair']),
+    false,
+  );
+});
+
+test('a feed dedicated to bike repair vouches for its posts, except recurring meta threads', () => {
+  const post = (id: string, title: string, source: string) =>
+    article(id, 'sports', '2026-11-01T00:00:00.000Z', { title, excerpt: '', source });
+
+  // r/bikewrench posts rarely say "bike" or "repair"
+  assert.equal(
+    articleMatchesForYouKeywords(post('a', 'Derailur messed up after flying', 'Reddit r/bikewrench'), ['bicycle repair']),
+    true,
+  );
+  // same title from a general feed does not qualify
+  assert.equal(
+    articleMatchesForYouKeywords(post('b', 'Derailur messed up after flying', 'Reddit r/books'), ['bicycle repair']),
+    false,
+  );
+  // stickied/recurring threads are not stories
+  assert.equal(
+    articleMatchesForYouKeywords(post('c', 'Small Questions and Thank Yous Weekly Thread', 'Reddit r/bikewrench'), ['bicycle repair']),
+    false,
+  );
+  assert.equal(
+    articleMatchesForYouKeywords(post('d', 'Subreddit Rules', 'Reddit r/bikewrench'), ['bicycle repair']),
+    false,
+  );
+  // the feed only vouches for what it is about: it says nothing about "bike saddles"
+  assert.equal(
+    articleMatchesForYouKeywords(post('e', 'Derailur messed up after flying', 'Reddit r/bikewrench'), ['bike saddles']),
+    false,
+  );
+});

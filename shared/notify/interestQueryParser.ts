@@ -10,6 +10,7 @@
  */
 
 import {
+  BIKE_SEARCH_TERMS,
   type ArticleSearchFields,
   articleSearchTags,
 } from '../../catalog/articleSearch';
@@ -345,4 +346,59 @@ export function extractRecencyWords(interest: string): string[] {
  */
 export function isRecencyWord(word: string): boolean {
   return RECENCY_WORDS.has(word.toLowerCase());
+}
+
+// ---------------------------------------------------------------------------
+// Bike interests
+// ---------------------------------------------------------------------------
+
+/** Every word from the recognized bike/cycling/mtb vocabulary — used to spot modifier words. */
+const BIKE_VOCAB_WORDS = new Set(BIKE_SEARCH_TERMS.flatMap((term) => term.split(' ')));
+
+/**
+ * Synonyms for bike-interest modifier words. Deliberately tighter than the generic table:
+ * "service" is a repair word in general ("service your car") but in bike content it mostly
+ * means "National Park Service" or "streaming service", so it is left out.
+ */
+const BIKE_MODIFIER_SYNONYMS: Record<string, readonly string[]> = {
+  repair: ['repairs', 'repaired', 'repairing', 'fix', 'fixing', 'maintenance', 'troubleshooting', 'tune-up'],
+  repairs: ['repair', 'fix', 'fixing', 'maintenance'],
+  maintenance: ['repair', 'repairs', 'fix', 'tune-up'],
+  fix: ['repair', 'repairs', 'fixing', 'maintenance'],
+  tools: ['tool', 'toolkit'],
+  tool: ['tools', 'toolkit'],
+};
+
+/** A bike-interest modifier word plus the synonyms that satisfy it ("repair" → fix, maintenance…). */
+export function bikeModifierVariants(word: string): readonly string[] {
+  return [word, ...(BIKE_MODIFIER_SYNONYMS[word] ?? [])];
+}
+
+/**
+ * Words in a bike-flavored interest beyond the recognized bike vocabulary (e.g. "repair" in
+ * "bike repair"). A compound interest like this shouldn't collapse into generic bike/cycling
+ * matching — the extra word must also appear in the article for a match.
+ *
+ * Recency words (latest, new, recent, etc.) are excluded: they express ranking intent
+ * (prefer fresher articles) rather than topical match requirements.
+ *
+ * Shared so the For You matcher and the server-side archive query agree on what a bike
+ * interest requires.
+ */
+export function bikeInterestModifierWords(normalizedKeyword: string): string[] {
+  return normalizedKeyword
+    .split(' ')
+    .filter((word) => word.length >= 3 && !BIKE_VOCAB_WORDS.has(word) && !isRecencyWord(word));
+}
+
+/**
+ * Whether a feed dedicated to `focus` words vouches for a bike interest: it is a bike feed, and
+ * every modifier ("repair") is covered by what the feed is about (or a synonym of it).
+ */
+export function bikeFocusCoversModifiers(
+  focus: ReadonlySet<string> | undefined,
+  modifiers: readonly string[],
+): boolean {
+  if (!focus?.has('bike')) return false;
+  return modifiers.every((word) => bikeModifierVariants(word).some((variant) => focus.has(variant)));
 }

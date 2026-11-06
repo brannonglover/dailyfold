@@ -79,7 +79,7 @@ import {
 } from '@/services/recommendations';
 import { Article, FeedSource, LikedFolder, SportTag, Topic, UserPreferences } from '@/types';
 import { createFolderId } from '@/utils/folderId';
-import { isBikeRelatedInterest, normalizeForYouKeyword } from '@/utils/forYouTopics';
+import { normalizeForYouKeyword } from '@/utils/forYouTopics';
 
 export type TrendingNotificationsToggleResult = 'updated' | 'denied' | 'unavailable';
 
@@ -765,14 +765,11 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       if (!normalized) return;
       const existing = preferences.forYouKeywords ?? [];
       if (existing.includes(normalized)) return;
-      const nextSportTags = [...(preferences.forYouSportTags ?? [])];
-      if (isBikeRelatedInterest(normalized) && !nextSportTags.includes('cycling')) {
-        nextSportTags.push('cycling');
-      }
+      // A keyword is only that keyword: "Bicycle Repair" must not also subscribe the user to
+      // all Cycling news. Bike keywords get their stories through useInterestBoost instead.
       await persist({
         ...preferences,
         forYouKeywords: [...existing, normalized],
-        forYouSportTags: nextSportTags,
       });
     },
     [user, preferences, persist],

@@ -1,10 +1,22 @@
 import {
+  BIKE_QUERY_PATTERN,
+  expandBikeSearchTerms,
   generateArticleSearchTags,
   expandSearchQueryTerms,
 } from '../../catalog/articleSearch';
 import { inferSportTags, type SportTag } from '../../catalog/sports';
+import {
+  META_POST_TITLE_PATTERN,
+  SOURCE_CATALOG,
+  interestFocusForSourceName,
+} from '../../catalog/sources';
 import { repairBrokenGuardianImageUrl } from '../../catalog/guardianImageUrl';
-import { parseInterestQuery } from '../../shared/notify/interestQueryParser';
+import {
+  bikeFocusCoversModifiers,
+  bikeInterestModifierWords,
+  bikeModifierVariants,
+  parseInterestQuery,
+} from '../../shared/notify/interestQueryParser';
 
 import { getSql, resetSqlConnectionForTests } from './postgres';
 import type { ReaderBlock } from './extract';
@@ -317,16 +329,46 @@ function combinations<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-/** A word or phrase as a tsquery operand. Prefix-matches the last word only when it is long enough to be selective. */
-function tsPhrase(text: string): string | null {
+/**
+ * A word or phrase as a tsquery operand. `prefix` also matches longer words ("repair" →
+ * "repairing"), but only on words long enough to be selective.
+ */
+function tsPhrase(text: string, prefix = true): string | null {
   const words = text
     .split(/[\s-]+/)
     .map(tsLexeme)
     .filter(Boolean);
   if (words.length === 0) return null;
   return words
-    .map((word, i) => (i === words.length - 1 && word.length >= 4 ? `${word}:*` : word))
+    .map((word, i) =>
+      prefix && i === words.length - 1 && word.length >= 4 ? `${word}:*` : word,
+    )
     .join(' <-> ');
+}
+
+/**
+ * Bike interests ("Bicycle Repair", "gravel bikes") are matched on the client by a bike
+ * vocabulary hit plus every non-vocabulary word ("repair") appearing in the article, so
+ * the archive query asks for exactly that: any bike term AND each modifier. Bike terms are
+ * matched exactly, not by prefix, so "velo" doesn't pull in "velocity".
+ */
+function buildBikeInterestTsQueryText(normalized: string): string | null {
+  const context = expandBikeSearchTerms(normalized)
+    .map((term) => tsPhrase(term, false))
+    .filter((operand): operand is string => !!operand);
+  if (context.length === 0) return null;
+
+  const modifiers = bikeInterestModifierWords(normalized)
+    .slice(0, MAX_INTEREST_QUERY_TERMS)
+    .map((word) => {
+      const variants = bikeModifierVariants(word)
+        .map((variant) => tsPhrase(variant))
+        .filter((operand): operand is string => !!operand);
+      return variants.length > 0 ? `(${variants.join(' | ')})` : null;
+    })
+    .filter((clause): clause is string => !!clause);
+
+  return [`(${context.join(' | ')})`, ...modifiers].join(' & ');
 }
 
 /**
@@ -338,11 +380,13 @@ function tsPhrase(text: string): string | null {
  */
 export function buildInterestTsQueryText(interest: string): string | null {
   const parsed = parseInterestQuery(interest);
+  if (BIKE_QUERY_PATTERN.test(parsed.original)) return buildBikeInterestTsQueryText(parsed.original);
+
   const clauses = parsed.terms
     .slice(0, MAX_INTEREST_QUERY_TERMS)
     .map((term) => {
       const operands = (parsed.expandedTerms.get(term) ?? [term])
-        .map(tsPhrase)
+        .map((variant) => tsPhrase(variant))
         .filter((operand): operand is string => !!operand);
       return operands.length > 0 ? `(${operands.join(' | ')})` : null;
     })
@@ -360,6 +404,19 @@ export function buildInterestTsQueryText(interest: string): string | null {
  * pool only covers the most recent window, so a niche interest ("Fantasy Books") is
  * otherwise invisible until a matching story happens to land in that window.
  */
+/**
+ * Outlets dedicated to what a bike interest asks for (r/bikewrench for "bike repair"). Their
+ * posts qualify without the words appearing, mirroring the client's `interestFocus` rule.
+ */
+export function interestFocusSourceNames(interest: string): string[] {
+  const { original } = parseInterestQuery(interest);
+  if (!BIKE_QUERY_PATTERN.test(original)) return [];
+  const modifiers = bikeInterestModifierWords(original);
+  return SOURCE_CATALOG.filter((entry) =>
+    bikeFocusCoversModifiers(interestFocusForSourceName(entry.name), modifiers),
+  ).map((entry) => entry.name);
+}
+
 export async function searchArticlesForInterest(
   interest: string,
   options?: SearchArticlesOptions,
@@ -370,13 +427,23 @@ export async function searchArticlesForInterest(
   const limit = Math.min(Math.max(1, options?.limit ?? 40), 50);
   const sql = getSql();
   const cols = articleListColumns(sql);
+  const focusSources = interestFocusSourceNames(interest);
 
-  const rows = await sql<ArticleRow[]>`
-    SELECT ${cols} FROM articles
-    WHERE search_vector @@ to_tsquery('english', ${tsQueryText})
-    ORDER BY published_at DESC
-    LIMIT ${limit}
-  `;
+  const rows =
+    focusSources.length > 0
+      ? await sql<ArticleRow[]>`
+          SELECT ${cols} FROM articles
+          WHERE search_vector @@ to_tsquery('english', ${tsQueryText})
+             OR (source = ANY(${focusSources}::text[]) AND title !~* ${META_POST_TITLE_PATTERN})
+          ORDER BY published_at DESC
+          LIMIT ${limit}
+        `
+      : await sql<ArticleRow[]>`
+          SELECT ${cols} FROM articles
+          WHERE search_vector @@ to_tsquery('english', ${tsQueryText})
+          ORDER BY published_at DESC
+          LIMIT ${limit}
+        `;
 
   return rows.map(rowToArticle);
 }

@@ -12,6 +12,7 @@ import {
   textMatchesSearchTerms,
   type BikeDiscipline,
 } from '@/catalog/articleSearch';
+import { interestFocusForSourceName, isMetaPostTitle } from '@/catalog/sources';
 import { CURIOSITY_LABELS, CURIOSITY_ORDER } from '@/constants/curiosities';
 import { articleInterestKeywords } from '@/services/interestSignals';
 import { articleSportTags } from '@/services/sportPreferences';
@@ -22,7 +23,12 @@ import {
 } from '@/utils/interestKeywords';
 import { Article, SportTag, Topic, UserPreferences } from '@/types';
 import { normalizeForYouKeyword } from '@/shared/notify/explicitInterests';
-import { articleMatchesGenericInterest, isRecencyWord } from '@/utils/interestQueryParser';
+import {
+  articleMatchesGenericInterest,
+  bikeFocusCoversModifiers,
+  bikeInterestModifierWords,
+  bikeModifierVariants,
+} from '@/utils/interestQueryParser';
 
 export function hasForYouTopicSelection(
   prefs: UserPreferences | null | undefined,
@@ -132,33 +138,21 @@ function contentConfirmedBikeSportTags(article: Article): SportTag[] {
   return inferSportTags(headText, []).filter((tag) => BIKE_FOR_YOU_SPORT_TAGS.includes(tag));
 }
 
-/** Every word from the recognized bike/cycling/mtb vocabulary — used to spot modifier words. */
-const BIKE_VOCAB_WORDS = new Set(BIKE_SEARCH_TERMS.flatMap((term) => term.split(' ')));
-
-/**
- * Words in a bike-flavored query beyond the recognized bike vocabulary (e.g. "repair" in
- * "bike repair"). A compound interest like this shouldn't collapse into generic bike/cycling
- * matching — the extra word must also appear in the article for a match.
- *
- * Recency words (latest, new, recent, etc.) are excluded from modifiers — they express
- * ranking intent (prefer fresher articles) rather than topical match requirements.
- */
-function bikeQueryModifierWords(normalizedKeyword: string): string[] {
-  return normalizedKeyword
-    .split(' ')
-    .filter((word) => word.length >= 3 && !BIKE_VOCAB_WORDS.has(word) && !isRecencyWord(word));
-}
-
 function articleMatchesBikeForYouKeyword(article: Article, keyword: string): boolean {
   const headText = `${article.title} ${article.excerpt}`;
   const discipline = resolveBikeDiscipline(keyword);
   const terms = expandForYouKeywordMatchTerms(keyword);
   const articleKeywords = new Set(articleInterestKeywords(article));
-  const modifiers = bikeQueryModifierWords(normalizeForYouKeyword(keyword));
+  const modifiers = bikeInterestModifierWords(normalizeForYouKeyword(keyword));
 
   if (discipline === 'cycling' || discipline === 'mtb') {
     if (articleConflictsWithBikeDiscipline(article, discipline)) return false;
   }
+
+  // A feed dedicated to bike repair vouches for its own posts: "Derailleur won't shift" never
+  // says "bike" or "repair". Recurring moderator threads from such feeds don't count.
+  const focus = isMetaPostTitle(article.title) ? undefined : interestFocusForSourceName(article.source);
+  if (bikeFocusCoversModifiers(focus, modifiers)) return true;
 
   const hasBikeContext =
     terms.some((term) => articleKeywords.has(term)) ||
@@ -172,7 +166,11 @@ function articleMatchesBikeForYouKeyword(article: Article, keyword: string): boo
 
   const tagText = articleSearchTags(article).join(' ').toLowerCase();
   const fullText = `${headText} ${article.body ?? ''} ${tagText}`.toLowerCase();
-  return modifiers.every((word) => fullText.includes(word));
+  // "repair" is satisfied by fix/service/maintenance too — real repair stories (forum threads,
+  // how-tos) rarely use the literal word, and the generic matcher already allows these.
+  return modifiers.every((word) =>
+    bikeModifierVariants(word).some((variant) => keywordMatchesInText(variant, fullText)),
+  );
 }
 
 export function articleMatchesForYouKeywords(article: Article, keywords: string[]): boolean {

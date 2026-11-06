@@ -43,6 +43,26 @@ export interface SourceCatalogEntry {
   subscriptionPublisher?: boolean;
   /** Per-feed fetch timeout (ms). Default 15000 in ingest when omitted. */
   fetchTimeoutMs?: number;
+  /**
+   * What the whole feed is dedicated to, as lowercase words (e.g. a bike-repair forum:
+   * ['bike', 'repair']). For You trusts such a feed to satisfy those words for an interest —
+   * forum posts and Q&A titles like "Derailleur won't shift" never say "bike" or "repair".
+   */
+  interestFocus?: string[];
+}
+
+/**
+ * Stickied moderator / recurring-thread posts that come with community feeds. They belong to a
+ * dedicated feed but are not stories, so they never earn `interestFocus` trust. Written to be
+ * valid as both a JS RegExp (case-insensitive) and a Postgres `~*` pattern.
+ */
+export const META_POST_TITLE_PATTERN =
+  '(^subreddit rules|(weekly|daily|monthly) (thread|discussion)|megathread)';
+
+const META_POST_TITLE_REGEX = new RegExp(META_POST_TITLE_PATTERN, 'i');
+
+export function isMetaPostTitle(title: string): boolean {
+  return META_POST_TITLE_REGEX.test(title);
 }
 
 export const SOURCE_CATALOG: SourceCatalogEntry[] = [
@@ -1378,6 +1398,29 @@ export const SOURCE_CATALOG: SourceCatalogEntry[] = [
     topics: ['sports'],
     sportTags: ['cycling'],
     logoDomain: 'bicycling.com',
+    interestFocus: ['bike', 'repair'],
+  },
+  {
+    id: 'reddit-bikewrench',
+    url: 'https://www.reddit.com/r/bikewrench/.rss',
+    name: 'Reddit r/bikewrench',
+    description: 'Bike repair questions, fixes, and workshop help',
+    primaryTopic: 'sports',
+    topics: ['sports'],
+    sportTags: ['cycling'],
+    logoDomain: 'reddit.com',
+    interestFocus: ['bike', 'repair'],
+  },
+  {
+    id: 'bicycles-stackexchange',
+    url: 'https://bicycles.stackexchange.com/feeds',
+    name: 'Bicycle Stack Exchange',
+    description: 'Q&A on bike repair, maintenance, and components',
+    primaryTopic: 'sports',
+    topics: ['sports'],
+    sportTags: ['cycling'],
+    logoDomain: 'stackexchange.com',
+    interestFocus: ['bike', 'repair'],
   },
   {
     id: 'cycling-weekly-maintenance',
@@ -2254,4 +2297,19 @@ export function sourceNamesForArticleQuery(ids: readonly string[]): string[] {
     names.add(entry.name);
   }
   return [...names];
+}
+
+let focusBySourceName: Map<string, ReadonlySet<string>> | null = null;
+
+/** Focus words for a feed's outlet name (what `Article.source` carries), if it has any. */
+export function interestFocusForSourceName(name: string): ReadonlySet<string> | undefined {
+  if (!focusBySourceName) {
+    focusBySourceName = new Map(
+      SOURCE_CATALOG.filter((entry) => entry.interestFocus?.length).map((entry) => [
+        entry.name,
+        new Set(entry.interestFocus!.map((word) => word.toLowerCase())),
+      ]),
+    );
+  }
+  return focusBySourceName.get(name);
 }

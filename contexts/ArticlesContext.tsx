@@ -119,6 +119,8 @@ interface UseArticlesResult {
    * nothing to match until this pulls its stories in. Resolves true when new stories arrived.
    */
   boostArticlesForKeywords: (keywords: string[]) => Promise<boolean>;
+  /** True while an interest fetch (publisher or keyword) is in flight, so screens can say "looking" instead of "nothing". */
+  isBoostingInterests: boolean;
   /** Merge fresher article fields (e.g. hero image after detail enrichment) into the visible feed. */
   patchArticle: (article: Article) => void;
 }
@@ -209,7 +211,17 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   const appState = useRef(AppState.currentState);
   const refreshInFlightRef = useRef(0);
   const loadMoreInFlightRef = useRef(false);
-  const interestBoostInFlightRef = useRef(false);
+  const interestBoostInFlightRef = useRef<Promise<unknown> | null>(null);
+  const boostCountRef = useRef(0);
+  const [isBoostingInterests, setIsBoostingInterests] = useState(false);
+  const beginBoost = useCallback(() => {
+    boostCountRef.current += 1;
+    setIsBoostingInterests(true);
+  }, []);
+  const endBoost = useCallback(() => {
+    boostCountRef.current = Math.max(0, boostCountRef.current - 1);
+    if (boostCountRef.current === 0) setIsBoostingInterests(false);
+  }, []);
   const interestBoostKeyRef = useRef('');
   const articlesRef = useRef<Article[]>([]);
   const pendingArticlesRef = useRef<Article[]>([]);
@@ -926,9 +938,20 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       const filteredMatches = () =>
         applyFeedFilters(articlesRef.current, preferences, sources).length;
       if (interestBoostKeyRef.current === boostKey && filteredMatches() > 0) return true;
-      if (interestBoostInFlightRef.current) return false;
+      // Another interest is mid-fetch (e.g. the For You tab stocking all interests while a
+      // single-interest screen opens). Queue behind it rather than giving up — the caller
+      // records its boost key and would otherwise never retry.
+      const inFlight = interestBoostInFlightRef.current;
+      if (inFlight) {
+        await inFlight;
+        if (interestBoostKeyRef.current === boostKey && filteredMatches() > 0) return true;
+      }
 
-      interestBoostInFlightRef.current = true;
+      let release: () => void = () => {};
+      interestBoostInFlightRef.current = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      beginBoost();
       try {
         const generation = fetchGenerationRef.current;
         const chipTopics = options?.topics;
@@ -974,10 +997,12 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
         // Non-fatal — For You / Latest still show whatever matches the main pool.
         return false;
       } finally {
-        interestBoostInFlightRef.current = false;
+        interestBoostInFlightRef.current = null;
+        release();
+        endBoost();
       }
     },
-    [preferences, sources],
+    [preferences, sources, beginBoost, endBoost],
   );
 
   // Keywords already searched for the current feed generation. A refresh replaces the pool,
@@ -994,18 +1019,24 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       );
     if (pending.length === 0) return false;
 
-    const results = await Promise.all(
-      pending.map(async (keyword) => {
-        const { articles: found } = await fetchArticleSearch(keyword, {
-          limit: KEYWORD_FETCH_LIMIT,
-          mode: 'interest',
-        });
-        // fetchArticleSearch swallows network errors as "no results"; only remember
-        // keywords that returned something so an offline attempt is retried.
-        if (found.length > 0) keywordBoostDoneRef.current.add(`${generation}\0${keyword}`);
-        return found;
-      }),
-    );
+    beginBoost();
+    let results: Article[][];
+    try {
+      results = await Promise.all(
+        pending.map(async (keyword) => {
+          const { articles: found } = await fetchArticleSearch(keyword, {
+            limit: KEYWORD_FETCH_LIMIT,
+            mode: 'interest',
+          });
+          // fetchArticleSearch swallows network errors as "no results"; only remember
+          // keywords that returned something so an offline attempt is retried.
+          if (found.length > 0) keywordBoostDoneRef.current.add(`${generation}\0${keyword}`);
+          return found;
+        }),
+      );
+    } finally {
+      endBoost();
+    }
     if (generation !== fetchGenerationRef.current) return false;
 
     const next = appendUniqueArticles(articlesRef.current, results.flat());
@@ -1013,7 +1044,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     articlesRef.current = next;
     setArticles(next);
     return true;
-  }, []);
+  }, [beginBoost, endBoost]);
 
   const dismissPendingArticles = useCallback(() => {
     for (const article of pendingArticlesRef.current) {
@@ -1154,6 +1185,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       dismissPendingArticles,
       boostArticlesForInterests,
       boostArticlesForKeywords,
+      isBoostingInterests,
       patchArticle,
     }),
     [
@@ -1177,6 +1209,7 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
       dismissPendingArticles,
       boostArticlesForInterests,
       boostArticlesForKeywords,
+      isBoostingInterests,
       patchArticle,
     ],
   );

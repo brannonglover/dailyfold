@@ -9,14 +9,14 @@ import { SPORT_TAG_LABELS } from '@/catalog/sports';
 import { CURIOSITY_LABELS } from '@/constants/curiosities';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { useArticles } from '@/hooks/useArticles';
-import { useKeywordInterestBoost } from '@/hooks/useKeywordInterestBoost';
+import { useInterestBoost } from '@/hooks/useInterestBoost';
 import { useTheme } from '@/hooks/useTheme';
 import {
   ForYouInterestKind,
   getSingleInterestForYouFeed,
 } from '@/services/recommendations';
 import { isAllSourcesEnabled } from '@/services/sourcePreferences';
-import { Article, Topic, SportTag, UserPreferences } from '@/types';
+import { Article, Topic, SportTag } from '@/types';
 import { getForYouEmptyMessage } from '@/utils/feedEmptyMessage';
 import {
   buildForYouInterestFeedCacheKey,
@@ -27,7 +27,6 @@ import {
   resolveForYouInterestFeedArticles,
 } from '@/utils/forYouInterestFeedCache';
 import { formatInterestLabel } from '@/utils/interestKeywords';
-import { sourceIdsForForYouInterests } from '@/utils/forYouInterestSources';
 
 function parseInterestKind(type: string | string[] | undefined): ForYouInterestKind | null {
   const raw = Array.isArray(type) ? type[0] : type;
@@ -66,19 +65,6 @@ function interestDescription(kind: ForYouInterestKind, value: string): string {
     case 'sportTag':
       return `The latest stories and updates for ${label}.`;
   }
-}
-
-function syntheticPrefsForInterest(
-  prefs: UserPreferences,
-  kind: ForYouInterestKind,
-  value: string,
-): UserPreferences {
-  return {
-    ...prefs,
-    forYouTopics: kind === 'topic' ? [value as Topic] : [],
-    forYouKeywords: kind === 'keyword' ? [value] : [],
-    forYouSportTags: kind === 'sportTag' ? [value as SportTag] : [],
-  };
 }
 
 function InterestFeedHeader({
@@ -135,24 +121,16 @@ export default function ForYouInterestFeedScreen() {
     usingDemoArticles,
     refresh,
     loadMore,
-    boostArticlesForInterests,
+    isBoostingInterests,
   } = useArticles();
 
   const title = kind && value ? interestTitle(kind, value) : 'For You';
   const description = kind && value ? interestDescription(kind, value) : '';
   const cacheKey =
     kind && value ? buildForYouInterestFeedCacheKey(kind, value) : '';
-  const interestBoostKeyRef = useRef('');
   const rankTaskRef = useRef<ReturnType<typeof InteractionManager.runAfterInteractions> | null>(
     null,
   );
-
-  // Deep links (e.g. notifications) can land here before the For You tab ever ran.
-  const keywordInterest = useMemo(
-    () => (kind === 'keyword' && value ? [value] : undefined),
-    [kind, value],
-  );
-  useKeywordInterestBoost(keywordInterest);
 
   const [rankedArticles, setRankedArticles] = useState<Article[]>([]);
   const [isRevalidating, setIsRevalidating] = useState(false);
@@ -160,7 +138,6 @@ export default function ForYouInterestFeedScreen() {
 
   useEffect(() => {
     setRankedArticles([]);
-    interestBoostKeyRef.current = '';
   }, [cacheKey]);
 
   const hasCachedFeed = useMemo(
@@ -236,30 +213,20 @@ export default function ForYouInterestFeedScreen() {
     );
   }, [articles, kind, value, filterForYouFeedArticles, feedGeneration]);
 
-  useEffect(() => {
-    if (!kind || !value || !preferences || isLoading) return;
-    if (rankedArticles.length > 0) return;
-    if (cacheKey && hasShowableForYouInterestFeedCache(cacheKey)) return;
-
-    const sourceIds = sourceIdsForForYouInterests(
-      syntheticPrefsForInterest(preferences, kind, value),
-    );
-    if (sourceIds.length === 0) return;
-
-    const boostKey = `${kind}\0${value}\0${articles.length}`;
-    if (interestBoostKeyRef.current === boostKey) return;
-    interestBoostKeyRef.current = boostKey;
-    void boostArticlesForInterests(sourceIds, boostKey);
-  }, [
-    kind,
-    value,
-    preferences,
-    isLoading,
-    rankedArticles.length,
-    articles.length,
-    cacheKey,
-    boostArticlesForInterests,
-  ]);
+  // Deep links (e.g. notifications) can land here before the For You tab ever ran, so this
+  // screen stocks the pool for its own interest through the same path the tab uses.
+  const thisInterest = useMemo(
+    () =>
+      kind && value
+        ? {
+            forYouTopics: kind === 'topic' ? [value as Topic] : [],
+            forYouKeywords: kind === 'keyword' ? [value] : [],
+            forYouSportTags: kind === 'sportTag' ? [value as SportTag] : [],
+          }
+        : null,
+    [kind, value],
+  );
+  useInterestBoost(thisInterest);
 
   useEffect(() => {
     if (!kind || !value) {
@@ -271,7 +238,7 @@ export default function ForYouInterestFeedScreen() {
     const task = InteractionManager.runAfterInteractions(() => {
       if (cancelled) return;
       const filtered = filterForYouFeedArticles(articles);
-      const noStories = feedArticles.length === 0 && !isLoading;
+      const noStories = feedArticles.length === 0 && !isLoading && !isBoostingInterests;
       setEmptyMessage(
         noStories
           ? `Nothing worth showing yet.\nWe'll keep looking for stories about ${title}.`
@@ -302,6 +269,7 @@ export default function ForYouInterestFeedScreen() {
     articles,
     isLoading,
     feedArticles.length,
+    isBoostingInterests,
     filterForYouFeedArticles,
     preferences?.enabledTopics,
     preferences?.enabledSportTags,
@@ -310,7 +278,7 @@ export default function ForYouInterestFeedScreen() {
     preferences,
   ]);
 
-  const showFeedLoading = isLoading && feedArticles.length === 0;
+  const showFeedLoading = (isLoading || isBoostingInterests) && feedArticles.length === 0;
 
   const openSettings = useCallback(() => setSettingsVisible(true), []);
   const closeSettings = useCallback(() => setSettingsVisible(false), []);
