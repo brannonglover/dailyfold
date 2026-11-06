@@ -417,6 +417,9 @@ export function interestFocusSourceNames(interest: string): string[] {
   ).map((entry) => entry.name);
 }
 
+// Rows without an image are skipped (`image_url <> ''`): the For You feed never shows a story
+// without a hero image, so letting them into the capped result only crowds out stories that can
+// be shown — r/booksuggestions text posts were taking 35 of the 50 newest "Fantasy Books" hits.
 export async function searchArticlesForInterest(
   interest: string,
   options?: SearchArticlesOptions,
@@ -433,14 +436,17 @@ export async function searchArticlesForInterest(
     focusSources.length > 0
       ? await sql<ArticleRow[]>`
           SELECT ${cols} FROM articles
-          WHERE search_vector @@ to_tsquery('english', ${tsQueryText})
-             OR (source = ANY(${focusSources}::text[]) AND title !~* ${META_POST_TITLE_PATTERN})
+          WHERE image_url <> ''
+            AND (
+              search_vector @@ to_tsquery('english', ${tsQueryText})
+              OR (source = ANY(${focusSources}::text[]) AND title !~* ${META_POST_TITLE_PATTERN})
+            )
           ORDER BY published_at DESC
           LIMIT ${limit}
         `
       : await sql<ArticleRow[]>`
           SELECT ${cols} FROM articles
-          WHERE search_vector @@ to_tsquery('english', ${tsQueryText})
+          WHERE image_url <> '' AND search_vector @@ to_tsquery('english', ${tsQueryText})
           ORDER BY published_at DESC
           LIMIT ${limit}
         `;

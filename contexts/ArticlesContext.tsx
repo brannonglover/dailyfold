@@ -21,6 +21,7 @@ import { fetchPersonalizedFeed, type FeedResponseMeta } from '@/services/feed';
 import { registerFeedArticles } from '@/services/articleSession';
 import { chipPrewarmKey, loadChipArticles, readChipPrewarm } from '@/services/chipPrewarm';
 import { shouldRequestScopedChipFeed } from '@/utils/feedLoadMoreGate';
+import { createKeywordBoostLedger } from '@/utils/keywordBoostLedger';
 import { CURIOSITY_ORDER } from '@/constants/curiosities';
 import { prefetchFeedImages } from '@/services/feedImagePrefetch';
 import {
@@ -248,6 +249,8 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   >(undefined);
 
   articlesRef.current = articles;
+  const feedGenerationRef = useRef(feedGeneration);
+  feedGenerationRef.current = feedGeneration;
   pendingArticlesRef.current = pendingArticles;
 
   useEffect(() => {
@@ -1005,18 +1008,14 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
     [preferences, sources, beginBoost, endBoost],
   );
 
-  // Keywords already searched for the current feed generation. A refresh replaces the pool,
-  // so the generation is part of the key and the same keyword is fetched again afterwards.
-  const keywordBoostDoneRef = useRef(new Set<string>());
+  // Keywords already searched for the current pool. Refreshes and snapshot adoption replace the
+  // pool (dropping merged archive stories), and they bump `feedGeneration` — not the fetch
+  // generation ref — so that is the revision the ledger must be keyed on.
+  const keywordBoostLedgerRef = useRef(createKeywordBoostLedger());
 
   const boostArticlesForKeywords = useCallback(async (keywords: string[]): Promise<boolean> => {
     const generation = fetchGenerationRef.current;
-    const pending = keywords
-      .map((keyword) => keyword.trim())
-      .filter(
-        (keyword) =>
-          keyword.length > 0 && !keywordBoostDoneRef.current.has(`${generation}\0${keyword}`),
-      );
+    const pending = keywordBoostLedgerRef.current.pending(feedGenerationRef.current, keywords);
     if (pending.length === 0) return false;
 
     beginBoost();
@@ -1029,8 +1028,11 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
             mode: 'interest',
           });
           // fetchArticleSearch swallows network errors as "no results"; only remember
-          // keywords that returned something so an offline attempt is retried.
-          if (found.length > 0) keywordBoostDoneRef.current.add(`${generation}\0${keyword}`);
+          // keywords that returned something so an offline attempt is retried. Keyed on the
+          // pool the results land in, which may be newer than the one this fetch started on.
+          if (found.length > 0) {
+            keywordBoostLedgerRef.current.markDone(feedGenerationRef.current, keyword);
+          }
           return found;
         }),
       );
