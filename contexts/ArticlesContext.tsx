@@ -21,6 +21,7 @@ import { fetchPersonalizedFeed, type FeedResponseMeta } from '@/services/feed';
 import { registerFeedArticles } from '@/services/articleSession';
 import { chipPrewarmKey, loadChipArticles, readChipPrewarm } from '@/services/chipPrewarm';
 import { shouldRequestScopedChipFeed } from '@/utils/feedLoadMoreGate';
+import { createBoostedArticleStore } from '@/utils/boostedArticles';
 import { createKeywordBoostLedger } from '@/utils/keywordBoostLedger';
 import { CURIOSITY_ORDER } from '@/constants/curiosities';
 import { prefetchFeedImages } from '@/services/feedImagePrefetch';
@@ -987,6 +988,9 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
               { bypassCache: options?.forceRefresh === true },
             )) ?? [])
           : await fetchScoped();
+        // Remember even if this fetch went stale: the stories are still the user's, and the pool
+        // gets them back when it settles.
+        boostedStoreRef.current.remember(data);
         if (generation !== fetchGenerationRef.current) return false;
         if (data.length > 0) {
           const next = appendUniqueArticles(articlesRef.current, data);
@@ -1012,40 +1016,53 @@ export function ArticlesProvider({ children }: { children: React.ReactNode }) {
   // pool (dropping merged archive stories), and they bump `feedGeneration` — not the fetch
   // generation ref — so that is the revision the ledger must be keyed on.
   const keywordBoostLedgerRef = useRef(createKeywordBoostLedger());
+  // Interest stories survive pool replacement: refreshes, snapshot adoption and the initial
+  // load each swap the pool, and a cold start does that several times.
+  const boostedStoreRef = useRef(createBoostedArticleStore());
+
+  useEffect(() => {
+    const restored = boostedStoreRef.current.restoreInto(articles);
+    if (restored === articles) return;
+    articlesRef.current = restored;
+    setArticles(restored);
+  }, [articles]);
 
   const boostArticlesForKeywords = useCallback(async (keywords: string[]): Promise<boolean> => {
-    const generation = fetchGenerationRef.current;
     const pending = keywordBoostLedgerRef.current.pending(feedGenerationRef.current, keywords);
     if (pending.length === 0) return false;
 
     beginBoost();
-    let results: Article[][];
+    let found: { keyword: string; articles: Article[] }[];
     try {
-      results = await Promise.all(
-        pending.map(async (keyword) => {
-          const { articles: found } = await fetchArticleSearch(keyword, {
-            limit: KEYWORD_FETCH_LIMIT,
-            mode: 'interest',
-          });
-          // fetchArticleSearch swallows network errors as "no results"; only remember
-          // keywords that returned something so an offline attempt is retried. Keyed on the
-          // pool the results land in, which may be newer than the one this fetch started on.
-          if (found.length > 0) {
-            keywordBoostLedgerRef.current.markDone(feedGenerationRef.current, keyword);
-          }
-          return found;
-        }),
+      found = await Promise.all(
+        pending.map(async (keyword) => ({
+          keyword,
+          articles: (
+            await fetchArticleSearch(keyword, { limit: KEYWORD_FETCH_LIMIT, mode: 'interest' })
+          ).articles,
+        })),
       );
     } finally {
       endBoost();
     }
-    if (generation !== fetchGenerationRef.current) return false;
 
-    const next = appendUniqueArticles(articlesRef.current, results.flat());
-    if (next === articlesRef.current) return false;
-    articlesRef.current = next;
-    setArticles(next);
-    return true;
+    // Archive matches stay valid whatever happened to the pool meanwhile (a refresh bumping the
+    // fetch generation must not throw them away), so they are always kept and merged.
+    const incoming = found.flatMap((entry) => entry.articles);
+    boostedStoreRef.current.remember(incoming);
+    const next = appendUniqueArticles(articlesRef.current, incoming);
+    if (next !== articlesRef.current) {
+      articlesRef.current = next;
+      setArticles(next);
+    }
+    // Only now is the keyword handled for this pool. fetchArticleSearch swallows network errors
+    // as "no results", so keywords that came back empty are retried.
+    for (const entry of found) {
+      if (entry.articles.length > 0) {
+        keywordBoostLedgerRef.current.markDone(feedGenerationRef.current, entry.keyword);
+      }
+    }
+    return incoming.length > 0;
   }, [beginBoost, endBoost]);
 
   const dismissPendingArticles = useCallback(() => {
