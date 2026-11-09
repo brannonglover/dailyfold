@@ -1,0 +1,40 @@
+DAILYFOLD - APP REVIEW NOTES
+
+1. SCREEN RECORDING
+Recorded on a physical iPhone running the latest iOS: <PASTE VIDEO LINK>. It starts at app launch and shows registration, sign-in, each tab, saving and sharing a story, adding an interest, hiding a source, the notifications switch, sign-out, and account deletion.
+
+2. PURPOSE AND AUDIENCE
+dailyfold is a news and magazine reader for general adult readers who follow many publishers and want one calm, personalised feed instead of juggling apps. It shows one full-screen story at a time, built from headlines, summaries and images that publishers distribute through public RSS feeds. Users save stories, choose interests (topics, sources, sports teams or custom keywords) and hide what they don't want; the For You tab adapts. Every story credits the publisher and links to the original. We do not sell content.
+
+3. ACCESSING THE APP
+Sign-in is required. Demo account (pre-verified, no email confirmation needed):
+Email: <DEMO EMAIL>
+Password: <DEMO PASSWORD>
+You can also tap "Get started" to register with a name, email and password.
+
+Main features:
+- Latest: vertical feed of story cards. Swipe up for the next story, pull down to refresh. Tap a card to open the reader; "Continue reading on [publisher]" opens the publisher's page.
+- For You: tap "Add an interest" to follow a topic, source, team or any keyword (e.g. "bicycle repair").
+- Videos: vertical feed of short videos from curated YouTube channels.
+- Reading: stories saved with "Save for Read Later", plus folders.
+- Profile: learned interests; "Sources" (turn publishers on/off); trending-alerts switch (optional push notifications, iOS permission prompt); "Send feedback"; "Sign out"; "Delete account".
+
+4. ACCOUNT DELETION
+Profile > Delete account. The user types DELETE and re-enters their password. This permanently deletes the account (Supabase Auth) and the user's push-notification registrations on our server, and clears saved preferences on the device. No email or web form is needed.
+
+5. USER-GENERATED CONTENT, PURCHASES
+No user-generated content is visible to other users (no posts, comments, public profiles or messaging), so reporting/blocking tools do not apply. "Send feedback" only opens a private email to us. There are no in-app purchases, subscriptions or paid features. Some publishers have their own paywalls; the app labels those stories and links to the publisher.
+
+6. EXTERNAL SERVICES
+- Supabase: email/password authentication; Postgres database for the article cache and push tokens.
+- Vercel: hosts our API and the cron job that refreshes feeds every 15 minutes.
+- Expo Push Service and Apple Push Notification service: optional notifications.
+- Publisher RSS feeds (e.g. BBC, The Guardian, NPR, Ars Technica, The Atlantic): headlines, summaries, images. For the in-app reader our server may extract text from the publisher's public article page; we use no publisher logins and do not circumvent paywalls.
+- YouTube (channel feeds and embedded player) for the Videos tab; Vimeo embeds when a publisher article contains one.
+No AI services and no payment processors are used.
+
+7. REGIONAL DIFFERENCES
+None. Features and content are the same in all regions (English-language sources). Individual publishers may apply their own regional restrictions or paywalls on their own sites.
+
+8. REGULATED INDUSTRY / THIRD-PARTY MATERIAL
+Not a regulated industry. Article content comes from publishers' public RSS feeds and is always attributed and linked to the original publisher. No special authorization documents apply.

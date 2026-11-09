@@ -2,7 +2,7 @@
 Your daily read from hundreds of trusted sources. Swipe through full-screen stories, follow the topics and teams you care about, and get a feed that learns what you like.
 
 ## Keywords
-news,reader,articles,magazines,rss,headlines,personalized,sports,videos,tech,science,world cup
+news,reader,articles,magazines,rss,headlines,personalized,sports,videos,tech,science,culture
 
 ## Description
 dailyfold is a clean, focused reading app. Instead of an endless wall of headlines, you get one full-screen story at a time, pulled from hundreds of trusted publishers and refreshed all day.
@@ -19,8 +19,8 @@ Read from major newsrooms, tech and science publications, health and wellness wr
 WATCH TOO
 The Videos tab collects video alongside your reading, so you can read and watch without bouncing between apps.
 
-FOLLOW THE BIG MOMENTS
-Dedicated feeds for the FIFA World Cup and the Tour de France keep every story, match and stage in one place, with optional notifications so you never miss a kickoff.
+STAY IN THE LOOP
+Optional trending alerts let you know when a story you'd care about breaks. Turn them on or off any time from your profile.
 
 YOUR READING LIST
 Save articles to your Reading tab to come back to later, and share stories with friends through the native share sheet.

@@ -52,7 +52,7 @@ export async function registerUser(
   }
 
   if (!data.session) {
-    throw new Error('Check your email to confirm your account, then sign in.');
+    throw new Error('Check your email and tap the confirmation link to finish creating your account.');
   }
 
   return mapSupabaseUser(data.user);

@@ -23,6 +23,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    // PKCE: the emailed confirmation link carries a one-time `code` that only this device can
+    // exchange (the verifier lives in AsyncStorage), so a hijacked dailyfold:// link is useless.
+    flowType: 'pkce',
   },
 });
 
